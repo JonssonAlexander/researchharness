@@ -17,6 +17,7 @@
 
 export * from "./contracts.ts";
 export * from "./atlas.ts";
+export * from "./atlas-layout.ts";
 export * from "./atlas-relations.ts";
 export * from "./atlas-query.ts";
 export * from "./atlas-demo.ts";

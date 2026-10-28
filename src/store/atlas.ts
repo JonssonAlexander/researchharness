@@ -47,7 +47,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 4)
+			if (version > 5)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -112,6 +112,20 @@ PRAGMA user_version = 3;`);
 					throw error;
 				}
 			}
+			if (version < 5) {
+				if (version === 4) db.prepare("VACUUM INTO ?").run(`${file}.v4-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`ALTER TABLE subjects ADD COLUMN locked INTEGER NOT NULL DEFAULT 0 CHECK(locked IN (0,1));
+CREATE TABLE atlas_layout_version (revision INTEGER NOT NULL) STRICT;
+INSERT INTO atlas_layout_version VALUES (0);
+PRAGMA user_version = 5;`);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
 			return run(db);
 		} finally {
 			db.close();
@@ -163,7 +177,10 @@ PRAGMA user_version = 3;`);
 	function snapshot(db: DatabaseSync): AtlasSnapshot {
 		if (db.prepare("PRAGMA foreign_key_check").all().length)
 			throw new AtlasError("Broken Atlas references.", 500);
-		const subjects = db.prepare("SELECT * FROM subjects ORDER BY rowid").all() as unknown as AtlasSubject[];
+		const subjects = db.prepare("SELECT * FROM subjects ORDER BY rowid").all().map(({locked, ...row}) => {
+			if (locked !== 0 && locked !== 1) throw new AtlasError("Invalid layout lock.", 500);
+			return {...row, locked: locked === 1} as unknown as AtlasSubject;
+		});
 		const concepts = db
 			.prepare("SELECT * FROM concepts ORDER BY rowid")
 			.all()
@@ -193,7 +210,8 @@ PRAGMA user_version = 3;`);
 			["concept", concepts],
 		] as const)
 			for (const row of rows) {
-				const { revision, x, y, ...input } = row;
+				const { revision, x, y, locked: _locked, ...input } = row as typeof row & { locked?: boolean };
+				void _locked;
 				if (!Number.isSafeInteger(revision) || revision < 1 || !Number.isFinite(x) || !Number.isFinite(y))
 					throw new AtlasError("Invalid Atlas record.", 500);
 				atlasCommandSchema.parse({ ...input, kind, expectedRevision: revision });
@@ -223,7 +241,11 @@ PRAGMA user_version = 3;`);
 				const { kind: _kind, expectedRevision: _expected, ...fields } = command;
 				return { ...fields, revision, createdAt, updatedAt, contentHash } as AtlasRelation;
 			});
-		return { subjects, concepts, relations };
+		const versions = db.prepare("SELECT revision FROM atlas_layout_version").all();
+		const layoutRevision = Number(versions[0]?.revision);
+		if (versions.length !== 1 || !Number.isSafeInteger(layoutRevision) || layoutRevision < 0)
+			throw new AtlasError("Invalid Atlas layout version.", 500);
+		return { subjects, concepts, relations, layoutRevision };
 	}
 	return {
 		read: () => database(snapshot),
@@ -233,6 +255,18 @@ PRAGMA user_version = 3;`);
 				db.exec("BEGIN IMMEDIATE");
 				try {
 					const current = snapshot(db);
+					if (command.kind === "layout") {
+						if (command.expectedRevision !== current.layoutRevision)
+							throw new AtlasError("Atlas changed while arranging. Reload before saving.", 409);
+						for (const position of command.positions) {
+							const concept = current.concepts.find(c => c.id === position.id);
+							if (!concept || current.subjects.find(s => s.id === concept.preferredSubjectId)?.locked)
+								throw new AtlasError("Concept is missing or its subject is locked.", 409);
+							db.prepare("UPDATE concepts SET x=?, y=?, revision=revision+1 WHERE id=?").run(position.x, position.y, position.id);
+						}
+						db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");
+						return;
+					}
 					const rows =
 						command.kind === "relation" || command.kind === "relation-delete"
 							? current.relations
@@ -244,8 +278,12 @@ PRAGMA user_version = 3;`);
 					const previous = rows.find((r) => r.id === command.id);
 					if ((previous?.revision ?? 0) !== command.expectedRevision)
 						throw new AtlasError("This item changed. Reload it before saving.", 409);
-					if (command.kind === "concept-position" || command.kind === "subject-position") {
+					if (command.kind === "subject-lock") {
+						db.prepare("UPDATE subjects SET locked=?, revision=revision+1 WHERE id=?").run(command.locked ? 1 : 0, command.id);
+					} else if (command.kind === "concept-position" || command.kind === "subject-position") {
 						if (!previous) throw new AtlasError("Item no longer exists.", 409);
+						if (command.kind === "concept-position" && current.subjects.find(s => s.id === (previous as AtlasConcept).preferredSubjectId)?.locked)
+							throw new AtlasError("Unlock this subject before moving its concepts.", 409);
 						const table = command.kind === "concept-position" ? "concepts" : "subjects";
 						db.prepare(`UPDATE ${table} SET x=?, y=?, revision=revision+1 WHERE id=?`).run(
 							command.x,
@@ -356,7 +394,7 @@ revision=excluded.revision, updatedAt=excluded.updatedAt, contentHash=excluded.c
 						assertSubjectParent(current.subjects, command.id, command.parentId);
 						const index = current.subjects.length;
 						db.prepare(
-							`INSERT INTO subjects VALUES (?, ?, ?, ?, ?, ?, ?)
+							`INSERT INTO subjects(id,title,color,parentId,revision,x,y) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET title=excluded.title, color=excluded.color, parentId=excluded.parentId, revision=excluded.revision`,
 						).run(
 							command.id,
@@ -407,7 +445,7 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, aliases=excluded.aliases, pr
 							for (const id of ids) insert.run(command.id, id);
 						}
 					}
-					db.exec("COMMIT");
+					db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");
 				} catch (error) {
 					db.exec("ROLLBACK");
 					throw error;

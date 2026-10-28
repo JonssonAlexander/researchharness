@@ -59,6 +59,8 @@ import {
 	CHARGE_STRENGTH,
 	CLUSTER_PULL_STRENGTH,
 	createGraphSimulation,
+	createAtlasLayout,
+	type AtlasSnapshot,
 	DEFAULT_PHYSICS_TUNING,
 	DEFAULT_REGION_TUNING,
 	sanitizePhysicsTuning,
@@ -83,7 +85,7 @@ export interface CanvasNode {
 	x: number;
 	y: number;
 	label: string;
-	/** Atlas concepts are anchored, coloured rings; propositions retain their fill. */
+	/** Atlas concepts carry subject colour and explicit spatial locks. */
 	color?: string;
 	fixed?: boolean;
 	draggable?: boolean;
@@ -129,6 +131,7 @@ export interface CanvasData {
 	edges: CanvasEdge[];
 	/** Non-logical, accepted concept links. Excluded from formal layout/derivation. */
 	semanticEdges?: (CanvasEdge & { id?: string })[];
+	atlas?: AtlasSnapshot;
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
 	 *  drawn edges (legacy). Optional so non-graph callers of the
@@ -158,8 +161,9 @@ export interface RendererCallbacks {
 	/** The live sim settled after a drag: commit the new rest state
 	 *  (the caller PUTs it to the positions ledger). */
 	onCommit: (positions: Record<string, Position>) => void;
-	/** Direct concept movement changes only this node; no force relaxation. */
-	onNodeMove?: (id: string, position: Position) => void;
+	/** Local concept settling commits separately from the formal position ledger. */
+	onAtlasCommit?: (positions: {id: string; x: number; y: number}[], revision: number) => void;
+	onLayoutError?: (message: string) => void;
 }
 
 // ─── Constants (ported verbatim from the sigma view) ────────────────────────
@@ -647,7 +651,8 @@ export class GraphCanvasRenderer {
 	private builtVersion = -1; // version the cache was built at
 	private nodesPath: Path2D | null = null;
 	private coloredNodes = new Map<string, Path2D>();
-	private anchoredMoved = false;
+	private atlasLayout: ReturnType<typeof createAtlasLayout> | null = null;
+	private atlasLayoutRevision = 0;
 	private semanticPath = new Path2D();
 	private semanticFocus: ReadonlySet<string> | null = null;
 	private shaftsPath: Path2D = new Path2D();
@@ -704,6 +709,7 @@ export class GraphCanvasRenderer {
 		canvas.addEventListener("pointermove", this.onPointerMove);
 		canvas.addEventListener("pointerdown", this.onPointerDown);
 		canvas.addEventListener("pointerup", this.onPointerUp);
+		canvas.addEventListener("pointercancel", this.onPointerCancel);
 		canvas.addEventListener("pointerleave", this.onPointerLeave);
 		// Right-click → the caller's context menu (node interlude). Always
 		// preventDefault: the native menu on a full-bleed custom canvas is
@@ -763,6 +769,8 @@ export class GraphCanvasRenderer {
 	// ── Public API ──
 
 	setData(data: CanvasData): void {
+		const previousAtlas = this.data?.atlas;
+		this.atlasLayout = null;
 		this.data = data;
 		this.nodeById = new Map(data.nodes.map((n) => [n.id, n]));
 		let minX = Infinity;
@@ -792,6 +800,15 @@ export class GraphCanvasRenderer {
 		this.simMoved = false;
 		this.simCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 		this.buildSim();
+		// New/re-homed concepts and new/changed accepted links settle locally.
+		// First load and metadata-only refetches retain the saved spatial map.
+		if (previousAtlas && data.atlas) {
+			const added = data.atlas.concepts.find(c => !previousAtlas.concepts.some(p => p.id === c.id && p.preferredSubjectId === c.preferredSubjectId));
+			const link = data.atlas.relations.find(r => r.reviewStatus === "accepted" && !previousAtlas.relations.some(p => p.id === r.id && p.reviewStatus === "accepted" && p.sourceId === r.sourceId && p.targetId === r.targetId));
+			const changed = added ?? data.atlas.concepts.find(c => c.id === link?.sourceId);
+			if (changed && !data.atlas.subjects.find(s => s.id === changed.preferredSubjectId)?.locked)
+				this.relaxAtlas(changed.preferredSubjectId);
+		}
 		this.geoVersion++; // new data → rebuild world geometry
 		this.markDirty();
 	}
@@ -917,6 +934,7 @@ export class GraphCanvasRenderer {
 		if (this.frameId !== null) cancelAnimationFrame(this.frameId);
 		if (this.commitTimer) clearTimeout(this.commitTimer);
 		this.sim = null;
+		this.atlasLayout = null;
 		this.simActive = false;
 		this.dragId = null;
 		this.resizeObserver.disconnect();
@@ -925,6 +943,7 @@ export class GraphCanvasRenderer {
 		this.canvas.removeEventListener("pointermove", this.onPointerMove);
 		this.canvas.removeEventListener("pointerdown", this.onPointerDown);
 		this.canvas.removeEventListener("pointerup", this.onPointerUp);
+		this.canvas.removeEventListener("pointercancel", this.onPointerCancel);
 		this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
 		this.canvas.removeEventListener("contextmenu", this.onContextMenu);
 		this.canvas.style.cursor = "";
@@ -955,14 +974,12 @@ export class GraphCanvasRenderer {
 				const moved =
 					this.dragOrigin !== null &&
 					Math.hypot(pos.x - this.dragOrigin.x, pos.y - this.dragOrigin.y) > CLICK_SLOP;
-				const anchored = this.nodeById.get(this.dragId);
-				if (anchored?.fixed && anchored.draggable) {
-					if (moved || this.anchoredMoved) {
-						const { x: tx, y: ty, k } = this.transform;
-						anchored.x = n.x = n.fx = (pos.x - tx) / k;
-						anchored.y = n.y = n.fy = (pos.y - ty) / k;
-						this.anchoredMoved = true;
-						this.geoVersion++;
+				const concept = this.data?.atlas?.concepts.find(c => c.id === this.dragId);
+				if (concept) {
+					if (moved || this.atlasLayout) {
+						if (!this.atlasLayout?.active.has(concept.id)) this.relaxAtlas(concept.preferredSubjectId);
+						const {x: tx, y: ty, k} = this.transform;
+						this.atlasLayout?.move(concept.id, (pos.x-tx)/k, (pos.y-ty)/k);
 						this.markDirty();
 					}
 					return;
@@ -996,8 +1013,13 @@ export class GraphCanvasRenderer {
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
+		if (node?.fixed && this.data?.atlas?.concepts.some(c => c.id === node.id)) {
+			e.preventDefault();
+			this.callbacks.onSelect(node.id, pos);
+			return;
+		}
 		if (node && this.sim && (!node.fixed || node.draggable)) {
-			this.anchoredMoved = false;
+
 			// Node press: pin the node (at ITS OWN position — the cursor
 			// may be inside the pick pad, off-center). preventDefault kills
 			// the compatibility mousedown, so d3-zoom never starts a pan.
@@ -1024,6 +1046,18 @@ export class GraphCanvasRenderer {
 		this.zoomTarget = null; // a pan takes over — cancel any zoom glide
 	};
 
+	private onPointerCancel = () => {
+		if (!this.dragId) return;
+		const node = this.simById.get(this.dragId);
+		if (node) { node.fx = null; node.fy = null; }
+		this.atlasLayout?.release();
+		this.sim?.alphaTarget(0);
+		this.dragId = null;
+		this.dragOrigin = null;
+		this.canvas.style.cursor = "";
+		this.markDirty();
+	};
+
 	private onPointerUp = (e: PointerEvent) => {
 		if (e.button !== 0) return; // right-click is context-menu territory
 		// Node press ending: click (no slop) → select; drag → release-and-relax.
@@ -1037,11 +1071,10 @@ export class GraphCanvasRenderer {
 				/* already released */
 			}
 			this.canvas.style.cursor = "";
-			const anchored = this.nodeById.get(id);
-			if (anchored?.fixed && anchored.draggable) {
-				if (this.anchoredMoved) this.callbacks.onNodeMove?.(id, { x: anchored.x, y: anchored.y });
+			if (this.data?.atlas?.concepts.some(c => c.id === id)) {
+				if (this.atlasLayout) this.atlasLayout.release();
 				else this.callbacks.onSelect(id, this.eventPos(e));
-				this.anchoredMoved = false;
+				this.markDirty();
 				return;
 			}
 			const n = this.simById.get(id);
@@ -1148,11 +1181,12 @@ export class GraphCanvasRenderer {
 			const hoverAnim = this.advanceHover();
 			const zoomAnim = this.advanceZoom(dt);
 			const simAnim = this.advanceSim();
+			const atlasAnim = this.advanceAtlas();
 			this.draw();
 			// Keep frames coming ONLY while an animation is in motion (hover
 			// fade, zoom glide, or live physics); an idle graph schedules no
 			// rAF at all.
-			this.animating = hoverAnim || zoomAnim || simAnim;
+			this.animating = hoverAnim || zoomAnim || simAnim || atlasAnim;
 		} finally {
 			this.inTick = false;
 		}
@@ -1162,6 +1196,42 @@ export class GraphCanvasRenderer {
 				this.tick();
 			});
 		}
+	}
+
+	/** Explicit arrangement and dragging share the same local, warm-started engine. */
+	relaxAtlas(subjectId: string | null): void {
+		if (!this.data?.atlas) return;
+		try {
+			const snapshot = this.data.atlas;
+			this.atlasLayout = createAtlasLayout({...snapshot, concepts: snapshot.concepts.map(c => {
+				const n = this.nodeById.get(c.id);
+				return n ? {...c, x: n.x, y: n.y} : c;
+			})}, subjectId, [...(this.atlasLayout?.subjectIds ?? [])]);
+			this.atlasLayoutRevision = snapshot.layoutRevision ?? 0;
+			this.markDirty();
+		} catch (error) {
+			this.callbacks.onLayoutError?.(error instanceof Error ? error.message : "Could not arrange subject.");
+		}
+	}
+
+	private advanceAtlas(): boolean {
+		const layout = this.atlasLayout;
+		if (!layout) return false;
+		const moving = layout.step();
+		for (const n of layout.nodes) {
+			const drawn = this.nodeById.get(n.id);
+			if (drawn) { drawn.x = n.x; drawn.y = n.y; }
+		}
+		this.geoVersion++;
+		if (!moving) {
+			this.atlasLayout = null;
+			const positions = layout.positions().filter(p => {
+				const saved = this.data?.atlas?.concepts.find(c => c.id === p.id);
+				return saved && (Math.abs(saved.x-p.x) > 0.01 || Math.abs(saved.y-p.y) > 0.01);
+			});
+			if (positions.length) this.callbacks.onAtlasCommit?.(positions, this.atlasLayoutRevision);
+		}
+		return moving;
 	}
 
 	/** One live-sim step; returns true while physics is still in motion.
@@ -1195,7 +1265,7 @@ export class GraphCanvasRenderer {
 			if (!this.data || !this.simMoved) return;
 			this.simMoved = false;
 			const positions: Record<string, Position> = {};
-			for (const n of this.data.nodes) positions[n.id] = { x: n.x, y: n.y };
+			for (const n of this.sim?.nodes() ?? []) positions[n.id] = { x: n.x!, y: n.y! };
 			this.callbacks.onCommit(positions);
 		}, COMMIT_DEBOUNCE_MS);
 	}
@@ -1363,7 +1433,15 @@ export class GraphCanvasRenderer {
 			return;
 		}
 		const t = this.physicsTuning;
-		this.sim = createGraphSimulation(data.nodes, data.edges, {
+		const conceptIds = new Set(data.atlas?.concepts.map(c => c.id));
+		const formalNodes = data.nodes.filter(n => !conceptIds.has(n.id));
+		if (formalNodes.length) {
+			this.simCenter = {
+				x: (Math.min(...formalNodes.map(n => n.x)) + Math.max(...formalNodes.map(n => n.x))) / 2,
+				y: (Math.min(...formalNodes.map(n => n.y)) + Math.max(...formalNodes.map(n => n.y))) / 2,
+			};
+		}
+		this.sim = createGraphSimulation(formalNodes, data.edges, {
 			logicalEdges: data.logicalEdges,
 			impLinks: data.impLinks,
 			gravity: { x: this.simCenter.x, y: this.simCenter.y, strength: t.gravity },
@@ -1569,7 +1647,7 @@ export class GraphCanvasRenderer {
 			rctx.beginPath();
 			// Endpoints actually covered by a stroke's round caps.
 			const touched = new Set<string>();
-			for (const e of data.edges) {
+			for (const e of [...data.edges, ...(data.semanticEdges ?? [])]) {
 				if (clusterOf.get(e.from) !== ci) continue;
 				if (clusterOf.get(e.to) !== ci) continue;
 				// Search filter: stroke only fully-visible edges. Invisible-node
@@ -1734,9 +1812,8 @@ export class GraphCanvasRenderer {
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
 		for (const [color, disc] of this.coloredNodes) {
-			ctx.strokeStyle = color;
-			ctx.lineWidth = Math.max(0.8, this.world.nodeR * 0.3);
-			ctx.stroke(disc);
+			ctx.fillStyle = color;
+			ctx.fill(disc);
 		}
 
 		// 6. Node labels — one global gate, faded together. World-scaled

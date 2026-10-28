@@ -1401,13 +1401,12 @@ export function GraphView({
 				},
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
-				onNodeMove: (id, position) => {
-					const concept = atlasRef.current.concepts.find((c) => c.id === id);
-					if (!concept) return;
+				onLayoutError: setLayoutError,
+				onAtlasCommit: (positions, revision) => {
 					setLayoutError(null);
-					void atlasActionsRef.current.save({ kind: "concept-position", id, expectedRevision: concept.revision, ...position })
-						.catch((error) => {
-							setLayoutError(error instanceof Error ? error.message : "Position could not be saved.");
+					void atlasActionsRef.current.save({kind: "layout", expectedRevision: revision, positions})
+						.catch(error => {
+							setLayoutError(error instanceof Error ? error.message : "Layout could not be saved.");
 							void atlasActionsRef.current.refresh();
 						});
 				},
@@ -1460,6 +1459,7 @@ export function GraphView({
 			],
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			semanticEdges: projection.semanticEdges,
+			atlas: atlas.snapshot,
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks,
 			clusters: [
@@ -1536,6 +1536,7 @@ export function GraphView({
 		<div className="relative h-full w-full">
 			{atlasOpen && (
 				<AtlasPanel atlas={atlas} selectedId={conceptId} onSelect={setConceptId}
+					onRelax={(id) => rendererRef.current?.relaxAtlas(id)}
 					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={setAtlasFocus} />
 			)}
 			{isEmpty ? (

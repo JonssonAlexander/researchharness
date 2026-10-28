@@ -123,7 +123,7 @@ test("a rejected save keeps the editable concept and reuses its identity on retr
 		assert.equal(ui.document.querySelector("input[required]")!.getAttribute("value"), "Brownian motion");
 		assert(ui.document.querySelector('[role="alert"]')?.textContent?.includes("Reload"));
 		assert.deepEqual(
-			attempts.map((a) => a.id),
+			attempts.map((a) => "id" in a ? a.id : null),
 			[id, id],
 		);
 	} finally {
@@ -329,7 +329,7 @@ test("new links are proposed hypotheses and a rejected save retains the draft id
 		assert.equal(first.sourceId, id);
 		assert.equal(first.targetId, other.id);
 		assert.deepEqual(first.evidence, []);
-		assert.equal(attempts[1]!.id, first.id);
+		assert.equal(("id" in attempts[1]! ? attempts[1]!.id : null), first.id);
 	} finally {
 		await ui.close();
 	}
@@ -533,4 +533,17 @@ test("link removal requires confirmation and preserves the draft after a rejecte
 	} finally {
 		await ui.close();
 	}
+});
+
+test("subject controls arrange locally and send explicit revision-checked locks", async () => {
+ const commands: AtlasCommand[] = [], arranged: (string|null)[] = [];
+ const ui=await mount(()=> <AtlasPanel atlas={{snapshot,error:null,refresh:async()=>{},save:async c=>{commands.push(c);}}}
+  selectedId={null} onSelect={()=>{}} onClose={()=>{}} propositions={[]} onRelax={id=>arranged.push(id)} />);
+ try {
+  const arrange=ui.document.querySelector('[aria-label="Arrange Probability"]')!;
+  await act(async()=>{arrange.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(arranged,[a]); assert.deepEqual(commands,[]);
+  await act(async()=>{ui.document.querySelector('[aria-label="Lock Probability"]')!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(commands,[{kind:'subject-lock',id:a,expectedRevision:1,locked:true}]);
+ } finally {await ui.close();}
 });

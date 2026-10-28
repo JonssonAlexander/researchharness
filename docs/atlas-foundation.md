@@ -10,12 +10,13 @@ has a stable identity, title, aliases, several subject memberships, one preferre
 display subject and links to existing propositions. Subject names, colors and
 parentage are editable. Parents must exist and cannot form cycles.
 
-Each concept appears once as a colored ring in the existing canvas. Its other
+Each concept appears once as a colored dot in the existing canvas. Its other
 memberships remain visible in the inspector. Search includes titles and aliases.
 The initial persisted placement is relative to its preferred subject anchor;
 renaming retains placement, while changing the preferred subject moves that
-concept only. Concepts now support direct dragging with saved positions;
-[placement details](atlas-layout.md). Whole-cluster dragging and locking remain pending. Birth-session proposition clusters retain their existing
+concept near its new anchor. Concepts now support local force settling, saved
+positions, subject arrangement and explicit locks; see [placement details](atlas-layout.md).
+Whole-cluster dragging remains pending. Birth-session proposition clusters retain their existing
 meaning and rendering.
 
 These are explicit manual edits. Models have no Atlas write tool. Existing

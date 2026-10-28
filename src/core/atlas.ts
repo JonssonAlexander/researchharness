@@ -59,6 +59,22 @@ const subjectPosition = z
 		y: coordinate,
 	})
 	.strict();
+const layout = z
+	.object({
+		kind: z.literal("layout"),
+		expectedRevision: revision,
+		positions: z.array(z.object({ id: atlasConceptId, x: coordinate, y: coordinate }).strict()).min(1).max(150),
+	})
+	.strict()
+	.refine(c => new Set(c.positions.map(p => p.id)).size === c.positions.length, "Duplicate positions");
+const subjectLock = z
+	.object({
+		kind: z.literal("subject-lock"),
+		id: atlasSubjectId,
+		expectedRevision: revision.min(1),
+		locked: z.boolean(),
+	})
+	.strict();
 const conceptDelete = z
 	.object({ kind: z.literal("concept-delete"), id: atlasConceptId, expectedRevision: revision.min(1) })
 	.strict();
@@ -84,6 +100,8 @@ export const atlasCommandSchema = z.union([
 	conceptDelete,
 	relationDelete,
 	conceptPosition,
+	layout,
+	subjectLock,
 	subjectPosition,
 ]);
 export type AtlasCommand = z.infer<typeof atlasCommandSchema>;
@@ -95,11 +113,14 @@ export interface AtlasConcept extends Omit<ConceptInput, "kind" | "expectedRevis
 	y: number;
 }
 export interface AtlasSubject extends Omit<SubjectInput, "kind" | "expectedRevision"> {
+	locked?: boolean;
 	revision: number;
 	x: number;
 	y: number;
 }
 export interface AtlasSnapshot {
+	/** Global optimistic version for an atomic layout commit. */
+	layoutRevision?: number;
 	relations: AtlasRelation[];
 	concepts: AtlasConcept[];
 	subjects: AtlasSubject[];
@@ -131,7 +152,7 @@ export function assertSubjectParent(subjects: AtlasSubject[], id: string, parent
 
 /** Membership is many-to-many; the main canvas depicts each concept once. */
 export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
-	const colors = new Map(subjects.map((s) => [s.id, s.color]));
+	const subjectById = new Map(subjects.map((s) => [s.id, s]));
 	const members = new Map<string, string[]>();
 	for (const c of concepts)
 		if (c.preferredSubjectId) {
@@ -148,9 +169,9 @@ export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
 			label: c.title,
 			x: c.x,
 			y: c.y,
-			fixed: true,
-			draggable: true,
-			color: colors.get(c.preferredSubjectId ?? "") ?? "#9ca3af",
+			fixed: !!subjectById.get(c.preferredSubjectId ?? "")?.locked,
+			draggable: !subjectById.get(c.preferredSubjectId ?? "")?.locked,
+			color: subjectById.get(c.preferredSubjectId ?? "")?.color ?? "#9ca3af",
 		})),
 		clusters: subjects.map((s) => ({
 			id: s.id,

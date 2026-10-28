@@ -25,7 +25,7 @@ Review states are proposed, accepted, disputed and retracted. “Accepted” mea
 owner retained a link, not that the app verified a theorem. A checked argument is an
 owner assessment; there is no formal-verification claim or automated source check.
 
-Accepted links appear as dashed, headless lines between concept rings in the existing
+Accepted links appear as dashed, headless lines between concept dots in the existing
 canvas. Click a concept to inspect link type and direction, conditions, statuses and
 sources. Proposed, disputed and retracted links remain in the panel but do not appear
 as accepted canvas links. The inspector has source/target navigation and editing.

@@ -417,9 +417,10 @@ Read-only shortest concept-path queries and temporary graph focus are available;
 see [query semantics, search bounds and remaining work](docs/atlas-queries.md).
 Demo fixtures, dependency-checked concept/link removal and schema v4 archives are
 implemented; see [demo and removal behavior](docs/atlas-demo-and-removal.md).
-Concept nodes now support direct dragging with revision-checked position saves;
-see [placement and browser verification](docs/atlas-layout.md). Whole-cluster drag
-and locking remain pending.
+Concepts now reuse the upstream force engine for bounded local drag/settle and
+atomic position saves; subject Arrange and explicit locking are implemented with
+schema v5. See [placement and browser verification](docs/atlas-layout.md). Whole-
+cluster dragging, hierarchical lock inheritance and saved perspectives remain pending.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.

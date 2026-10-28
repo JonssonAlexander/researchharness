@@ -69,6 +69,7 @@ export function AtlasPanel({
 	onClose,
 	propositions,
 	onFocus,
+	onRelax,
 }: {
 	atlas: ReturnType<typeof useAtlas>;
 	selectedId: string | null;
@@ -76,6 +77,7 @@ export function AtlasPanel({
 	onClose: () => void;
 	propositions: GraphNode[];
 	onFocus?: (focus: AtlasPathFocus | null) => void;
+	onRelax?: (subjectId: string | null) => void;
 }) {
 	const [editing, setEditing] = useState<Extract<AtlasCommand, { kind: "concept" | "subject" }> | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -528,14 +530,20 @@ export function AtlasPanel({
 							<summary className="cursor-pointer text-muted-foreground">Subjects</summary>
 							<div className="mt-2 space-y-1">
 								{atlas.snapshot.subjects.map((s) => (
+									<div key={s.id} className="flex items-center gap-1">
 									<button
-										key={s.id}
 										type="button"
 										onClick={() => editSubject(s)}
 										className="block w-full rounded-md px-2 py-1 text-left hover:bg-accent"
 									>
 										<span style={{ color: s.color }}>●</span> {s.title}
 									</button>
+									<button type="button" className={button} aria-label={`Arrange ${s.title}`} disabled={busy || s.locked} onClick={() => onRelax?.(s.id)}>Arrange</button>
+									<button type="button" className={button} aria-label={`${s.locked ? "Unlock" : "Lock"} ${s.title}`} disabled={busy} aria-pressed={!!s.locked}
+										onClick={() => void submit({kind: "subject-lock", id: s.id, expectedRevision: s.revision, locked: !s.locked})}>
+										{s.locked ? "Unlock" : "Lock"}
+									</button>
+									</div>
 								))}
 							</div>
 						</details>

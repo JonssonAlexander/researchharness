@@ -149,7 +149,7 @@ test("unknown or deleted canonical propositions are refused on save and never si
 });
 
 test("future and unrecognized databases are refused without rewriting their contents", () => {
-	for (const version of [0, 5]) {
+	for (const version of [0, 6]) {
 		const { file, store } = fixture();
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const db = new DatabaseSync(file);
@@ -290,7 +290,7 @@ test("v1 migration keeps rows, creates a restorable baseline and refuses unsafe 
 	service.save(c);
 	const db = new DatabaseSync(file);
 	db.exec(
-		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; PRAGMA user_version=1",
+		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; PRAGMA user_version=1",
 	);
 	db.close();
 	const saved = createAtlasStore(file).read();
@@ -318,7 +318,7 @@ test("failed v1 migration rolls back schema and full-root restore keeps Markdown
 	fs.cpSync(path.join(path.dirname(file), "concepts"), path.join(restored, "concepts"), { recursive: true });
 	assert.deepEqual(createAtlasStore(path.join(restored, "atlas.sqlite")).read(), service.read());
 	const db = new DatabaseSync(file);
-	db.exec("ALTER TABLE concepts DROP COLUMN markdownPath; PRAGMA user_version=1");
+	db.exec("ALTER TABLE concepts DROP COLUMN markdownPath; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; PRAGMA user_version=1");
 	db.close();
 	assert.throws(() => createAtlasStore(file).read(), /already exists/);
 	const unchanged = new DatabaseSync(file);
@@ -432,10 +432,10 @@ test("v2 upgrade preserves notes and placements, backs up data and rolls back a 
 	const before = service.read();
 	const db = new DatabaseSync(file);
 	db.exec(
-		"DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; PRAGMA user_version=2",
+		"DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; PRAGMA user_version=2",
 	);
 	db.close();
-	assert.deepEqual(createAtlasStore(file).read(), before);
+	assert.deepEqual(createAtlasStore(file).read(), {...before, layoutRevision: 0});
 	const old = fs.readdirSync(path.dirname(file)).find((f) => f.includes(".v2-") && f.endsWith(".bak"))!;
 	const backupDb = new DatabaseSync(path.join(path.dirname(file), old));
 	assert.equal(backupDb.prepare("PRAGMA user_version").get()!.user_version, 2);
@@ -544,7 +544,7 @@ test("demo load, clear, partial retry and reload preserve owner records and refu
 	const removals = removeAtlasDemo(service.read());
 	service.save(removals[0]!);
 	for (const command of removeAtlasDemo(service.read())) service.save(command);
-	assert.deepEqual(service.read(), before);
+	assert.deepEqual(service.read(), {...before, layoutRevision: service.read().layoutRevision});
 	for (const c of createAtlasDemo("abcdef123456")) service.save(c);
 	assert.equal(service.read().concepts.length, 10);
 });
@@ -554,9 +554,9 @@ test("v3 archive migration backs up existing data and preserves rows", () => {
 	service.save(concept());
 	const before = service.read();
 	const db = new DatabaseSync(file);
-	db.exec("DROP TABLE atlas_archive; PRAGMA user_version=3");
+	db.exec("DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; PRAGMA user_version=3");
 	db.close();
-	assert.deepEqual(createAtlasStore(file).read(), before);
+	assert.deepEqual(createAtlasStore(file).read(), {...before, layoutRevision: 0});
 	const saved = fs.readdirSync(path.dirname(file)).find((f) => f.includes(".v3-") && f.endsWith(".bak"))!;
 	const old = new DatabaseSync(path.join(path.dirname(file), saved));
 	assert.equal(old.prepare("PRAGMA user_version").get()!.user_version, 3);
@@ -592,7 +592,46 @@ test("concept position saves survive reopen, preserve metadata and unrelated pos
 		service.save({ kind: "concept-position", id: c.id, expectedRevision: 2, x: Infinity, y: 10 }),
 	);
 	const projection = projectAtlas(moved);
-	assert(projection.nodes.every((n) => n.fixed && n.draggable));
+	assert(projection.nodes.every((n) => !n.fixed && n.draggable));
 	service.save({ kind: "subject-position", id: a.id, expectedRevision: 1, x: 100, y: 200 });
 	assert.deepEqual(service.read().concepts, moved.concepts);
+});
+
+test("layout batch is atomic, survives restart and rejects stale topology or locked subjects", () => {
+ const {service, file} = fixture();
+ const a = subject(), b = subject("Other"); service.save(a); service.save(b);
+ const c = concept([a.id]), d = concept([a.id]), other = concept([b.id]);
+ service.save(c); service.save(d); service.save(other);
+ const before = service.read();
+ const positions = [{id:c.id,x:50,y:60},{id:d.id,x:110,y:90}];
+ service.save({kind:"layout",expectedRevision:before.layoutRevision!,positions});
+ const moved = createAtlasStore(file).read();
+ assert.equal(moved.concepts.find(n=>n.id===c.id)!.x,50);
+ assert.equal(moved.concepts.find(n=>n.id===d.id)!.y,90);
+ assert.deepEqual(moved.concepts.find(n=>n.id===other.id),before.concepts.find(n=>n.id===other.id));
+ assert.throws(()=>service.save({kind:"layout",expectedRevision:before.layoutRevision!,positions}),/changed/);
+ assert.deepEqual(service.read(),moved);
+ service.save({kind:"subject-lock",id:a.id,expectedRevision:1,locked:true});
+ const locked = service.read();
+ assert.equal(locked.subjects[0]!.locked,true);
+ assert(projectAtlas(locked).nodes.filter(n=>n.id!==other.id).every(n=>n.fixed&&!n.draggable));
+ assert.throws(()=>service.save({kind:"layout",expectedRevision:locked.layoutRevision!,positions:[{id:other.id,x:0,y:0},...positions]}),/locked/);
+ assert.deepEqual(service.read(),locked); // the earlier ordinary row also rolled back
+ assert.throws(()=>service.save({kind:"concept-position",id:c.id,expectedRevision:2,x:0,y:0}),/Unlock/);
+ service.save({...a,expectedRevision:2,title:"Renamed"});
+ assert.equal(service.read().subjects[0]!.locked,true);
+ service.save({kind:"subject-lock",id:a.id,expectedRevision:3,locked:false});
+ assert.equal(createAtlasStore(file).read().subjects[0]!.locked,false);
+});
+
+test("v4 upgrade preserves positions, defaults to unlocked and leaves a recoverable backup", () => {
+ const {service,file} = fixture(); const a=subject(); service.save(a); service.save(concept([a.id]));
+ const before=service.read();
+ const db=new DatabaseSync(file);
+ db.exec("ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; PRAGMA user_version=4"); db.close();
+ const restored=createAtlasStore(file).read();
+ assert.deepEqual(restored,{...before,layoutRevision:0});
+ const backup=fs.readdirSync(path.dirname(file)).find(f=>f.includes('.v4-'))!;
+ const old=new DatabaseSync(path.join(path.dirname(file),backup));
+ assert.equal(old.prepare('PRAGMA user_version').get()!.user_version,4); old.close();
 });
