@@ -1,5 +1,15 @@
 # Development guide
 
+## Research Atlas: persistent local profile
+
+Run `npm run dev:local` for everyday development. On macOS its profile is `~/Library/Application Support/ResearchAtlas-dev`, with app-owned records in `data/` and `auth.json` plus subscription locators in the profile root. Windows uses Local AppData and Linux uses XDG data home with the same profile name. This is separate from upstream LearnHarness desktop storage. Nothing in this directory belongs in Git.
+
+The launcher binds to `127.0.0.1:3005`, preserves existing records, ignores inherited provider keys by default through the existing `LH_IGNORE_ENV_KEYS` seam, and uses saved provider connections. `RESEARCH_ATLAS_PROFILE_DIR`, `LH_DATA_DIR`, `LH_AUTH_FILE` and `PORT` can override the defaults. The original `npm run dev` remains unchanged.
+
+A profile lock prevents this launcher from starting a second writer. Normal shutdown removes it. After a hard crash, inspect the PID in `dev-server.lock` and remove only that lock after confirming the process is gone. Do not launch the same profile from another checkout or a direct Next command while it is in use.
+
+On 28 October 2026, the temporary baseline instance was copied into this permanent profile while idle. Every copied file was hash-verified, the original temporary files were retained, and a private rollback snapshot was saved under the profile’s `backups/` directory. Live read-back verified that sessions, settings and the connected ChatGPT account were preserved. The launcher’s duplicate-writer rejection was also verified. A Keychain locator can be copied on the same Mac without changing its item ID. A filesystem backup alone does not include the corresponding Keychain secret.
+
 ## Research Atlas: ChatGPT credentials on macOS
 
 ChatGPT OAuth records now use macOS Keychain in both `npm run dev` and Electron desktop. Start only one application writer per auth directory. Legacy owner-only ChatGPT JSON migrates on first access after a verified Keychain write; no real account is needed for an empty local instance. macOS may request access separately for Node and Electron. Denial leaves the connection unavailable; do not work around it by copying tokens into source files or API-key fields.
