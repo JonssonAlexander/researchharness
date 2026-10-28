@@ -29,9 +29,10 @@ Atlas → Subjects offers **Arrange** and **Lock / Unlock** for each subject. Ar
 uses the same warm-started engine. Lock freezes concepts whose preferred placement
 is that subject; it is a spatial lock, not a restriction on editing knowledge.
 Memberships in additional subjects do not create extra copies or extra lock rules.
-Whole-subject dragging, parent/descendant lock inheritance, saved perspectives and
-an interactive hierarchy layout remain pending. `subject-position` still changes
-an anchor only and does not translate its members.
+Whole-subject dragging and named camera/search views are now available; see
+[subject movement and saved views](atlas-views.md). Parent/descendant lock inheritance
+and an interactive hierarchy layout remain pending. `subject-position` remains an anchor-only maintenance command; the separate
+`subject-move` operation translates members atomically.
 
 ## Storage and conflicts
 

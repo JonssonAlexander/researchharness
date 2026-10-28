@@ -9,6 +9,7 @@ import {
 	type AtlasSubject,
 	type GraphNode,
 } from "@/src/core";
+import { AtlasViews, type AtlasViewActions } from "./atlas-views";
 import { AtlasDemo } from "./atlas-demo";
 import { AtlasQuery } from "./atlas-query";
 import { AtlasRelations } from "./atlas-relations";
@@ -70,6 +71,7 @@ export function AtlasPanel({
 	propositions,
 	onFocus,
 	onRelax,
+	viewActions,
 }: {
 	atlas: ReturnType<typeof useAtlas>;
 	selectedId: string | null;
@@ -78,6 +80,7 @@ export function AtlasPanel({
 	propositions: GraphNode[];
 	onFocus?: (focus: AtlasPathFocus | null) => void;
 	onRelax?: (subjectId: string | null) => void;
+	viewActions?: AtlasViewActions;
 }) {
 	const [editing, setEditing] = useState<Extract<AtlasCommand, { kind: "concept" | "subject" }> | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -161,6 +164,7 @@ export function AtlasPanel({
 						{atlas.error}
 					</p>
 				)}
+				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
 				{editing ? (
 					<form
 						className="space-y-3"
@@ -528,6 +532,7 @@ export function AtlasPanel({
 						</div>
 						<details className="text-xs">
 							<summary className="cursor-pointer text-muted-foreground">Subjects</summary>
+							<p className="mt-2 text-muted-foreground">Drag a subject title in the graph to move its group.</p>
 							<div className="mt-2 space-y-1">
 								{atlas.snapshot.subjects.map((s) => (
 									<div key={s.id} className="flex items-center gap-1">

@@ -981,6 +981,7 @@ export function GraphView({
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	const atlas = useAtlas();
+	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined} | null>(null);
 	const atlasActionsRef = useRef(atlas);
 	atlasActionsRef.current = atlas;
 	const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -1402,6 +1403,14 @@ export function GraphView({
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
 				onLayoutError: setLayoutError,
+				onSubjectMove: (id, dx, dy, revision) => {
+					setLayoutError(null);
+					void atlasActionsRef.current.save({kind: "subject-move", id, dx, dy, expectedRevision: revision})
+						.catch(error => {
+							setLayoutError((error as Error).message);
+							void atlasActionsRef.current.refresh();
+						});
+				},
 				onAtlasCommit: (positions, revision) => {
 					setLayoutError(null);
 					void atlasActionsRef.current.save({kind: "layout", expectedRevision: revision, positions})
@@ -1446,6 +1455,11 @@ export function GraphView({
 		const renderer = rendererRef.current;
 		const positions = posRef.current ?? new Map();
 		if (!renderer || !snapshot) return;
+		// A bookmark save changes no graph data and must not interrupt a live drag.
+		const revision = atlas.snapshot.layoutRevision;
+		const previous = canvasFeedRef.current;
+		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision) return;
+		canvasFeedRef.current = {renderer, snapshot, revision};
 		const projection = projectAtlas(atlas.snapshot);
 		renderer.setData({
 			nodes: [
@@ -1537,6 +1551,14 @@ export function GraphView({
 			{atlasOpen && (
 				<AtlasPanel atlas={atlas} selectedId={conceptId} onSelect={setConceptId}
 					onRelax={(id) => rendererRef.current?.relaxAtlas(id)}
+					viewActions={{
+						canSave: !isEmpty && !atlasFocus,
+						capture: () => rendererRef.current ? {camera: rendererRef.current.getViewCamera(), query} : null,
+						restore: view => {
+							setQuery(view.query); setAtlasFocus(null); setAtlasOpen(false);
+							rendererRef.current?.restoreViewCamera(view.camera);
+						},
+					}}
 					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={setAtlasFocus} />
 			)}
 			{isEmpty ? (

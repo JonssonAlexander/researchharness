@@ -419,8 +419,9 @@ Demo fixtures, dependency-checked concept/link removal and schema v4 archives ar
 implemented; see [demo and removal behavior](docs/atlas-demo-and-removal.md).
 Concepts now reuse the upstream force engine for bounded local drag/settle and
 atomic position saves; subject Arrange and explicit locking are implemented with
-schema v5. See [placement and browser verification](docs/atlas-layout.md). Whole-
-cluster dragging, hierarchical lock inheritance and saved perspectives remain pending.
+schema v5. See [placement and browser verification](docs/atlas-layout.md). Whole-subject dragging and named camera/search views are now implemented;
+see [schema v6, movement and views](docs/atlas-views.md). Hierarchical movement/lock
+inheritance and hierarchy visualization remain pending.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.

@@ -11,7 +11,8 @@ Read-only concept path queries and temporary graph focus reuse that snapshot; se
 [query semantics and bounds](atlas-queries.md). Schema v4 adds archives for confirmed
 concept/link removal; [demo and removal details](atlas-demo-and-removal.md).
 [Concept dragging and local force layout](atlas-layout.md) reuse the upstream
-engine with atomic position batches; schema v5 adds subject locks and a layout revision. See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
+engine with atomic position batches; schema v5 adds subject locks and a layout revision. Schema v6 adds [named views and rigid subject movement](atlas-views.md).
+See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
 
 ## Research Atlas credential-storage update — 28 October 2026
 

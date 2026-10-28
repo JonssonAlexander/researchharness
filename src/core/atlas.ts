@@ -67,6 +67,10 @@ const layout = z
 	})
 	.strict()
 	.refine(c => new Set(c.positions.map(p => p.id)).size === c.positions.length, "Duplicate positions");
+const subjectMove = z.object({
+	kind: z.literal("subject-move"), id: atlasSubjectId, expectedRevision: revision,
+	dx: coordinate, dy: coordinate,
+}).strict();
 const subjectLock = z
 	.object({
 		kind: z.literal("subject-lock"),
@@ -75,6 +79,15 @@ const subjectLock = z
 		locked: z.boolean(),
 	})
 	.strict();
+export const atlasViewInput = z.object({
+	kind: z.literal("view"), id: id("av"), expectedRevision: revision,
+	title, query: z.string().max(200),
+	/** World point at viewport centre, plus zoom; portable across window sizes. */
+	camera: z.object({x: coordinate, y: coordinate, k: z.number().finite().min(0.02).max(40)}).strict(),
+}).strict();
+const viewDelete = z.object({
+	kind: z.literal("view-delete"), id: id("av"), expectedRevision: revision.min(1),
+}).strict();
 const conceptDelete = z
 	.object({ kind: z.literal("concept-delete"), id: atlasConceptId, expectedRevision: revision.min(1) })
 	.strict();
@@ -102,6 +115,9 @@ export const atlasCommandSchema = z.union([
 	conceptPosition,
 	layout,
 	subjectLock,
+	subjectMove,
+	atlasViewInput,
+	viewDelete,
 	subjectPosition,
 ]);
 export type AtlasCommand = z.infer<typeof atlasCommandSchema>;
@@ -118,7 +134,11 @@ export interface AtlasSubject extends Omit<SubjectInput, "kind" | "expectedRevis
 	x: number;
 	y: number;
 }
+export interface AtlasView extends Omit<z.infer<typeof atlasViewInput>, "kind" | "expectedRevision"> {
+	revision: number;
+}
 export interface AtlasSnapshot {
+	views?: AtlasView[];
 	/** Global optimistic version for an atomic layout commit. */
 	layoutRevision?: number;
 	relations: AtlasRelation[];

@@ -6,6 +6,7 @@ import {
 	AtlasError,
 	atlasCommandSchema,
 	atlasConceptId,
+	atlasViewInput,
 	assertSubjectParent,
 	type AtlasCommand,
 	type AtlasConcept,
@@ -14,6 +15,7 @@ import {
 	type AtlasSubject,
 } from "../core/atlas.ts";
 
+import { translateAtlasSubject } from "../core/atlas-layout.ts";
 import { atlasRelationSchema, normalizeRelation, type AtlasRelation } from "../core/atlas-relations.ts";
 
 const SCHEMA = `
@@ -47,7 +49,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 5)
+			if (version > 6)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -120,6 +122,20 @@ PRAGMA user_version = 3;`);
 CREATE TABLE atlas_layout_version (revision INTEGER NOT NULL) STRICT;
 INSERT INTO atlas_layout_version VALUES (0);
 PRAGMA user_version = 5;`);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+			if (version < 6) {
+				if (version === 5) db.prepare("VACUUM INTO ?").run(`${file}.v5-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`CREATE TABLE atlas_views (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL COLLATE NOCASE UNIQUE, revision INTEGER NOT NULL,
+ camera TEXT NOT NULL CHECK(json_valid(camera)), query TEXT NOT NULL
+) STRICT; PRAGMA user_version = 6;`);
 					db.exec("COMMIT");
 				} catch (error) {
 					db.exec("ROLLBACK");
@@ -245,7 +261,15 @@ PRAGMA user_version = 5;`);
 		const layoutRevision = Number(versions[0]?.revision);
 		if (versions.length !== 1 || !Number.isSafeInteger(layoutRevision) || layoutRevision < 0)
 			throw new AtlasError("Invalid Atlas layout version.", 500);
-		return { subjects, concepts, relations, layoutRevision };
+		const views = db.prepare("SELECT * FROM atlas_views ORDER BY rowid").all().map(row => {
+			const {revision: savedRevision, ...input} = row;
+			if (!Number.isSafeInteger(savedRevision) || Number(savedRevision) < 1)
+				throw new AtlasError("Invalid saved view revision.", 500);
+			const parsed = atlasViewInput.parse({...input, camera: JSON.parse(String(row.camera)), kind: "view", expectedRevision: savedRevision});
+			const {kind: _kind, expectedRevision, ...fields} = parsed;
+			return {...fields, revision: expectedRevision};
+		});
+		return { subjects, concepts, relations, layoutRevision, views };
 	}
 	return {
 		read: () => database(snapshot),
@@ -255,6 +279,37 @@ PRAGMA user_version = 5;`);
 				db.exec("BEGIN IMMEDIATE");
 				try {
 					const current = snapshot(db);
+					if (command.kind === "view" || command.kind === "view-delete") {
+						const previous = current.views?.find(v => v.id === command.id);
+						if ((previous?.revision ?? 0) !== command.expectedRevision)
+							throw new AtlasError("This view changed. Reload before saving.", 409);
+						if (command.kind === "view-delete") {
+							db.prepare("INSERT INTO atlas_archive VALUES ('view', ?, ?, ?)").run(command.id, JSON.stringify(previous), new Date().toISOString());
+							db.prepare("DELETE FROM atlas_views WHERE id=?").run(command.id);
+						} else {
+							if (db.prepare("SELECT id FROM atlas_archive WHERE kind='view' AND id=?").get(command.id))
+								throw new AtlasError("This view was removed. Save a new view.", 409);
+							if (!previous && (current.views?.length ?? 0) >= 100)
+								throw new AtlasError("Keep at most 100 saved views. Remove one before saving another.");
+							if (current.views?.some(v => v.id !== command.id && v.title.toLowerCase() === command.title.toLowerCase()))
+								throw new AtlasError("A view with this name already exists.", 409);
+							db.prepare(`INSERT INTO atlas_views VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, camera=excluded.camera, query=excluded.query`)
+								.run(command.id, command.title, command.expectedRevision+1, JSON.stringify(command.camera), command.query);
+						}
+						db.exec("COMMIT");
+						return;
+					}
+					if (command.kind === "subject-move") {
+						if (command.expectedRevision !== current.layoutRevision)
+							throw new AtlasError("Atlas changed while moving. Reload before saving.", 409);
+						const moved = translateAtlasSubject(current, command.id, command.dx, command.dy);
+						for (const p of moved.positions)
+							db.prepare("UPDATE concepts SET x=?, y=?, revision=revision+1 WHERE id=?").run(p.x, p.y, p.id);
+						db.prepare("UPDATE subjects SET x=?, y=?, revision=revision+1 WHERE id=?").run(moved.anchor.x, moved.anchor.y, command.id);
+						db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");
+						return;
+					}
 					if (command.kind === "layout") {
 						if (command.expectedRevision !== current.layoutRevision)
 							throw new AtlasError("Atlas changed while arranging. Reload before saving.", 409);

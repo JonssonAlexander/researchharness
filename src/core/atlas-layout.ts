@@ -1,5 +1,5 @@
 import { createGraphSimulation, type LayoutNode } from "./layout.ts";
-import type { AtlasSnapshot } from "./atlas.ts";
+import { AtlasError, type AtlasSnapshot } from "./atlas.ts";
 
 export const ATLAS_LAYOUT_LIMIT = 150;
 const FLOOR = 0.003;
@@ -72,4 +72,19 @@ export function createAtlasLayout(
 		},
 		positions() { return nodes.filter(n => active.has(n.id)).map(({id,x,y}) => ({id,x,y})); },
 	};
+}
+
+/** Rigid translation of the visible subject's preferred members, including hidden ones. */
+export function translateAtlasSubject(snapshot: AtlasSnapshot, id: string, dx: number, dy: number) {
+	const subject = snapshot.subjects.find(s => s.id === id);
+	if (!subject || subject.locked) throw new AtlasError("Subject is missing or locked.", 409);
+	const members = snapshot.concepts.filter(c => c.preferredSubjectId === id);
+	if (members.length > 2000) throw new AtlasError("Subject movement supports up to 2,000 concepts.");
+	const translate = (point: {x: number; y: number}) => {
+		const x = point.x + dx, y = point.y + dy;
+		if (![dx, dy, x, y].every(v => Number.isFinite(v) && Math.abs(v) <= 1000000))
+			throw new AtlasError("Move would exceed the graph's coordinate limits.");
+		return {x, y};
+	};
+	return {anchor: translate(subject), positions: members.map(c => ({id: c.id, ...translate(c)}))};
 }

@@ -547,3 +547,20 @@ test("subject controls arrange locally and send explicit revision-checked locks"
   assert.deepEqual(commands,[{kind:'subject-lock',id:a,expectedRevision:1,locked:true}]);
  } finally {await ui.close();}
 });
+
+test("saved views restore without writes and require confirmed removal", async () => {
+ const {AtlasViews}=await import('../components/atlas-views.tsx');
+ const commands:AtlasCommand[]=[],restored:string[]=[];
+ const view={id:'av_00000000-0000-4000-8000-000000000001',title:'Probability',query:'Brownian',camera:{x:5,y:6,k:2},revision:1};
+ const ui=await mount(()=> <AtlasViews views={[view]} save={async c=>{commands.push(c);}}
+  actions={{canSave:true,capture:()=>({camera:view.camera,query:view.query}),restore:v=>restored.push(v.id)}} />);
+ async function click(text:string) {await act(async()=>{
+  const b=[...ui.document.querySelectorAll('button')].find(b=>b.textContent===text)!;
+  b.dispatchEvent(new window.Event('click',{bubbles:true}));
+ });}
+ try {
+  await click('Probability');assert.deepEqual(restored,[view.id]);assert.deepEqual(commands,[]);
+  await click('Remove');assert.equal(commands.length,0);
+  await click('Confirm removal');assert.deepEqual(commands,[{kind:'view-delete',id:view.id,expectedRevision:1}]);
+ } finally {await ui.close();}
+});

@@ -60,7 +60,9 @@ import {
 	CLUSTER_PULL_STRENGTH,
 	createGraphSimulation,
 	createAtlasLayout,
+	translateAtlasSubject,
 	type AtlasSnapshot,
+	type AtlasView,
 	DEFAULT_PHYSICS_TUNING,
 	DEFAULT_REGION_TUNING,
 	sanitizePhysicsTuning,
@@ -163,6 +165,7 @@ export interface RendererCallbacks {
 	onCommit: (positions: Record<string, Position>) => void;
 	/** Local concept settling commits separately from the formal position ledger. */
 	onAtlasCommit?: (positions: {id: string; x: number; y: number}[], revision: number) => void;
+	onSubjectMove?: (id: string, dx: number, dy: number, revision: number) => void;
 	onLayoutError?: (message: string) => void;
 }
 
@@ -653,6 +656,7 @@ export class GraphCanvasRenderer {
 	private coloredNodes = new Map<string, Path2D>();
 	private atlasLayout: ReturnType<typeof createAtlasLayout> | null = null;
 	private atlasLayoutRevision = 0;
+	private subjectDrag: {id: string; origin: Pt; dx: number; dy: number} | null = null;
 	private semanticPath = new Path2D();
 	private semanticFocus: ReadonlySet<string> | null = null;
 	private shaftsPath: Path2D = new Path2D();
@@ -771,6 +775,7 @@ export class GraphCanvasRenderer {
 	setData(data: CanvasData): void {
 		const previousAtlas = this.data?.atlas;
 		this.atlasLayout = null;
+		this.subjectDrag = null;
 		this.data = data;
 		this.nodeById = new Map(data.nodes.map((n) => [n.id, n]));
 		let minX = Infinity;
@@ -903,6 +908,18 @@ export class GraphCanvasRenderer {
 		this.markDirty();
 	}
 
+	getViewCamera(): AtlasView["camera"] {
+		const {x, y, k} = this.transform;
+		return {x: (this.viewW/2-x)/k, y: (this.viewH/2-y)/k, k};
+	}
+
+	restoreViewCamera(camera: AtlasView["camera"]): void {
+		this.zoomTarget = null;
+		this.hasFit = true;
+		select(this.canvas).call(this.zoomBehavior.transform,
+			zoomIdentity.translate(this.viewW/2-camera.x*camera.k, this.viewH/2-camera.y*camera.k).scale(camera.k));
+	}
+
 	/** Frame the whole graph (padding included). Keeps the camera on later
 	 *  setData calls — call fit() only for an explicit re-frame (the
 	 *  first-ever open; afterwards the caller-persisted camera wins). */
@@ -954,6 +971,7 @@ export class GraphCanvasRenderer {
 	/** Wheel: accumulate the zoom target; the camera GLIDES toward it in the
 	 *  tick loop (cursor-anchored). Sensitivity formula is d3-zoom's own. */
 	private onWheel = (e: WheelEvent) => {
+		if (this.subjectDrag) { e.preventDefault(); return; }
 		e.preventDefault();
 		const delta = -e.deltaY * (e.deltaMode === 1 ? 0.05 : e.deltaMode ? 1 : 0.002);
 		const { x, y } = this.eventPos(e);
@@ -968,6 +986,19 @@ export class GraphCanvasRenderer {
 
 	private onPointerMove = (e: PointerEvent) => {
 		const pos = this.eventPos(e);
+		if (this.subjectDrag && this.data?.atlas) {
+			const drag = this.subjectDrag;
+			if (Math.hypot(pos.x-drag.origin.x, pos.y-drag.origin.y) <= CLICK_SLOP && !drag.dx && !drag.dy) return;
+			try {
+				const dx = (pos.x-drag.origin.x)/this.transform.k, dy = (pos.y-drag.origin.y)/this.transform.k;
+				const moved = translateAtlasSubject(this.data.atlas, drag.id, dx, dy);
+				for (const p of moved.positions) Object.assign(this.nodeById.get(p.id)!, p);
+				drag.dx = dx; drag.dy = dy;
+				this.geoVersion++;
+				this.markDirty();
+			} catch (error) { this.callbacks.onLayoutError?.((error as Error).message); }
+			return;
+		}
 		if (this.dragId) {
 			const n = this.simById.get(this.dragId);
 			if (n) {
@@ -1002,7 +1033,7 @@ export class GraphCanvasRenderer {
 		}
 		const node = this.pickAt(pos.x, pos.y);
 		if ((node?.id ?? null) !== this.hoverId) this.setHover(node?.id ?? null);
-		this.canvas.style.cursor = node ? "pointer" : "";
+		this.canvas.style.cursor = node ? "pointer" : this.pickSubjectAt(pos) ? "grab" : "";
 	};
 
 	private onPointerDown = (e: PointerEvent) => {
@@ -1012,6 +1043,18 @@ export class GraphCanvasRenderer {
 		// used to open under the menu).
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
+		const subject = this.pickSubjectAt(pos);
+		if (subject) {
+			e.preventDefault();
+			if (subject.locked || this.atlasLayout) {
+				this.callbacks.onLayoutError?.(subject.locked ? "Unlock this subject before moving it." : "Let the layout settle before moving a subject.");
+				return;
+			}
+			this.subjectDrag = {id: subject.id, origin: pos, dx: 0, dy: 0};
+			try { this.canvas.setPointerCapture(e.pointerId); } catch { /* best effort */ }
+			this.canvas.style.cursor = "grabbing";
+			return;
+		}
 		const node = this.pickAt(pos.x, pos.y);
 		if (node?.fixed && this.data?.atlas?.concepts.some(c => c.id === node.id)) {
 			e.preventDefault();
@@ -1047,6 +1090,16 @@ export class GraphCanvasRenderer {
 	};
 
 	private onPointerCancel = () => {
+		if (this.subjectDrag) {
+			for (const c of this.data?.atlas?.concepts ?? []) {
+				const n = this.nodeById.get(c.id);
+				if (n) { n.x = c.x; n.y = c.y; }
+			}
+			this.subjectDrag = null;
+			this.canvas.style.cursor = "";
+			this.geoVersion++;
+			this.markDirty();
+		}
 		if (!this.dragId) return;
 		const node = this.simById.get(this.dragId);
 		if (node) { node.fx = null; node.fy = null; }
@@ -1060,6 +1113,14 @@ export class GraphCanvasRenderer {
 
 	private onPointerUp = (e: PointerEvent) => {
 		if (e.button !== 0) return; // right-click is context-menu territory
+		if (this.subjectDrag) {
+			const {id, dx, dy} = this.subjectDrag;
+			this.subjectDrag = null;
+			try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+			this.canvas.style.cursor = "";
+			if (dx || dy) this.callbacks.onSubjectMove?.(id, dx, dy, this.data?.atlas?.layoutRevision ?? 0);
+			return;
+		}
 		// Node press ending: click (no slop) → select; drag → release-and-relax.
 		if (this.dragId) {
 			const id = this.dragId;
@@ -1113,7 +1174,7 @@ export class GraphCanvasRenderer {
 	};
 
 	private onPointerLeave = () => {
-		if (this.dragId) return; // pointer capture keeps the drag alive
+		if (this.dragId || this.subjectDrag) return; // pointer capture keeps the drag alive
 		this.downPos = null;
 		this.setHover(null);
 	};
@@ -1123,6 +1184,21 @@ export class GraphCanvasRenderer {
 	private eventPos(e: { clientX: number; clientY: number }): Pt {
 		const rect = this.canvas.getBoundingClientRect();
 		return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+	}
+
+	/** Subject titles are the move handles; background keeps its original pan behavior. */
+	private pickSubjectAt(pos: Pt) {
+		const data = this.data, settings = this.settings;
+		if (!data?.atlas || !settings || !settings.clusterLabels ||
+			labelAlpha(zoomRatioOf(this.kFit, this.transform.k), settings.labelZoom) >= 0.99) return null;
+		const {k, x, y} = this.transform;
+		this.ctx.save();
+		this.ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
+		const hit = this.regionMeta.find(r => r.color && r.lines &&
+			Math.abs(pos.x-(r.cx*k+x)) <= Math.max(...r.lines.map(line => this.ctx.measureText(line).width))/2+6 &&
+			Math.abs(pos.y-(r.cy*k+y)) <= r.lines.length*settings.clusterLabelSize*REGION_LABEL_LINE_HEIGHT/2+6);
+		this.ctx.restore();
+		return data.atlas.subjects.find(s => s.id === hit?.id) ?? null;
 	}
 
 	private pickAt(px: number, py: number): CanvasNode | null {

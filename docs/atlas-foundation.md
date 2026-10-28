@@ -16,7 +16,7 @@ The initial persisted placement is relative to its preferred subject anchor;
 renaming retains placement, while changing the preferred subject moves that
 concept near its new anchor. Concepts now support local force settling, saved
 positions, subject arrangement and explicit locks; see [placement details](atlas-layout.md).
-Whole-cluster dragging remains pending. Birth-session proposition clusters retain their existing
+Whole-subject dragging and named views are available; see [movement and views](atlas-views.md). Birth-session proposition clusters retain their existing
 meaning and rendering.
 
 These are explicit manual edits. Models have no Atlas write tool. Existing
