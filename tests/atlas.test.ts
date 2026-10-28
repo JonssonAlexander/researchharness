@@ -562,3 +562,37 @@ test("v3 archive migration backs up existing data and preserves rows", () => {
 	assert.equal(old.prepare("PRAGMA user_version").get()!.user_version, 3);
 	old.close();
 });
+
+test("concept position saves survive reopen, preserve metadata and unrelated positions, and reject stale movement", () => {
+	const { service, file } = fixture();
+	const a = subject();
+	service.save(a);
+	const c = concept([a.id]),
+		other = concept([a.id]);
+	service.save(c);
+	service.save(other);
+	const before = service.read();
+	service.save({ kind: "concept-position", id: c.id, expectedRevision: 1, x: 240, y: -130 });
+	const moved = createAtlasStore(file).read();
+	const saved = moved.concepts.find((n) => n.id === c.id)!;
+	assert.equal(saved.x, 240);
+	assert.equal(saved.y, -130);
+	assert.equal(saved.revision, 2);
+	assert.deepEqual(saved.subjectIds, [a.id]);
+	assert.deepEqual(saved.propositionIds, c.propositionIds);
+	assert.deepEqual(
+		moved.concepts.find((n) => n.id === other.id),
+		before.concepts.find((n) => n.id === other.id),
+	);
+	assert.throws(
+		() => service.save({ kind: "concept-position", id: c.id, expectedRevision: 1, x: 10, y: 10 }),
+		/changed/,
+	);
+	assert.throws(() =>
+		service.save({ kind: "concept-position", id: c.id, expectedRevision: 2, x: Infinity, y: 10 }),
+	);
+	const projection = projectAtlas(moved);
+	assert(projection.nodes.every((n) => n.fixed && n.draggable));
+	service.save({ kind: "subject-position", id: a.id, expectedRevision: 1, x: 100, y: 200 });
+	assert.deepEqual(service.read().concepts, moved.concepts);
+});

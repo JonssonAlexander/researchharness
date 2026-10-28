@@ -236,13 +236,23 @@ PRAGMA user_version = 3;`);
 					const rows =
 						command.kind === "relation" || command.kind === "relation-delete"
 							? current.relations
-							: command.kind === "concept" || command.kind === "concept-delete"
+							: command.kind === "concept" ||
+								  command.kind === "concept-delete" ||
+								  command.kind === "concept-position"
 								? current.concepts
 								: current.subjects;
 					const previous = rows.find((r) => r.id === command.id);
 					if ((previous?.revision ?? 0) !== command.expectedRevision)
 						throw new AtlasError("This item changed. Reload it before saving.", 409);
-					if (command.kind === "concept-delete" || command.kind === "relation-delete") {
+					if (command.kind === "concept-position" || command.kind === "subject-position") {
+						if (!previous) throw new AtlasError("Item no longer exists.", 409);
+						const table = command.kind === "concept-position" ? "concepts" : "subjects";
+						db.prepare(`UPDATE ${table} SET x=?, y=?, revision=revision+1 WHERE id=?`).run(
+							command.x,
+							command.y,
+							command.id,
+						);
+					} else if (command.kind === "concept-delete" || command.kind === "relation-delete") {
 						if (!previous) throw new AtlasError("Item no longer exists.", 409);
 						const kind = command.kind === "concept-delete" ? "concept" : "relation";
 						if (
@@ -354,8 +364,8 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, color=excluded.color, parent
 							command.color,
 							command.parentId,
 							command.expectedRevision + 1,
-							previous && "x" in previous ? previous.x : 600 + (index % 4) * 360,
-							previous && "y" in previous ? previous.y : Math.floor(index / 4) * 360,
+							previous && "x" in previous ? previous.x : (index % 2) * 520,
+							previous && "y" in previous ? previous.y : Math.floor(index / 2) * 420,
 						);
 					} else {
 						if (db.prepare("SELECT id FROM atlas_archive WHERE kind='concept' AND id=?").get(command.id))
@@ -366,8 +376,8 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, color=excluded.color, parent
 						const index = current.concepts.filter(
 							(c) => c.preferredSubjectId === command.preferredSubjectId,
 						).length;
-						const angle = index * 2.3999632297,
-							radius = 40 + Math.sqrt(index) * 24;
+						const seedX = (anchor?.x ?? -600) + ((index % 3) - 1) * 140;
+						const seedY = (anchor?.y ?? 0) + Math.floor(index / 3) * 120;
 						const keepPosition =
 							previous &&
 							"preferredSubjectId" in previous &&
@@ -381,8 +391,8 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, aliases=excluded.aliases, pr
 							JSON.stringify(command.aliases),
 							command.preferredSubjectId,
 							command.expectedRevision + 1,
-							keepPosition ? previous.x : (anchor?.x ?? -600) + Math.cos(angle) * radius,
-							keepPosition ? previous.y : (anchor?.y ?? 0) + Math.sin(angle) * radius,
+							keepPosition ? previous.x : seedX,
+							keepPosition ? previous.y : seedY,
 							writeNote(
 								command.id,
 								command.markdown ?? (previous && "markdown" in previous ? (previous.markdown ?? "") : ""),

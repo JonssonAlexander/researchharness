@@ -86,6 +86,7 @@ export interface CanvasNode {
 	/** Atlas concepts are anchored, coloured rings; propositions retain their fill. */
 	color?: string;
 	fixed?: boolean;
+	draggable?: boolean;
 }
 
 /** One directed edge of the DERIVED view (chains-primary, 2026-09-30):
@@ -157,6 +158,8 @@ export interface RendererCallbacks {
 	/** The live sim settled after a drag: commit the new rest state
 	 *  (the caller PUTs it to the positions ledger). */
 	onCommit: (positions: Record<string, Position>) => void;
+	/** Direct concept movement changes only this node; no force relaxation. */
+	onNodeMove?: (id: string, position: Position) => void;
 }
 
 // ─── Constants (ported verbatim from the sigma view) ────────────────────────
@@ -644,6 +647,7 @@ export class GraphCanvasRenderer {
 	private builtVersion = -1; // version the cache was built at
 	private nodesPath: Path2D | null = null;
 	private coloredNodes = new Map<string, Path2D>();
+	private anchoredMoved = false;
 	private semanticPath = new Path2D();
 	private semanticFocus: ReadonlySet<string> | null = null;
 	private shaftsPath: Path2D = new Path2D();
@@ -951,6 +955,18 @@ export class GraphCanvasRenderer {
 				const moved =
 					this.dragOrigin !== null &&
 					Math.hypot(pos.x - this.dragOrigin.x, pos.y - this.dragOrigin.y) > CLICK_SLOP;
+				const anchored = this.nodeById.get(this.dragId);
+				if (anchored?.fixed && anchored.draggable) {
+					if (moved || this.anchoredMoved) {
+						const { x: tx, y: ty, k } = this.transform;
+						anchored.x = n.x = n.fx = (pos.x - tx) / k;
+						anchored.y = n.y = n.fy = (pos.y - ty) / k;
+						this.anchoredMoved = true;
+						this.geoVersion++;
+						this.markDirty();
+					}
+					return;
+				}
 				if (moved) {
 					// First real movement: reheat and glue the node to the cursor.
 					if (this.commitTimer) {
@@ -980,7 +996,8 @@ export class GraphCanvasRenderer {
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
-		if (node && this.sim && !node.fixed) {
+		if (node && this.sim && (!node.fixed || node.draggable)) {
+			this.anchoredMoved = false;
 			// Node press: pin the node (at ITS OWN position — the cursor
 			// may be inside the pick pad, off-center). preventDefault kills
 			// the compatibility mousedown, so d3-zoom never starts a pan.
@@ -1020,6 +1037,13 @@ export class GraphCanvasRenderer {
 				/* already released */
 			}
 			this.canvas.style.cursor = "";
+			const anchored = this.nodeById.get(id);
+			if (anchored?.fixed && anchored.draggable) {
+				if (this.anchoredMoved) this.callbacks.onNodeMove?.(id, { x: anchored.x, y: anchored.y });
+				else this.callbacks.onSelect(id, this.eventPos(e));
+				this.anchoredMoved = false;
+				return;
+			}
 			const n = this.simById.get(id);
 			if (n) {
 				n.fx = null;
@@ -1432,6 +1456,7 @@ export class GraphCanvasRenderer {
 			let members = 0;
 			let sumX = 0;
 			let sumY = 0;
+			let topY = Infinity;
 			for (const id of cluster.members) {
 				if (!isVisible(id)) continue;
 				const n = this.nodeById.get(id);
@@ -1439,13 +1464,14 @@ export class GraphCanvasRenderer {
 				members++;
 				sumX += n.x;
 				sumY += n.y;
+				topY = Math.min(topY, n.y);
 			}
 			if (members > 0) {
 				this.regionMeta.push({
 					id: cluster.id,
 					label: cluster.label || null,
 					cx: sumX / members,
-					cy: sumY / members,
+					cy: cluster.color ? topY - 65 : sumY / members,
 					hue: clusterHue(cluster.id),
 					color: cluster.color,
 					lines: null,

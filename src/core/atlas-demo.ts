@@ -24,7 +24,7 @@ export function createAtlasDemo(batch: string): AtlasCommand[] {
 		kind: "subject",
 		id: id("as", i),
 		expectedRevision: 0,
-		title: `Demo · ${title}`,
+		title,
 		color: ["#60a5fa", "#c084fc", "#fbbf24"][i]!,
 		parentId: null,
 	}));
@@ -33,13 +33,35 @@ export function createAtlasDemo(batch: string): AtlasCommand[] {
 			kind: "concept",
 			id: id("ac", i),
 			expectedRevision: 0,
-			title: `Demo · ${title}`,
+			title,
 			aliases: [],
 			markdown: `# ${title}\n\n**Demo data — illustrative, unverified.**\n\nTry the concept links and **Find a connection**. These notes are a layout fixture, not a mathematical reference.\n\nEdit or remove this concept freely.`,
 			subjectIds: i === 5 ? [id("as", 0), id("as", 1)] : [id("as", homes[i]!)],
 			preferredSubjectId: id("as", homes[i]!),
 			propositionIds: [],
 		}),
+	);
+	const subjectPositions = [
+		[-250, -90],
+		[170, -90],
+		[170, 210],
+	];
+	const conceptPositions = [
+		[-380, -200],
+		[-250, -110],
+		[-110, -200],
+		[-340, 30],
+		[-160, 30],
+		[110, -100],
+		[280, -100],
+		[110, 210],
+		[280, 210],
+	];
+	subjectPositions.forEach(([x, y], i) =>
+		commands.push({ kind: "subject-position", id: id("as", i), expectedRevision: 1, x: x!, y: y! }),
+	);
+	conceptPositions.forEach(([x, y], i) =>
+		commands.push({ kind: "concept-position", id: id("ac", i), expectedRevision: 1, x: x!, y: y! }),
 	);
 	const edges = [
 		[0, 1],

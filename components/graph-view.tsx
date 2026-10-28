@@ -981,6 +981,9 @@ export function GraphView({
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	const atlas = useAtlas();
+	const atlasActionsRef = useRef(atlas);
+	atlasActionsRef.current = atlas;
+	const [layoutError, setLayoutError] = useState<string | null>(null);
 	const atlasRef = useRef(atlas.snapshot);
 	atlasRef.current = atlas.snapshot;
 	const [atlasOpen, setAtlasOpen] = useState(false);
@@ -1398,6 +1401,16 @@ export function GraphView({
 				},
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
+				onNodeMove: (id, position) => {
+					const concept = atlasRef.current.concepts.find((c) => c.id === id);
+					if (!concept) return;
+					setLayoutError(null);
+					void atlasActionsRef.current.save({ kind: "concept-position", id, expectedRevision: concept.revision, ...position })
+						.catch((error) => {
+							setLayoutError(error instanceof Error ? error.message : "Position could not be saved.");
+							void atlasActionsRef.current.refresh();
+						});
+				},
 				onCommit: (positions) => {
 					posRef.current = new Map(Object.entries(positions));
 					void fetch("/api/graph/positions", {
@@ -1651,6 +1664,7 @@ export function GraphView({
 			</div>
 
 			<NotesImportErrors errors={notesImport.errors} />
+			{layoutError && <p role="alert" className="absolute bottom-4 left-4 z-30 rounded border bg-card p-2 text-xs text-destructive">{layoutError}</p>}
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
 			    just a number, hover-highlighted, dropdown breakdown — then
 			    the running-pipeline pills under it. Lives BELOW the actions

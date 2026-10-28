@@ -6,14 +6,15 @@
 
 The owner-requested demo was loaded into the local app through `/api/atlas`.
 It has three subjects (Probability, Analysis, Computation), nine concepts and nine
-links. All subject/concept titles begin with `Demo ·`. The generator belongs to
+links. Sample labels now use plain mathematical titles; reserved fixture IDs still
+identify them for safe cleanup. See [the compact layout and dragging update](atlas-layout.md). The generator belongs to
 both Probability and Analysis and renders once, in Analysis. Concepts have small
 Markdown notes. Links are accepted for display but explicitly marked as unverified
 hypotheses with placeholder citations. They are UI fixtures, not mathematical
 evidence. No formal propositions, arguments, sessions or provider calls are created.
 
 Open Atlas, or refresh and use **Fit graph** to bring all nodes into view. Try
-**Find a connection** from **Demo · Brownian motion** to **Demo · Heat equation**.
+**Find a connection** from **Brownian motion** to **Heat equation**.
 Then use **Show path in graph** and inspect each step's status and citation.
 
 **Atlas → Demo data** has **Load demo** and a confirmed **Remove demo** action.

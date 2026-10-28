@@ -40,6 +40,25 @@ const subject = z
 		parentId: atlasSubjectId.nullable(),
 	})
 	.strict();
+const coordinate = z.number().finite().min(-1000000).max(1000000);
+const conceptPosition = z
+	.object({
+		kind: z.literal("concept-position"),
+		id: atlasConceptId,
+		expectedRevision: revision.min(1),
+		x: coordinate,
+		y: coordinate,
+	})
+	.strict();
+const subjectPosition = z
+	.object({
+		kind: z.literal("subject-position"),
+		id: atlasSubjectId,
+		expectedRevision: revision.min(1),
+		x: coordinate,
+		y: coordinate,
+	})
+	.strict();
 const conceptDelete = z
 	.object({ kind: z.literal("concept-delete"), id: atlasConceptId, expectedRevision: revision.min(1) })
 	.strict();
@@ -64,6 +83,8 @@ export const atlasCommandSchema = z.union([
 	atlasRelationSchema,
 	conceptDelete,
 	relationDelete,
+	conceptPosition,
+	subjectPosition,
 ]);
 export type AtlasCommand = z.infer<typeof atlasCommandSchema>;
 export type ConceptInput = Extract<AtlasCommand, { kind: "concept" }>;
@@ -128,6 +149,7 @@ export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
 			x: c.x,
 			y: c.y,
 			fixed: true,
+			draggable: true,
 			color: colors.get(c.preferredSubjectId ?? "") ?? "#9ca3af",
 		})),
 		clusters: subjects.map((s) => ({

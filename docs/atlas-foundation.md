@@ -14,8 +14,8 @@ Each concept appears once as a colored ring in the existing canvas. Its other
 memberships remain visible in the inspector. Search includes titles and aliases.
 The initial persisted placement is relative to its preferred subject anchor;
 renaming retains placement, while changing the preferred subject moves that
-concept only. Concepts are fixed in this slice; cluster dragging and locking are
-not yet implemented. Birth-session proposition clusters retain their existing
+concept only. Concepts now support direct dragging with saved positions;
+[placement details](atlas-layout.md). Whole-cluster dragging and locking remain pending. Birth-session proposition clusters retain their existing
 meaning and rendering.
 
 These are explicit manual edits. Models have no Atlas write tool. Existing
