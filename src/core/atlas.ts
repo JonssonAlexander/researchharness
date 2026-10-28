@@ -104,7 +104,7 @@ export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
 	return {
 		semanticEdges: relations
 			.filter((r) => r.reviewStatus === "accepted")
-			.map((r) => ({ from: r.sourceId, to: r.targetId })),
+			.map((r) => ({ id: r.id, from: r.sourceId, to: r.targetId })),
 		nodes: concepts.map((c) => ({
 			id: c.id,
 			label: c.title,

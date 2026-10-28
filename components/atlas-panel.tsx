@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	type AtlasCommand,
+	type AtlasPathFocus,
 	type AtlasConcept,
 	type AtlasSnapshot,
 	type AtlasSubject,
 	type GraphNode,
 } from "@/src/core";
+import { AtlasQuery } from "./atlas-query";
 import { AtlasRelations } from "./atlas-relations";
 import { MessageResponse } from "./ai-elements/message";
 import { useServerEvent, useServerResync } from "./server-events";
@@ -65,12 +67,14 @@ export function AtlasPanel({
 	onSelect,
 	onClose,
 	propositions,
+	onFocus,
 }: {
 	atlas: ReturnType<typeof useAtlas>;
 	selectedId: string | null;
 	onSelect: (id: string | null) => void;
 	onClose: () => void;
 	propositions: GraphNode[];
+	onFocus?: (focus: AtlasPathFocus | null) => void;
 }) {
 	const [editing, setEditing] = useState<Extract<AtlasCommand, { kind: "concept" | "subject" }> | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -397,6 +401,7 @@ export function AtlasPanel({
 								New subject
 							</button>
 						</div>
+						<AtlasQuery snapshot={atlas.snapshot} selectedId={selectedId} onSelect={onSelect} onFocus={onFocus} />
 						{selected && (
 							<section className="space-y-2 border-b pb-3 text-xs">
 								<div className="text-muted-foreground">Concept</div>

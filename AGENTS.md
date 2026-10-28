@@ -413,6 +413,8 @@ single-placement canvas projection. See [the as-built Atlas foundation](docs/atl
 for schema, validation and outstanding work. Phase 2 is not complete.
 Typed concept links are now implemented as an additional bounded slice; see
 [typed link semantics, schema v3 and limits](docs/atlas-relations.md).
+Read-only shortest concept-path queries and temporary graph focus are available;
+see [query semantics, search bounds and remaining work](docs/atlas-queries.md).
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.

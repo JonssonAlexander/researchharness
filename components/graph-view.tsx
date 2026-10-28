@@ -67,7 +67,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, projectAtlas, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, projectAtlas, type AtlasPathFocus, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -984,6 +984,7 @@ export function GraphView({
 	const atlasRef = useRef(atlas.snapshot);
 	atlasRef.current = atlas.snapshot;
 	const [atlasOpen, setAtlasOpen] = useState(false);
+	const [atlasFocus, setAtlasFocus] = useState<AtlasPathFocus | null>(null);
 	const [conceptId, setConceptId] = useState<string | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
 	// constructed once, so they read through this ref, never a closure).
@@ -1078,8 +1079,9 @@ export function GraphView({
 			if ([concept.title, ...concept.aliases].some((s) => s.toLowerCase().includes(query.trim().toLowerCase())))
 				set.add(concept.id);
 		}
+		if (atlasFocus) for (const id of set) if (!atlasFocus.conceptIds.includes(id)) set.delete(id);
 		return set;
-	}, [snapshot, atlas.snapshot, query]);
+	}, [snapshot, atlas.snapshot, query, atlasFocus]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1472,10 +1474,11 @@ export function GraphView({
 	// Feed #3 — visibility: hidden nodes drop out of rendering, picking,
 	// hover, AND labels; edges drop when either endpoint is hidden.
 	useEffect(() => {
-		rendererRef.current?.setVisible(query.trim() ? visibleIds : null);
+		rendererRef.current?.setVisible(query.trim() || atlasFocus ? visibleIds : null);
+		rendererRef.current?.setSemanticFocus(atlasFocus ? new Set(atlasFocus.relationIds) : null);
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
-	}, [visibleIds, query]);
+	}, [visibleIds, query, atlasFocus]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1520,7 +1523,7 @@ export function GraphView({
 		<div className="relative h-full w-full">
 			{atlasOpen && (
 				<AtlasPanel atlas={atlas} selectedId={conceptId} onSelect={setConceptId}
-					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} />
+					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={setAtlasFocus} />
 			)}
 			{isEmpty ? (
 				// The empty graph keeps the first action clear without zero-valued statistics.

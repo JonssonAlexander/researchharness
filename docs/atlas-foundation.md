@@ -120,8 +120,11 @@ including Markdown files and SQLite; the database alone cannot restore notes.
 Manual typed links with owner-entered citations are now available; see
 [typed concept links](atlas-relations.md). Managed source revisions remain pending.
 
+Read-only sourced concept paths and temporary focus are now available; see
+[query semantics and limits](atlas-queries.md).
+
 Remaining Phase 2 work includes
-source-backed query paths, saved perspectives, timestamps/history, movable/lockable
+saved perspectives, timestamps/history, movable/lockable
 subject clusters, hierarchy visualization and layout interaction acceptance. Rnote,
 reviewed synchronization and handwriting belong to subsequent slices. The first
 slice does not satisfy the full Phase 2 exit criteria.

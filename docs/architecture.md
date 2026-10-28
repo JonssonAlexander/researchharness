@@ -6,7 +6,9 @@ The first Atlas extension adds manually curated concepts, subjects, many-to-many
 memberships and canonical proposition references in `LH_DATA_DIR/atlas.sqlite`.
 It reuses the existing canvas and SSE transport. The formal JSONL graph remains
 authoritative. Typed concept links add separate claim/review states, citation
-references and revision history; see [link semantics and schema v3](atlas-relations.md). See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
+references and revision history; see [link semantics and schema v3](atlas-relations.md).
+Read-only concept path queries and temporary graph focus reuse that snapshot; see
+[query semantics and bounds](atlas-queries.md). See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
 
 ## Research Atlas credential-storage update — 28 October 2026
 

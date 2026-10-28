@@ -127,7 +127,7 @@ export interface CanvasData {
 	nodes: CanvasNode[];
 	edges: CanvasEdge[];
 	/** Non-logical, accepted concept links. Excluded from formal layout/derivation. */
-	semanticEdges?: CanvasEdge[];
+	semanticEdges?: (CanvasEdge & { id?: string })[];
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
 	 *  drawn edges (legacy). Optional so non-graph callers of the
@@ -645,6 +645,7 @@ export class GraphCanvasRenderer {
 	private nodesPath: Path2D | null = null;
 	private coloredNodes = new Map<string, Path2D>();
 	private semanticPath = new Path2D();
+	private semanticFocus: ReadonlySet<string> | null = null;
 	private shaftsPath: Path2D = new Path2D();
 	private headsPath: Path2D = new Path2D();
 	private regionCanvas: HTMLCanvasElement | null = null;
@@ -866,6 +867,13 @@ export class GraphCanvasRenderer {
 		);
 		ctx.font = prevFont;
 		if (changed) this.markDirty();
+	}
+
+	/** Temporary relation visibility never rebuilds the simulation or commits layout. */
+	setSemanticFocus(ids: ReadonlySet<string> | null): void {
+		this.semanticFocus = ids;
+		this.geoVersion++;
+		this.markDirty();
 	}
 
 	setVisible(visible: ReadonlySet<string> | null): void {
@@ -1258,6 +1266,7 @@ export class GraphCanvasRenderer {
 		this.nodesPath = nodesPath;
 		this.semanticPath = new Path2D();
 		for (const edge of data.semanticEdges ?? []) {
+			if (this.semanticFocus && (!edge.id || !this.semanticFocus.has(edge.id))) continue;
 			if (!isVisible(edge.from) || !isVisible(edge.to)) continue;
 			const from = this.nodeById.get(edge.from), to = this.nodeById.get(edge.to);
 			if (!from || !to) continue;

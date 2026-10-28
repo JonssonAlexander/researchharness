@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AtlasQuery } from "../components/atlas-query.tsx";
 import { AtlasRelations } from "../components/atlas-relations.tsx";
 import { AtlasPanel, useAtlas } from "../components/atlas-panel.tsx";
 import type { AtlasCommand, AtlasSnapshot } from "../src/core/atlas.ts";
@@ -379,4 +380,73 @@ test("link inspection shows direction, conditions, citations and disputed claim 
 	])
 		assert(text.includes(value), value);
 	assert(!html.includes("<a "));
+});
+
+test("query shows sourced steps, focuses temporarily and drops stale results after retraction", async () => {
+	const other = {
+		...snapshot.concepts[0]!,
+		id: "ac_00000000-0000-4000-8000-000000000002",
+		title: "Continuity",
+	};
+	const data: AtlasSnapshot = {
+		...snapshot,
+		concepts: [...snapshot.concepts, other],
+		relations: [
+			{
+				id: "ar_00000000-0000-4000-8000-000000000001",
+				sourceId: id,
+				targetId: other.id,
+				relationType: "application",
+				conditions: "Bounded time",
+				claimStatus: "numerical-observation",
+				reviewStatus: "accepted",
+				evidence: [{ citation: "Notebook", locator: "Run 3" }],
+				revision: 1,
+				createdAt: "2026-10-28T00:00:00Z",
+				updatedAt: "2026-10-28T00:00:00Z",
+				contentHash: "fixture",
+			},
+		],
+	};
+	const focus: unknown[] = [];
+	const onFocus = (value: unknown) => {
+		focus.push(value);
+	};
+	let update: (s: AtlasSnapshot) => void = () => {};
+	function Harness() {
+		const [value, setValue] = React.useState(data);
+		update = setValue;
+		return <AtlasQuery snapshot={value} selectedId={id} onSelect={() => {}} onFocus={onFocus} />;
+	}
+	const ui = await mount(() => <Harness />);
+	try {
+		const target = ui.document.querySelectorAll("select")[1]!;
+		await act(async () => {
+			for (const option of target.querySelectorAll("option")) option.selected = option.value === other.id;
+			target.dispatchEvent(new ui.document.defaultView!.Event("change", { bubbles: true }));
+		});
+		await act(async () => {
+			ui.document
+				.querySelector("form")!
+				.dispatchEvent(new ui.document.defaultView!.Event("submit", { bubbles: true, cancelable: true }));
+		});
+		const text = ui.document.body.textContent!;
+		for (const value of ["Bounded time", "numerical observation", "Notebook", "Run 3"])
+			assert(text.includes(value), value);
+		await act(async () => {
+			[...ui.document.querySelectorAll("button")]
+				.find((b) => b.textContent === "Show path in graph")!
+				.click();
+		});
+		assert.deepEqual(focus.at(-1), { conceptIds: [id, other.id], relationIds: [data.relations[0]!.id] });
+		await act(async () => {
+			update({ ...data, relations: [{ ...data.relations[0]!, reviewStatus: "retracted" }] });
+		});
+		assert(ui.document.body.textContent!.includes("No supported path found"));
+		assert.equal(focus.at(-1), null);
+		assert(!ui.document.body.textContent!.includes("Run 3"));
+	} finally {
+		await ui.close();
+	}
+	assert.equal(focus.at(-1), null);
 });
