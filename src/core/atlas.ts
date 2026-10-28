@@ -40,6 +40,16 @@ const subject = z
 		parentId: atlasSubjectId.nullable(),
 	})
 	.strict();
+const conceptDelete = z
+	.object({ kind: z.literal("concept-delete"), id: atlasConceptId, expectedRevision: revision.min(1) })
+	.strict();
+const relationDelete = z
+	.object({
+		kind: z.literal("relation-delete"),
+		id: z.string().regex(/^ar_[0-9a-f-]{36}$/),
+		expectedRevision: revision.min(1),
+	})
+	.strict();
 const subjectDelete = z
 	.object({
 		kind: z.literal("subject-delete"),
@@ -47,7 +57,14 @@ const subjectDelete = z
 		expectedRevision: revision.min(1),
 	})
 	.strict();
-export const atlasCommandSchema = z.union([concept, subject, subjectDelete, atlasRelationSchema]);
+export const atlasCommandSchema = z.union([
+	concept,
+	subject,
+	subjectDelete,
+	atlasRelationSchema,
+	conceptDelete,
+	relationDelete,
+]);
 export type AtlasCommand = z.infer<typeof atlasCommandSchema>;
 export type ConceptInput = Extract<AtlasCommand, { kind: "concept" }>;
 export type SubjectInput = Extract<AtlasCommand, { kind: "subject" }>;

@@ -1630,6 +1630,7 @@ export function GraphView({
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
+				<button type="button" onClick={() => rendererRef.current?.fit()} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Fit graph</button>
 				<button type="button" aria-expanded={atlasOpen} onClick={() => setAtlasOpen((open) => !open)} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Atlas</button>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +

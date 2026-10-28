@@ -36,7 +36,7 @@ are short lived; saves use `BEGIN IMMEDIATE`, foreign keys and full synchronous
 durability. New directories/files request owner-only modes. The existing trusted
 local-server assumptions still apply.
 
-The concept/subject slice introduced schema v2. The current schema is v3;
+The concept/subject slice introduced schema v2. The current schema is v4 ([archives/removal](atlas-demo-and-removal.md));
 [typed concept links](atlas-relations.md) add relation tables and document migration.
 The foundation tables are:
 

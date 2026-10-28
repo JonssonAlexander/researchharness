@@ -9,6 +9,7 @@ import {
 	type AtlasSubject,
 	type GraphNode,
 } from "@/src/core";
+import { AtlasDemo } from "./atlas-demo";
 import { AtlasQuery } from "./atlas-query";
 import { AtlasRelations } from "./atlas-relations";
 import { MessageResponse } from "./ai-elements/message";
@@ -88,6 +89,7 @@ export function AtlasPanel({
 	}, [selectedId]);
 	function editConcept(concept?: AtlasConcept) {
 		setError(null);
+		setConfirmDelete(false);
 		setEditing(
 			concept
 				? {
@@ -132,6 +134,7 @@ export function AtlasPanel({
 		try {
 			await atlas.save(command);
 			if (command.kind === "concept") onSelect(command.id);
+			if (command.kind === "concept-delete") onSelect(null);
 			setEditing(null);
 		} catch (error) {
 			setError(error instanceof Error ? error.message : "Could not save Atlas.");
@@ -369,6 +372,50 @@ export function AtlasPanel({
 								)}
 							</div>
 						)}
+						{editing.kind === "concept" && editing.expectedRevision > 0 && (
+							<div className="space-y-2 border-t pt-2 text-xs">
+								<button
+									type="button"
+									disabled={busy}
+									className={button}
+									onClick={() => setConfirmDelete(!confirmDelete)}
+								>
+									Delete concept
+								</button>
+								{confirmDelete && (
+									<>
+										<p>
+											Remove this concept and its memberships? Propositions stay. Notes and a copy of this
+											concept are archived.
+										</p>
+										{atlas.snapshot.relations
+											.filter((r) => r.sourceId === editing.id || r.targetId === editing.id)
+											.map((r) => (
+												<p key={r.id}>Delete link first: {r.relationType}</p>
+											))}
+										<button
+											type="button"
+											className={button}
+											disabled={
+												busy ||
+												atlas.snapshot.relations.some(
+													(r) => r.sourceId === editing.id || r.targetId === editing.id,
+												)
+											}
+											onClick={() =>
+												void submit({
+													kind: "concept-delete",
+													id: editing.id,
+													expectedRevision: editing.expectedRevision,
+												})
+											}
+										>
+											Confirm delete concept
+										</button>
+									</>
+								)}
+							</div>
+						)}
 						{error && (
 							<p role="alert" className="text-xs text-destructive">
 								{error}
@@ -401,7 +448,13 @@ export function AtlasPanel({
 								New subject
 							</button>
 						</div>
-						<AtlasQuery snapshot={atlas.snapshot} selectedId={selectedId} onSelect={onSelect} onFocus={onFocus} />
+						<AtlasDemo snapshot={atlas.snapshot} save={atlas.save} />
+						<AtlasQuery
+							snapshot={atlas.snapshot}
+							selectedId={selectedId}
+							onSelect={onSelect}
+							onFocus={onFocus}
+						/>
 						{selected && (
 							<section className="space-y-2 border-b pb-3 text-xs">
 								<div className="text-muted-foreground">Concept</div>

@@ -29,7 +29,8 @@ Accepted links appear as dashed, headless lines between concept rings in the exi
 canvas. Click a concept to inspect link type and direction, conditions, statuses and
 sources. Proposed, disputed and retracted links remain in the panel but do not appear
 as accepted canvas links. The inspector has source/target navigation and editing.
-Retract through **Edit link → Review status**; there is no destructive link deletion.
+Retract through **Edit link → Review status**; confirmed **Delete link** now removes it from the live graph while retaining its
+record/history in schema v4 archives; see [removal details](atlas-demo-and-removal.md).
 
 Source citations and page/section locators are plain owner-entered references. They
 are not fetched, opened, uploaded, or represented as captured immutable sources.

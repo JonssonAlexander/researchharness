@@ -37,10 +37,12 @@ export function AtlasRelations({
 	const [draft, setDraft] = useState<RelationInput | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
 	const name = (id: string) => snapshot.concepts.find((c) => c.id === id)?.title ?? "Unavailable concept";
 	const links = snapshot.relations.filter((r) => r.sourceId === conceptId || r.targetId === conceptId);
 	function edit(relation?: AtlasRelation) {
 		setError(null);
+		setConfirmDelete(false);
 		setDraft(
 			relation
 				? {
@@ -69,12 +71,14 @@ export function AtlasRelations({
 					},
 		);
 	}
-	async function submit() {
+	async function submit(remove = false) {
 		if (!draft || busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			await save(draft);
+			await save(
+				remove ? { kind: "relation-delete", id: draft.id, expectedRevision: draft.expectedRevision } : draft,
+			);
 			setDraft(null);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Link could not be saved.");
@@ -230,6 +234,26 @@ export function AtlasRelations({
 							Add source
 						</button>
 					</fieldset>
+					{draft.expectedRevision > 0 && (
+						<div className="space-y-2">
+							<button
+								type="button"
+								disabled={busy}
+								className={button}
+								onClick={() => setConfirmDelete(!confirmDelete)}
+							>
+								Delete link
+							</button>
+							{confirmDelete && (
+								<>
+									<p>Remove this link? Concepts stay. Its sources and previous versions are archived.</p>
+									<button type="button" disabled={busy} className={button} onClick={() => void submit(true)}>
+										Confirm delete link
+									</button>
+								</>
+							)}
+						</div>
+					)}
 					{error && (
 						<p role="alert" className="text-destructive">
 							{error}

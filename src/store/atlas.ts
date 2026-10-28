@@ -47,7 +47,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 3)
+			if (version > 4)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -92,6 +92,20 @@ CREATE TABLE relation_revisions (
  PRIMARY KEY(id, revision)
 ) STRICT;
 PRAGMA user_version = 3;`);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+			if (version < 4) {
+				if (version === 3) db.prepare("VACUUM INTO ?").run(`${file}.v3-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`CREATE TABLE atlas_archive (
+ kind TEXT NOT NULL, id TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), removedAt TEXT NOT NULL,
+ PRIMARY KEY(kind, id)
+) STRICT; PRAGMA user_version = 4;`);
 					db.exec("COMMIT");
 				} catch (error) {
 					db.exec("ROLLBACK");
@@ -220,15 +234,46 @@ PRAGMA user_version = 3;`);
 				try {
 					const current = snapshot(db);
 					const rows =
-						command.kind === "relation"
+						command.kind === "relation" || command.kind === "relation-delete"
 							? current.relations
-							: command.kind === "concept"
+							: command.kind === "concept" || command.kind === "concept-delete"
 								? current.concepts
 								: current.subjects;
 					const previous = rows.find((r) => r.id === command.id);
 					if ((previous?.revision ?? 0) !== command.expectedRevision)
 						throw new AtlasError("This item changed. Reload it before saving.", 409);
-					if (command.kind === "relation") {
+					if (command.kind === "concept-delete" || command.kind === "relation-delete") {
+						if (!previous) throw new AtlasError("Item no longer exists.", 409);
+						const kind = command.kind === "concept-delete" ? "concept" : "relation";
+						if (
+							kind === "concept" &&
+							current.relations.some((r) => r.sourceId === command.id || r.targetId === command.id)
+						)
+							throw new AtlasError("Delete this concept's links first. Propositions will be kept.", 409);
+						const history =
+							kind === "relation"
+								? db
+										.prepare("SELECT record FROM relation_revisions WHERE id=? ORDER BY revision")
+										.all(command.id)
+										.map((r) => JSON.parse(String(r.record)))
+								: [];
+						db.prepare("INSERT INTO atlas_archive VALUES (?, ?, ?, ?)").run(
+							kind,
+							command.id,
+							JSON.stringify({ item: previous, history }),
+							new Date().toISOString(),
+						);
+						if (kind === "relation") {
+							db.prepare("DELETE FROM relation_revisions WHERE id=?").run(command.id);
+							db.prepare("DELETE FROM relations WHERE id=?").run(command.id);
+						} else {
+							db.prepare("DELETE FROM concept_subjects WHERE conceptId=?").run(command.id);
+							db.prepare("DELETE FROM concept_propositions WHERE conceptId=?").run(command.id);
+							db.prepare("DELETE FROM concepts WHERE id=?").run(command.id);
+						}
+					} else if (command.kind === "relation") {
+						if (db.prepare("SELECT id FROM atlas_archive WHERE kind='relation' AND id=?").get(command.id))
+							throw new AtlasError("This link was removed. Create a new link.", 409);
 						const relation = normalizeRelation(command);
 						if (
 							![relation.sourceId, relation.targetId].every((id) => current.concepts.some((c) => c.id === id))
@@ -313,6 +358,8 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, color=excluded.color, parent
 							previous && "y" in previous ? previous.y : Math.floor(index / 4) * 360,
 						);
 					} else {
+						if (db.prepare("SELECT id FROM atlas_archive WHERE kind='concept' AND id=?").get(command.id))
+							throw new AtlasError("This concept was removed. Create a new concept.", 409);
 						if (command.subjectIds.some((id) => !current.subjects.some((s) => s.id === id)))
 							throw new AtlasError("A selected subject no longer exists.");
 						const anchor = current.subjects.find((s) => s.id === command.preferredSubjectId);

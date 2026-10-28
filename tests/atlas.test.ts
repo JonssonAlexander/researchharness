@@ -149,7 +149,7 @@ test("unknown or deleted canonical propositions are refused on save and never si
 });
 
 test("future and unrecognized databases are refused without rewriting their contents", () => {
-	for (const version of [0, 4]) {
+	for (const version of [0, 5]) {
 		const { file, store } = fixture();
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const db = new DatabaseSync(file);
@@ -290,7 +290,7 @@ test("v1 migration keeps rows, creates a restorable baseline and refuses unsafe 
 	service.save(c);
 	const db = new DatabaseSync(file);
 	db.exec(
-		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; PRAGMA user_version=1",
+		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; PRAGMA user_version=1",
 	);
 	db.close();
 	const saved = createAtlasStore(file).read();
@@ -431,7 +431,9 @@ test("v2 upgrade preserves notes and placements, backs up data and rolls back a 
 	service.save({ ...concept(), markdown: "Keep me" });
 	const before = service.read();
 	const db = new DatabaseSync(file);
-	db.exec("DROP TABLE relation_revisions; DROP TABLE relations; PRAGMA user_version=2");
+	db.exec(
+		"DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; PRAGMA user_version=2",
+	);
 	db.close();
 	assert.deepEqual(createAtlasStore(file).read(), before);
 	const old = fs.readdirSync(path.dirname(file)).find((f) => f.includes(".v2-") && f.endsWith(".bak"))!;
@@ -474,4 +476,89 @@ test("relation records with broken hashes or references are rejected visibly", (
 		db.close();
 		assert.throws(() => service.read(), /Invalid|Broken/);
 	}
+});
+
+test("confirmed removal archives concepts, notes and link history without touching other knowledge", () => {
+	const { service, file } = fixture();
+	const a = concept(),
+		b = concept();
+	service.save({ ...a, markdown: "Keep my note" });
+	service.save(b);
+	const r = {
+		kind: "relation",
+		id: `ar_${randomUUID()}`,
+		expectedRevision: 0,
+		sourceId: a.id,
+		targetId: b.id,
+		relationType: "analogy",
+		conditions: "",
+		claimStatus: "hypothesis",
+		reviewStatus: "proposed",
+		evidence: [],
+	};
+	service.save(r);
+	service.save({ ...r, expectedRevision: 1, reviewStatus: "retracted" });
+	assert.throws(() => service.save({ kind: "concept-delete", id: a.id, expectedRevision: 1 }), /links first/);
+	assert.throws(() => service.save({ kind: "relation-delete", id: r.id, expectedRevision: 1 }), /changed/);
+	const other = service.read().concepts.find((c) => c.id === b.id);
+	service.save({ kind: "relation-delete", id: r.id, expectedRevision: 2 });
+	service.save({ kind: "concept-delete", id: a.id, expectedRevision: 1 });
+	assert.deepEqual(service.read().concepts, [other]);
+	assert.equal(service.read().relations.length, 0);
+	assert.throws(() => service.save(a), /removed/);
+	assert.throws(() => service.save(r), /removed/);
+	const db = new DatabaseSync(file);
+	const archived = db.prepare("SELECT kind, record FROM atlas_archive ORDER BY kind").all();
+	assert.equal(JSON.parse(String(archived[0]!.record)).item.markdown, "Keep my note");
+	assert.equal(JSON.parse(String(archived[1]!.record)).history.length, 2);
+	db.close();
+	assert(fs.readdirSync(path.join(path.dirname(file), "concepts")).length > 0);
+});
+
+test("demo load, clear, partial retry and reload preserve owner records and refuse shared dependencies", async () => {
+	const { createAtlasDemo, removeAtlasDemo, isAtlasDemoId } = await import("../src/core/atlas-demo.ts");
+	const { service } = fixture();
+	const owner = concept();
+	service.save(owner);
+	const before = service.read();
+	const commands = createAtlasDemo("123456abcdef");
+	for (const c of commands) service.save(c);
+	assert.equal(service.read().concepts.length, 10);
+	assert.equal(service.read().subjects.length, 3);
+	const demoConcept = service.read().concepts.find((c) => isAtlasDemoId(c.id))!;
+	const ownLink = {
+		kind: "relation",
+		id: `ar_${randomUUID()}`,
+		expectedRevision: 0,
+		sourceId: owner.id,
+		targetId: demoConcept.id,
+		relationType: "analogy",
+		conditions: "",
+		claimStatus: "hypothesis",
+		reviewStatus: "proposed",
+		evidence: [],
+	};
+	service.save(ownLink);
+	assert.throws(() => removeAtlasDemo(service.read()), /own work/);
+	service.save({ kind: "relation-delete", id: ownLink.id, expectedRevision: 1 });
+	const removals = removeAtlasDemo(service.read());
+	service.save(removals[0]!);
+	for (const command of removeAtlasDemo(service.read())) service.save(command);
+	assert.deepEqual(service.read(), before);
+	for (const c of createAtlasDemo("abcdef123456")) service.save(c);
+	assert.equal(service.read().concepts.length, 10);
+});
+
+test("v3 archive migration backs up existing data and preserves rows", () => {
+	const { service, file } = fixture();
+	service.save(concept());
+	const before = service.read();
+	const db = new DatabaseSync(file);
+	db.exec("DROP TABLE atlas_archive; PRAGMA user_version=3");
+	db.close();
+	assert.deepEqual(createAtlasStore(file).read(), before);
+	const saved = fs.readdirSync(path.dirname(file)).find((f) => f.includes(".v3-") && f.endsWith(".bak"))!;
+	const old = new DatabaseSync(path.join(path.dirname(file), saved));
+	assert.equal(old.prepare("PRAGMA user_version").get()!.user_version, 3);
+	old.close();
 });

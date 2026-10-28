@@ -450,3 +450,87 @@ test("query shows sourced steps, focuses temporarily and drops stale results aft
 	}
 	assert.equal(focus.at(-1), null);
 });
+
+test("concept removal requires confirmation and sends only the displayed identity and revision", async () => {
+	const saved: AtlasCommand[] = [];
+	const selected: (string | null)[] = [];
+	const ui = await mount(() => (
+		<AtlasPanel
+			atlas={{
+				snapshot,
+				error: null,
+				refresh: async () => {},
+				save: async (c) => {
+					saved.push(c);
+				},
+			}}
+			selectedId={id}
+			onSelect={(v) => {
+				selected.push(v);
+			}}
+			onClose={() => {}}
+			propositions={[]}
+		/>
+	));
+	const press = async (label: string) => {
+		await act(async () => {
+			[...ui.document.querySelectorAll("button")].find((b) => b.textContent === label)!.click();
+		});
+	};
+	try {
+		await press("Edit concept");
+		await press("Delete concept");
+		assert.equal(saved.length, 0);
+		assert(ui.document.body.textContent!.includes("Propositions stay"));
+		await press("Confirm delete concept");
+		assert.deepEqual(saved, [{ kind: "concept-delete", id, expectedRevision: 1 }]);
+		assert.deepEqual(selected, [null]);
+	} finally {
+		await ui.close();
+	}
+});
+
+test("link removal requires confirmation and preserves the draft after a rejected delete", async () => {
+	const attempts: AtlasCommand[] = [];
+	const relation = {
+		id: "ar_00000000-0000-4000-8000-000000000001",
+		sourceId: id,
+		targetId: "ac_00000000-0000-4000-8000-000000000002",
+		relationType: "analogy" as const,
+		conditions: "",
+		claimStatus: "hypothesis" as const,
+		reviewStatus: "proposed" as const,
+		evidence: [],
+		revision: 2,
+		createdAt: "2026-10-28T00:00:00Z",
+		updatedAt: "2026-10-28T00:00:00Z",
+		contentHash: "fixture",
+	};
+	const ui = await mount(() => (
+		<AtlasRelations
+			conceptId={id}
+			snapshot={{ ...snapshot, relations: [relation] }}
+			onSelect={() => {}}
+			save={async (c) => {
+				attempts.push(c);
+				throw new Error("Stale delete");
+			}}
+		/>
+	));
+	const press = async (text: string) => {
+		await act(async () => {
+			[...ui.document.querySelectorAll("button")].find((b) => b.textContent === text)!.click();
+		});
+	};
+	try {
+		await press("Edit link");
+		await press("Delete link");
+		assert.equal(attempts.length, 0);
+		await press("Confirm delete link");
+		assert.deepEqual(attempts, [{ kind: "relation-delete", id: relation.id, expectedRevision: 2 }]);
+		assert(ui.document.body.textContent!.includes("Stale delete"));
+		assert(ui.document.querySelector("select"));
+	} finally {
+		await ui.close();
+	}
+});

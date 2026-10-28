@@ -8,7 +8,8 @@ It reuses the existing canvas and SSE transport. The formal JSONL graph remains
 authoritative. Typed concept links add separate claim/review states, citation
 references and revision history; see [link semantics and schema v3](atlas-relations.md).
 Read-only concept path queries and temporary graph focus reuse that snapshot; see
-[query semantics and bounds](atlas-queries.md). See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
+[query semantics and bounds](atlas-queries.md). Schema v4 adds archives for confirmed
+concept/link removal; [demo and removal details](atlas-demo-and-removal.md). See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
 
 ## Research Atlas credential-storage update — 28 October 2026
 
