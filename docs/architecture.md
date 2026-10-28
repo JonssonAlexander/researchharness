@@ -1,5 +1,13 @@
 # Learning Harness — Architecture
 
+## Research Atlas foundation update — 28 October 2026
+
+The first Atlas extension adds manually curated concepts, subjects, many-to-many
+memberships and canonical proposition references in `LH_DATA_DIR/atlas.sqlite`.
+It reuses the existing canvas and SSE transport. The formal JSONL graph remains
+authoritative. Typed concept links add separate claim/review states, citation
+references and revision history; see [link semantics and schema v3](atlas-relations.md). See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
+
 ## Research Atlas credential-storage update — 28 October 2026
 
 The Research Atlas fork changes ChatGPT OAuth storage on macOS (R16). Both the Node/browser owner and Electron main select `credentialStore` from `electron/chatgpt-keychain.cjs`. It uses `@napi-rs/keyring` 2.1.2 to store credential-bearing records in macOS Keychain; the local `chatgpt-credentials.json` becomes a nonsecret locator. Empty zero-account records may remain inline. A durable intent record and verified immutable Keychain entries handle migration, refresh rotation and cleanup recovery. Failure blocks this connection without falling back to plaintext.

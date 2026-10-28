@@ -83,6 +83,9 @@ export interface CanvasNode {
 	x: number;
 	y: number;
 	label: string;
+	/** Atlas concepts are anchored, coloured rings; propositions retain their fill. */
+	color?: string;
+	fixed?: boolean;
 }
 
 /** One directed edge of the DERIVED view (chains-primary, 2026-09-30):
@@ -108,6 +111,7 @@ export interface CanvasCluster {
 	id: string;
 	label: string | null;
 	members: string[];
+	color?: string;
 }
 
 /** Theme colors, resolved to #rrggbb by the caller (canvas wants hex,
@@ -122,6 +126,8 @@ export interface CanvasColors {
 export interface CanvasData {
 	nodes: CanvasNode[];
 	edges: CanvasEdge[];
+	/** Non-logical, accepted concept links. Excluded from formal layout/derivation. */
+	semanticEdges?: CanvasEdge[];
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
 	 *  drawn edges (legacy). Optional so non-graph callers of the
@@ -637,13 +643,15 @@ export class GraphCanvasRenderer {
 	private geoVersion = 0; // bump = geometry inputs changed
 	private builtVersion = -1; // version the cache was built at
 	private nodesPath: Path2D | null = null;
+	private coloredNodes = new Map<string, Path2D>();
+	private semanticPath = new Path2D();
 	private shaftsPath: Path2D = new Path2D();
 	private headsPath: Path2D = new Path2D();
 	private regionCanvas: HTMLCanvasElement | null = null;
 	/** World rect the bitmap covers (drawImage target coords). */
 	private regionRect: { minX: number; minY: number; w: number; h: number } | null = null;
 	/** Region labels: cluster centroid + hue, computed at splat build. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number }[] = [];
+	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number; color?: string }[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -964,7 +972,7 @@ export class GraphCanvasRenderer {
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
-		if (node && this.sim) {
+		if (node && this.sim && !node.fixed) {
 			// Node press: pin the node (at ITS OWN position — the cursor
 			// may be inside the pick pad, off-center). preventDefault kills
 			// the compatibility mousedown, so d3-zoom never starts a pan.
@@ -1239,12 +1247,23 @@ export class GraphCanvasRenderer {
 		// Node discs: one Path2D, one fill() per frame. Implication nodes
 		// are pure geometry — never a disc, never a label, never picked.
 		const nodesPath = new Path2D();
+		this.coloredNodes = new Map();
 		for (const n of data.nodes) {
 			if (!isVisible(n.id) || isImpNodeId(n.id)) continue;
-			nodesPath.moveTo(n.x + nodeR, n.y);
-			nodesPath.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
+			const disc = n.color ? (this.coloredNodes.get(n.color) ?? new Path2D()) : nodesPath;
+			if (n.color) this.coloredNodes.set(n.color, disc);
+			disc.moveTo(n.x + nodeR, n.y);
+			disc.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
 		}
 		this.nodesPath = nodesPath;
+		this.semanticPath = new Path2D();
+		for (const edge of data.semanticEdges ?? []) {
+			if (!isVisible(edge.from) || !isVisible(edge.to)) continue;
+			const from = this.nodeById.get(edge.from), to = this.nodeById.get(edge.to);
+			if (!from || !to) continue;
+			this.semanticPath.moveTo(from.x, from.y);
+			this.semanticPath.lineTo(to.x, to.y);
+		}
 
 		// Edge shafts + arrowheads (rendering arc, owner 2026-09-30): all
 		// arrows are PLAIN single shafts — the old double-shaft glyph is
@@ -1333,6 +1352,11 @@ export class GraphCanvasRenderer {
 							center: this.simCenter,
 						},
 		});
+		for (const node of this.sim.nodes())
+			if (this.nodeById.get(node.id)?.fixed) {
+				node.fx = node.x;
+				node.fy = node.y;
+			}
 		this.simById = new Map(data.nodes.map((n) => [n.id, n as LayoutNode]));
 		// Hygiene (2026-09-23 fix wave): a fresh sim starts at alpha 1 and
 		// never decays while stopped — so the first post-rebuild drag would
@@ -1414,6 +1438,7 @@ export class GraphCanvasRenderer {
 					cx: sumX / members,
 					cy: sumY / members,
 					hue: clusterHue(cluster.id),
+					color: cluster.color,
 					lines: null,
 				});
 			}
@@ -1505,7 +1530,7 @@ export class GraphCanvasRenderer {
 			// counted spot (user report 2026-09-14). At alpha 1 the alpha
 			// channel is a pure coverage indicator: overlaps of any count
 			// contribute exactly 1.0.
-			rctx.strokeStyle = `hsla(${hue}, 65%, 60%, 1)`;
+			rctx.strokeStyle = cluster.color ?? `hsla(${hue}, 65%, 60%, 1)`;
 			rctx.beginPath();
 			// Endpoints actually covered by a stroke's round caps.
 			const touched = new Set<string>();
@@ -1534,7 +1559,7 @@ export class GraphCanvasRenderer {
 			// radius as a round cap = dilation) covers exactly the members no
 			// stroke reached: every member is painted by its edges' caps OR
 			// one disc, never both — the no-double-counting rule survives.
-			rctx.fillStyle = `hsla(${hue}, 65%, 60%, 1)`;
+			rctx.fillStyle = cluster.color ?? `hsla(${hue}, 65%, 60%, 1)`;
 			const discR = dilationW / cell;
 			for (const id of cluster.members) {
 				if (touched.has(id) || !isVisible(id)) continue;
@@ -1661,9 +1686,23 @@ export class GraphCanvasRenderer {
 			ctx.fill(this.headsPath);
 		}
 
+		if (settings.edgeWidth > 0) {
+			ctx.save();
+			ctx.strokeStyle = data.colors.edge;
+			ctx.lineWidth = settings.edgeWidth / k;
+			ctx.setLineDash([5 / k, 5 / k]);
+			ctx.stroke(this.semanticPath);
+			ctx.restore();
+		}
+
 		// 4. Nodes: one cached Path2D, one fill.
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
+		for (const [color, disc] of this.coloredNodes) {
+			ctx.strokeStyle = color;
+			ctx.lineWidth = Math.max(0.8, this.world.nodeR * 0.3);
+			ctx.stroke(disc);
+		}
 
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).
@@ -1689,8 +1728,8 @@ export class GraphCanvasRenderer {
 				: this.hoverNode;
 			if (n) {
 				const glow = ctx.createRadialGradient(n.x, n.y, nodeR, n.x, n.y, glowOuter);
-				glow.addColorStop(0, rgbaFromHex(data.colors.node, GLOW_ALPHA * this.hoverFade));
-				glow.addColorStop(1, rgbaFromHex(data.colors.node, 0));
+				glow.addColorStop(0, rgbaFromHex(n.color ?? data.colors.node, GLOW_ALPHA * this.hoverFade));
+				glow.addColorStop(1, rgbaFromHex(n.color ?? data.colors.node, 0));
 				ctx.fillStyle = glow;
 				ctx.beginPath();
 				ctx.arc(n.x, n.y, glowOuter, 0, Math.PI * 2);
@@ -1725,7 +1764,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
-				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				ctx.fillStyle = rm.color ? rgbaFromHex(rm.color, 0.85) : `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

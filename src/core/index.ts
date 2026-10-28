@@ -16,6 +16,8 @@
  */
 
 export * from "./contracts.ts";
+export * from "./atlas.ts";
+export * from "./atlas-relations.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./render-settings.ts";

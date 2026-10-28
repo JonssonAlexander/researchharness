@@ -43,7 +43,7 @@ const RUNTIME = ELECTRON_MODE ? createRequire(import.meta.url)("electron") : pro
 const POLL_MS = 500;
 const BOOT_TIMEOUT_MS = 30_000;
 /** GET-only probes — the routes that exercised today's failure class. */
-const PROBES = ["/api/graph", "/api/models", "/api/settings", "/api/graph/status", "/api/graph/render-settings"];
+const PROBES = ["/api/graph", "/api/models", "/api/settings", "/api/graph/status", "/api/graph/render-settings", "/api/atlas"];
 
 if (!fs.existsSync(SERVER)) {
 	console.error("[smoke-server] .next/standalone/server.js missing — run next build first.");

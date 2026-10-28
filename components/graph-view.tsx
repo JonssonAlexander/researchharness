@@ -67,7 +67,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, projectAtlas, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -77,6 +77,7 @@ import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { Hint } from "@/components/ui/hint";
+import { AtlasPanel, useAtlas } from "./atlas-panel";
 import {
 	ARROW_LENGTH_LADDER,
 	CHARGE_RANGE,
@@ -979,6 +980,11 @@ export function GraphView({
 	const cardRef = useRef<HTMLDivElement | null>(null);
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
+	const atlas = useAtlas();
+	const atlasRef = useRef(atlas.snapshot);
+	atlasRef.current = atlas.snapshot;
+	const [atlasOpen, setAtlasOpen] = useState(false);
+	const [conceptId, setConceptId] = useState<string | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
 	// constructed once, so they read through this ref, never a closure).
 	const snapshotRef = useRef<GraphSnapshot | null>(null);
@@ -1068,8 +1074,12 @@ export function GraphView({
 			for (const node of snapshot.nodes) {
 				if (isNodeVisible(node, query)) set.add(node.id);
 			}
+		for (const concept of atlas.snapshot.concepts) {
+			if ([concept.title, ...concept.aliases].some((s) => s.toLowerCase().includes(query.trim().toLowerCase())))
+				set.add(concept.id);
+		}
 		return set;
-	}, [snapshot, query]);
+	}, [snapshot, atlas.snapshot, query]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1302,7 +1312,7 @@ export function GraphView({
 	// Construct the renderer once the canvas exists; destroy when it goes
 	// away (the empty-graph placeholder replaces it). The callbacks are
 	// created once and read through refs, so they never go stale.
-	const isEmpty = snapshot === null || snapshot.nodes.length === 0;
+	const isEmpty = (snapshot === null || snapshot.nodes.length === 0) && atlas.snapshot.concepts.length === 0;
 	useEffect(() => {
 		if (isEmpty) return;
 		const canvas = canvasRef.current;
@@ -1346,6 +1356,12 @@ export function GraphView({
 			canvas,
 			{
 				onSelect: (nodeId, pos) => {
+					if (atlasRef.current.concepts.some((c) => c.id === nodeId)) {
+						setConceptId(nodeId);
+						setAtlasOpen(true);
+						setSelected(null);
+						return;
+					}
 					const snap = snapshotRef.current;
 					const node = snap?.nodes.find((n) => n.id === nodeId);
 					if (!snap || !node) return;
@@ -1381,6 +1397,7 @@ export function GraphView({
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
 				onCommit: (positions) => {
+					posRef.current = new Map(Object.entries(positions));
 					void fetch("/api/graph/positions", {
 						method: "PUT",
 						headers: { "Content-Type": "application/json" },
@@ -1413,19 +1430,27 @@ export function GraphView({
 	// the construct effect, so the renderer exists and positions are fresh.
 	useEffect(() => {
 		const renderer = rendererRef.current;
-		const positions = posRef.current;
-		if (!renderer || !snapshot || snapshot.nodes.length === 0 || !positions) return;
+		const positions = posRef.current ?? new Map();
+		if (!renderer || !snapshot) return;
+		const projection = projectAtlas(atlas.snapshot);
 		renderer.setData({
-			nodes: snapshot.nodes.map((n) => ({
-				id: n.id,
-				x: positions.get(n.id)?.x ?? 0,
-				y: positions.get(n.id)?.y ?? 0,
-				label: n.name,
-			})),
+			nodes: [
+				...snapshot.nodes.map((n) => ({
+					id: n.id,
+					x: positions.get(n.id)?.x ?? 0,
+					y: positions.get(n.id)?.y ?? 0,
+					label: n.name,
+				})),
+				...projection.nodes,
+			],
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
+			semanticEdges: projection.semanticEdges,
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks,
-			clusters: snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
+			clusters: [
+				...snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
+				...projection.clusters,
+			],
 			colors: {
 				node: tokenHex(NODE_COLOR_TOKEN),
 				edge: tokenHex("--ring"),
@@ -1435,7 +1460,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty]);
+	}, [snapshot, atlas.snapshot, isEmpty]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1493,6 +1518,10 @@ export function GraphView({
 
 	return (
 		<div className="relative h-full w-full">
+			{atlasOpen && (
+				<AtlasPanel atlas={atlas} selectedId={conceptId} onSelect={setConceptId}
+					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} />
+			)}
 			{isEmpty ? (
 				// The empty graph keeps the first action clear without zero-valued statistics.
 				<div className="flex h-full w-full items-center justify-center px-4">
@@ -1598,6 +1627,7 @@ export function GraphView({
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
+				<button type="button" aria-expanded={atlasOpen} onClick={() => setAtlasOpen((open) => !open)} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Atlas</button>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}

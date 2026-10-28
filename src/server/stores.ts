@@ -10,6 +10,9 @@ import { chatStore } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
+import path from "node:path";
+import { PATHS } from "../../config.ts";
+import { createAtlasStore } from "../store/atlas.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
@@ -17,6 +20,7 @@ export const stores = {
 	graphStore,
 	jobStore,
 	settingsStore,
+	atlasStore: createAtlasStore(path.join(PATHS.data, "atlas.sqlite")),
 };
 
 export type Stores = typeof stores;

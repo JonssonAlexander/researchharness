@@ -1,0 +1,360 @@
+import fs from "node:fs";
+import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import {
+	AtlasError,
+	atlasCommandSchema,
+	atlasConceptId,
+	assertSubjectParent,
+	type AtlasCommand,
+	type AtlasConcept,
+	type AtlasSnapshot,
+	type AtlasStore,
+	type AtlasSubject,
+} from "../core/atlas.ts";
+
+import { atlasRelationSchema, normalizeRelation, type AtlasRelation } from "../core/atlas-relations.ts";
+
+const SCHEMA = `
+CREATE TABLE subjects (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL, color TEXT NOT NULL,
+ parentId TEXT REFERENCES subjects(id), revision INTEGER NOT NULL CHECK(revision > 0),
+ x REAL NOT NULL, y REAL NOT NULL
+) STRICT;
+CREATE TABLE concepts (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL, aliases TEXT NOT NULL CHECK(json_valid(aliases)),
+ preferredSubjectId TEXT, revision INTEGER NOT NULL CHECK(revision > 0), x REAL NOT NULL, y REAL NOT NULL,
+ FOREIGN KEY(id, preferredSubjectId) REFERENCES concept_subjects(conceptId, subjectId) DEFERRABLE INITIALLY DEFERRED
+) STRICT;
+CREATE TABLE concept_subjects (
+ conceptId TEXT REFERENCES concepts(id), subjectId TEXT REFERENCES subjects(id),
+ PRIMARY KEY(conceptId, subjectId)
+) STRICT;
+CREATE TABLE concept_propositions (
+ conceptId TEXT REFERENCES concepts(id), propositionId TEXT NOT NULL,
+ PRIMARY KEY(conceptId, propositionId)
+) STRICT;
+PRAGMA user_version = 1;`;
+
+/** Short synchronous transactions; no process-global DB handle or native addon. */
+export function createAtlasStore(file: string): AtlasStore {
+	function database<T>(run: (db: DatabaseSync) => T): T {
+		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+		if (fs.existsSync(file) && !fs.lstatSync(file).isFile())
+			throw new AtlasError("Atlas database must be a regular file.");
+		if (!fs.existsSync(file)) fs.closeSync(fs.openSync(file, "wx", 0o600));
+		const db = new DatabaseSync(file, { timeout: 1000 });
+		try {
+			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
+			if (version > 3)
+				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
+			if (version === 0) {
+				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+				if (tables.length) throw new AtlasError("Unrecognized Atlas database; no changes were made.", 409);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(SCHEMA);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+			db.exec("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;");
+			if (version < 2) {
+				// Preserve a recoverable v1 baseline before changing an existing database.
+				if (version === 1) db.prepare("VACUUM INTO ?").run(`${file}.v1-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`ALTER TABLE concepts ADD COLUMN markdownPath TEXT;
+CREATE TABLE subject_archive (id TEXT PRIMARY KEY, record TEXT NOT NULL, removedAt TEXT NOT NULL) STRICT;
+PRAGMA user_version = 2;`);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+			if (version < 3) {
+				if (version === 2) db.prepare("VACUUM INTO ?").run(`${file}.v2-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`CREATE TABLE relations (
+ id TEXT PRIMARY KEY, sourceId TEXT NOT NULL REFERENCES concepts(id), targetId TEXT NOT NULL REFERENCES concepts(id),
+ relationType TEXT NOT NULL, conditions TEXT NOT NULL, claimStatus TEXT NOT NULL, reviewStatus TEXT NOT NULL,
+ evidence TEXT NOT NULL CHECK(json_valid(evidence)), revision INTEGER NOT NULL CHECK(revision > 0),
+ createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, contentHash TEXT NOT NULL,
+ CHECK(sourceId != targetId), UNIQUE(sourceId, targetId, relationType, conditions)
+) STRICT;
+CREATE TABLE relation_revisions (
+ id TEXT NOT NULL REFERENCES relations(id), revision INTEGER NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)),
+ PRIMARY KEY(id, revision)
+) STRICT;
+PRAGMA user_version = 3;`);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+			return run(db);
+		} finally {
+			db.close();
+		}
+	}
+	function notePath(id: string, hash: string): string {
+		atlasConceptId.parse(id);
+		if (!/^[a-f0-9]{64}$/.test(hash)) throw new AtlasError("Invalid note reference.", 500);
+		const directory = path.join(path.dirname(file), "concepts");
+		if (fs.existsSync(directory) && !fs.lstatSync(directory).isDirectory())
+			throw new AtlasError("Notes must be a regular directory.", 500);
+		return path.join(directory, `${id}-${hash}.md`);
+	}
+	const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+	function readNote(id: string, hash: string | null): string {
+		if (!hash) return "";
+		const target = notePath(id, hash);
+		if (!fs.lstatSync(target).isFile()) throw new AtlasError("Note must be a regular file.", 500);
+		const text = fs.readFileSync(target, "utf8");
+		if (digest(text) !== hash)
+			throw new AtlasError("Note changed outside Atlas. Restore its saved revision before editing.", 409);
+		return text;
+	}
+	function writeNote(id: string, text: string): string | null {
+		if (!text) return null;
+		const hash = digest(text),
+			target = notePath(id, hash);
+		fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		if (fs.existsSync(target)) readNote(id, hash);
+		else {
+			const fd = fs.openSync(target, "wx", 0o600);
+			try {
+				fs.writeFileSync(fd, text);
+				fs.fsyncSync(fd);
+			} finally {
+				fs.closeSync(fd);
+			}
+			if (process.platform !== "win32") {
+				const dir = fs.openSync(path.dirname(target), "r");
+				try {
+					fs.fsyncSync(dir);
+				} finally {
+					fs.closeSync(dir);
+				}
+			}
+		}
+		return hash;
+	}
+	function snapshot(db: DatabaseSync): AtlasSnapshot {
+		if (db.prepare("PRAGMA foreign_key_check").all().length)
+			throw new AtlasError("Broken Atlas references.", 500);
+		const subjects = db.prepare("SELECT * FROM subjects ORDER BY rowid").all() as unknown as AtlasSubject[];
+		const concepts = db
+			.prepare("SELECT * FROM concepts ORDER BY rowid")
+			.all()
+			.map((row) => {
+				const subjectIds = db
+					.prepare("SELECT subjectId FROM concept_subjects WHERE conceptId = ? ORDER BY subjectId")
+					.all(row.id!)
+					.map((s) => String(s.subjectId));
+				const propositionIds = db
+					.prepare(
+						"SELECT propositionId FROM concept_propositions WHERE conceptId = ? ORDER BY propositionId",
+					)
+					.all(row.id!)
+					.map((p) => String(p.propositionId));
+				const { markdownPath, ...record } = row;
+				return {
+					...record,
+					markdown: readNote(String(row.id), markdownPath as string | null),
+					aliases: JSON.parse(String(row.aliases)),
+					subjectIds,
+					propositionIds,
+				} as unknown as AtlasConcept;
+			});
+		// Validate persisted rows rather than silently accepting malformed extension data.
+		for (const [kind, rows] of [
+			["subject", subjects],
+			["concept", concepts],
+		] as const)
+			for (const row of rows) {
+				const { revision, x, y, ...input } = row;
+				if (!Number.isSafeInteger(revision) || revision < 1 || !Number.isFinite(x) || !Number.isFinite(y))
+					throw new AtlasError("Invalid Atlas record.", 500);
+				atlasCommandSchema.parse({ ...input, kind, expectedRevision: revision });
+			}
+		for (const subject of subjects) assertSubjectParent(subjects, subject.id, subject.parentId);
+		const relations = db
+			.prepare("SELECT * FROM relations ORDER BY rowid")
+			.all()
+			.map((row) => {
+				const { revision, createdAt, updatedAt, contentHash, ...input } = row;
+				const command = atlasRelationSchema.parse({
+					...input,
+					evidence: JSON.parse(String(row.evidence)),
+					kind: "relation",
+					expectedRevision: revision,
+				});
+				const normalized = normalizeRelation(command);
+				if (
+					normalized.sourceId !== command.sourceId ||
+					!Number.isSafeInteger(revision) ||
+					Number(revision) < 1 ||
+					!Number.isFinite(Date.parse(String(createdAt))) ||
+					!Number.isFinite(Date.parse(String(updatedAt))) ||
+					digest(JSON.stringify(command)) !== contentHash
+				)
+					throw new AtlasError("Invalid Atlas relation record.", 500);
+				const { kind: _kind, expectedRevision: _expected, ...fields } = command;
+				return { ...fields, revision, createdAt, updatedAt, contentHash } as AtlasRelation;
+			});
+		return { subjects, concepts, relations };
+	}
+	return {
+		read: () => database(snapshot),
+		save: (input: AtlasCommand) =>
+			database((db) => {
+				const command = atlasCommandSchema.parse(input);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					const current = snapshot(db);
+					const rows =
+						command.kind === "relation"
+							? current.relations
+							: command.kind === "concept"
+								? current.concepts
+								: current.subjects;
+					const previous = rows.find((r) => r.id === command.id);
+					if ((previous?.revision ?? 0) !== command.expectedRevision)
+						throw new AtlasError("This item changed. Reload it before saving.", 409);
+					if (command.kind === "relation") {
+						const relation = normalizeRelation(command);
+						if (
+							![relation.sourceId, relation.targetId].every((id) => current.concepts.some((c) => c.id === id))
+						)
+							throw new AtlasError("A linked concept no longer exists.", 409);
+						if (
+							current.relations.some(
+								(r) =>
+									r.id !== relation.id &&
+									r.sourceId === relation.sourceId &&
+									r.targetId === relation.targetId &&
+									r.relationType === relation.relationType &&
+									r.conditions === relation.conditions,
+							)
+						)
+							throw new AtlasError("This link already exists. Edit the existing link.", 409);
+						const revision = command.expectedRevision + 1,
+							now = new Date().toISOString();
+						const contentHash = digest(JSON.stringify({ ...relation, expectedRevision: revision }));
+						const createdAt = previous && "createdAt" in previous ? previous.createdAt : now;
+						db.prepare(
+							`INSERT INTO relations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET sourceId=excluded.sourceId, targetId=excluded.targetId, relationType=excluded.relationType,
+conditions=excluded.conditions, claimStatus=excluded.claimStatus, reviewStatus=excluded.reviewStatus, evidence=excluded.evidence,
+revision=excluded.revision, updatedAt=excluded.updatedAt, contentHash=excluded.contentHash`,
+						).run(
+							relation.id,
+							relation.sourceId,
+							relation.targetId,
+							relation.relationType,
+							relation.conditions,
+							relation.claimStatus,
+							relation.reviewStatus,
+							JSON.stringify(relation.evidence),
+							revision,
+							createdAt,
+							now,
+							contentHash,
+						);
+						db.prepare("INSERT INTO relation_revisions VALUES (?, ?, ?)").run(
+							relation.id,
+							revision,
+							JSON.stringify({
+								...relation,
+								expectedRevision: revision,
+								createdAt,
+								updatedAt: now,
+								contentHash,
+							}),
+						);
+					} else if (command.kind === "subject-delete") {
+						if (!previous) throw new AtlasError("Subject no longer exists.", 409);
+						if (
+							current.concepts.some((c) => c.subjectIds.includes(command.id)) ||
+							current.subjects.some((s) => s.parentId === command.id)
+						)
+							throw new AtlasError(
+								"Move this subject's concepts and child subjects before deleting it.",
+								409,
+							);
+						db.prepare("INSERT INTO subject_archive VALUES (?, ?, ?)").run(
+							command.id,
+							JSON.stringify(previous),
+							new Date().toISOString(),
+						);
+						db.prepare("DELETE FROM subjects WHERE id = ?").run(command.id);
+					} else if (command.kind === "subject") {
+						if (db.prepare("SELECT id FROM subject_archive WHERE id = ?").get(command.id))
+							throw new AtlasError("This subject was removed. Create a new subject instead.", 409);
+						assertSubjectParent(current.subjects, command.id, command.parentId);
+						const index = current.subjects.length;
+						db.prepare(
+							`INSERT INTO subjects VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET title=excluded.title, color=excluded.color, parentId=excluded.parentId, revision=excluded.revision`,
+						).run(
+							command.id,
+							command.title,
+							command.color,
+							command.parentId,
+							command.expectedRevision + 1,
+							previous && "x" in previous ? previous.x : 600 + (index % 4) * 360,
+							previous && "y" in previous ? previous.y : Math.floor(index / 4) * 360,
+						);
+					} else {
+						if (command.subjectIds.some((id) => !current.subjects.some((s) => s.id === id)))
+							throw new AtlasError("A selected subject no longer exists.");
+						const anchor = current.subjects.find((s) => s.id === command.preferredSubjectId);
+						const index = current.concepts.filter(
+							(c) => c.preferredSubjectId === command.preferredSubjectId,
+						).length;
+						const angle = index * 2.3999632297,
+							radius = 40 + Math.sqrt(index) * 24;
+						const keepPosition =
+							previous &&
+							"preferredSubjectId" in previous &&
+							previous.preferredSubjectId === command.preferredSubjectId;
+						db.prepare(
+							`INSERT INTO concepts VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET title=excluded.title, aliases=excluded.aliases, preferredSubjectId=excluded.preferredSubjectId, revision=excluded.revision, x=excluded.x, y=excluded.y, markdownPath=excluded.markdownPath`,
+						).run(
+							command.id,
+							command.title,
+							JSON.stringify(command.aliases),
+							command.preferredSubjectId,
+							command.expectedRevision + 1,
+							keepPosition ? previous.x : (anchor?.x ?? -600) + Math.cos(angle) * radius,
+							keepPosition ? previous.y : (anchor?.y ?? 0) + Math.sin(angle) * radius,
+							writeNote(
+								command.id,
+								command.markdown ?? (previous && "markdown" in previous ? (previous.markdown ?? "") : ""),
+							),
+						);
+						for (const [table, column, ids] of [
+							["concept_subjects", "subjectId", command.subjectIds],
+							["concept_propositions", "propositionId", command.propositionIds],
+						] as const) {
+							db.prepare(`DELETE FROM ${table} WHERE conceptId = ?`).run(command.id);
+							const insert = db.prepare(`INSERT INTO ${table}(conceptId, ${column}) VALUES (?, ?)`);
+							for (const id of ids) insert.run(command.id, id);
+						}
+					}
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			}),
+	};
+}

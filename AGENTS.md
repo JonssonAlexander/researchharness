@@ -407,6 +407,18 @@ Required coverage:
 
 ## 17. Phased implementation with exit criteria
 
+Implementation progress, 28 October 2026: the first Phase 2 slice provides manual
+concept/subject editing, memberships, canonical proposition links and persistent
+single-placement canvas projection. See [the as-built Atlas foundation](docs/atlas-foundation.md)
+for schema, validation and outstanding work. Phase 2 is not complete.
+Typed concept links are now implemented as an additional bounded slice; see
+[typed link semantics, schema v3 and limits](docs/atlas-relations.md).
+
+Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
+requires their manual reassignment, confirms removal and archives the subject.
+Concept notes use revision-checked Markdown files with retained content-addressed
+versions. See the as-built document for schema v2 migration and backup details.
+
 Every phase leaves teaching, graph, practice, research and dictation functional. Do not implement advanced scheduling or a large agent hierarchy before the basic integration is trustworthy.
 
 | Phase | Scope | Required exit evidence |
