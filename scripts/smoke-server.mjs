@@ -24,7 +24,7 @@
  * leaked server holds its port against the next run (learned the hard
  * way, same day).
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { probeEnv, verifyDemoRuntime } from "./smoke-demo-runtime.mjs";
 import { verifyProviderRuntime } from "./smoke-provider-runtime.mjs";
 import { createRequire } from "node:module";
@@ -43,7 +43,7 @@ const RUNTIME = ELECTRON_MODE ? createRequire(import.meta.url)("electron") : pro
 const POLL_MS = 500;
 const BOOT_TIMEOUT_MS = 30_000;
 /** GET-only probes — the routes that exercised today's failure class. */
-const PROBES = ["/api/graph", "/api/models", "/api/settings"];
+const PROBES = ["/api/graph", "/api/models", "/api/settings", "/api/graph/status", "/api/graph/render-settings"];
 
 if (!fs.existsSync(SERVER)) {
 	console.error("[smoke-server] .next/standalone/server.js missing — run next build first.");
@@ -63,9 +63,9 @@ function freePort() {
 }
 
 /** One GET; resolves the status code (0 = connection refused/failed). */
-function get(url) {
+function get(url, headers = {}) {
 	return new Promise((resolve) => {
-		const req = http.get(url, (res) => {
+		const req = http.get(url, { headers }, (res) => {
 			res.resume();
 			resolve(res.statusCode ?? 0);
 		});
@@ -83,6 +83,16 @@ async function main() {
 	verifyDemoRuntime(STANDALONE, RUNTIME);
 	// /api/models only reads catalogs; initialize the real lazy SDK offline too.
 	verifyProviderRuntime(STANDALONE, RUNTIME);
+	// Initialize the actual native binding in the shipped runtime without reading
+	// Keychain or credentials. The secret-store exercise remains explicitly opt-in.
+	if (process.platform === "darwin") {
+		const probe = spawnSync(RUNTIME, [path.join(ROOT, "scripts", "smoke-chatgpt-keychain.cjs"), "--standalone", STANDALONE], {
+			env: { PATH: process.env.PATH, ELECTRON_RUN_AS_NODE: "1" },
+			encoding: "utf8", timeout: 30000, maxBuffer: 16384,
+		});
+		if (probe.status !== 0 || probe.error) throw new Error("standalone Keychain native binding failed to initialize");
+		process.stdout.write(probe.stdout);
+	}
 	const port = await freePort();
 	const url = `http://127.0.0.1:${port}`;
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-smoke-"));
@@ -166,6 +176,11 @@ async function main() {
 			if (status !== 200) throw new Error(`GET ${route} → ${status} (expected 200)`);
 			console.log(`[smoke-server] GET ${route} → 200`);
 		}
+		// Nested redirect routing must reach the handler, not a Next HTML 404.
+		// A fabricated action cannot contact a provider or consume an actual login.
+		const browserStatus = await get(url + "/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001", { "sec-fetch-site": "same-origin" });
+		if (browserStatus !== 410) throw new Error(`GET sign-in redirect with fabricated ID → ${browserStatus} (expected 410)`);
+		console.log("[smoke-server] sign-in redirect handler → 410 for fabricated ID");
 	} catch (err) {
 		failed = err;
 	} finally {

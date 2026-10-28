@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-28",
+  "timezone": "Europe/Stockholm",
+  "revision": "1dea13aeea11786090722faea9aab2133c278f4a",
+  "upstream_revision": "3dd52110bbcbcba81645453ce0a8fdc230594c47",
+  "platform": "macOS 26.0.1 arm64",
+  "node": "26.10.0",
+  "npm": "11.19.1",
+  "next": "16.3.2",
+  "react": "19.2.8",
+  "electron": "44.9.3",
+  "package_lock_sha256": "e45fc7b873e51997d4e460b64c7c042eee08370a261a795447847c48d88d385b",
+  "exit_codes": {
+    "typecheck": 0,
+    "lint": 0,
+    "test": 0,
+    "build": 0,
+    "native": 0,
+    "provider-runtime": 0,
+    "server-payload": 0,
+    "standalone-electron": 0
+  },
+  "tests": {
+    "passed": 2517,
+    "failed": 0,
+    "skipped": 0,
+    "duration_ms": 116270.253709
+  },
+  "electron_native_tests": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0,
+    "duration_ms": 19441.143958
+  },
+  "dev_http": [
+    {
+      "route": "/",
+      "status": 200,
+      "bytes": 45080,
+      "content_type": "text/html; charset=utf-8",
+      "has_setup_cta": true
+    },
+    {
+      "route": "/chat/new",
+      "status": 200,
+      "bytes": 44038,
+      "content_type": "text/html; charset=utf-8"
+    },
+    {
+      "route": "/chat/new?mode=practice",
+      "status": 200,
+      "bytes": 45188,
+      "content_type": "text/html; charset=utf-8"
+    },
+    {
+      "route": "/api/graph",
+      "status": 200,
+      "bytes": 148,
+      "content_type": "application/json",
+      "json_keys": [
+        "nodes",
+        "propositions",
+        "edges",
+        "logicalEdges",
+        "impLinks",
+        "chains",
+        "sessions",
+        "fileSources",
+        "nodeSessions",
+        "clusters"
+      ]
+    },
+    {
+      "route": "/api/models",
+      "status": 200,
+      "bytes": 2753,
+      "content_type": "application/json"
+    },
+    {
+      "route": "/api/settings",
+      "status": 200,
+      "bytes": 17,
+      "content_type": "application/json"
+    }
+  ],
+  "standalone": [
+    {
+      "check": "provider-runtime",
+      "command": [
+        "node",
+        "scripts/smoke-provider-runtime.mjs"
+      ],
+      "exit_code": 0
+    },
+    {
+      "check": "server-payload",
+      "command": [
+        "node",
+        "scripts/build-server.mjs"
+      ],
+      "exit_code": 0
+    },
+    {
+      "check": "standalone-electron",
+      "command": [
+        "node",
+        "scripts/smoke-server.mjs",
+        "--electron"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "visual_interaction_checked": false,
+  "live_provider_calls_checked": false,
+  "dictation_microphone_checked": false,
+  "full_electron_window_checked": false
+}

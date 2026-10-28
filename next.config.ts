@@ -67,6 +67,8 @@ const nextConfig: NextConfig = {
 	// caught it; unit tests run unbundled and never see it.
 	outputFileTracingIncludes: {
 		"*": [
+			"node_modules/@napi-rs/keyring/**/*",
+			"node_modules/@napi-rs/keyring-darwin-*/**/*",
 			// The standalone trace omitted this entire runtime-imported directory
 			// in 0.3.0, so importing puppeteer-core failed before browser startup.
 			"node_modules/@puppeteer/browsers/lib/browser-data/**/*.js",
@@ -102,6 +104,7 @@ const nextConfig: NextConfig = {
 	// The pi engine must stay external: its providers are runtime-loaded Node
 	// code (undici streams, catalog data) that breaks when bundled into routes.
 	serverExternalPackages: [
+		"@napi-rs/keyring", // shared Node/Electron macOS Keychain adapter
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-agent-core",
 		"pdfjs-dist", // sources v0: bundling breaks its node fake-worker path

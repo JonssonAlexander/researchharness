@@ -5,7 +5,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AUTH_FILE } from "../../config.ts";
-import { createChatGPT, fileStore } from "../../electron/chatgpt.cjs";
+import { createChatGPT } from "../../electron/chatgpt.cjs";
+import { credentialStore } from "../../electron/chatgpt-keychain.cjs";
 import { createSubscriptions } from "../../electron/subscriptions.cjs";
 import { chatGPTControl } from "../../electron/chatgpt-ipc.cjs";
 import { subscriptionControl } from "../../electron/subscription-ipc.cjs";
@@ -53,7 +54,7 @@ export function createWebSubscriptionOwner(options: {
 		captured.push(target);
 	};
 	const chatgpt = createChatGPT({
-		store: options.chatgptStore ?? fileStore(path.join(options.directory, "chatgpt-credentials.json")),
+		store: options.chatgptStore ?? credentialStore(path.join(options.directory, "chatgpt-credentials.json")),
 		openExternal,
 		onChange: (packet?: Packet) => { if (packet) notify("lh:chatgpt", packet); },
 	});

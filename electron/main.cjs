@@ -25,7 +25,8 @@
  */
 
 const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
-const { createChatGPT, fileStore } = require("./chatgpt.cjs");
+const { createChatGPT } = require("./chatgpt.cjs");
+const { credentialStore } = require("./chatgpt-keychain.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
@@ -659,7 +660,9 @@ async function main() {
 			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
 		});
 		chatgpt = createChatGPT({
-			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
+			store: credentialStore(path.join(app.getPath("userData"), "chatgpt-credentials.json"), {
+				keyringRoot: app.isPackaged ? path.dirname(serverEntry()) : undefined,
+			}),
 			openExternal: (target) => shell.openExternal(target),
 			onChange: (value) => {
 				chatgptChild?.send(value);

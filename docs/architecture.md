@@ -1,5 +1,11 @@
 # Learning Harness — Architecture
 
+## Research Atlas credential-storage update — 28 October 2026
+
+The Research Atlas fork changes ChatGPT OAuth storage on macOS (R16). Both the Node/browser owner and Electron main select `credentialStore` from `electron/chatgpt-keychain.cjs`. It uses `@napi-rs/keyring` 2.1.2 to store credential-bearing records in macOS Keychain; the local `chatgpt-credentials.json` becomes a nonsecret locator. Empty zero-account records may remain inline. A durable intent record and verified immutable Keychain entries handle migration, refresh rotation and cleanup recovery. Failure blocks this connection without falling back to plaintext.
+
+The existing injected read/write port, OAuth flow, runtime admission, background consent and private token transport remain in place. Other provider/API-key stores and non-macOS behavior are unchanged. See [storage, migration and validation details](credential-storage-plan.md). The older sections below retain the documentation drift identified in `AGENTS.md`; this update does not revalidate their historical practice architecture.
+
 Status: **the canonical architecture spec** — describes the as-built system, verified against the code by a full audit on 2026-09-18 (every file under `src/`, `app/`, `components/`, `electron/`, `scripts/`, the lint config, and the test suite; `lint` and `typecheck` clean on the audited tree). The pre-audit spec is archived at [`docs/archive/architecture-2026-09-08.md`](archive/architecture-2026-09-08.md) — history only. Product reasoning lives in [`docs/vision.md`](vision.md); file-by-file layout lives in the README.
 
 **What this is.** A standalone learning app (web + Electron desktop): the learner's knowledge accumulates into one persistent, cross-session knowledge graph, built from tutoring sessions in which a teacher agent authors a formal, visible dependency tree (the plan tree) and verifies understanding with structured questions. The graph is the home page; the session is the classroom; everything else serves those two.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { after } from "node:test";
+import test, { after, mock } from "node:test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -15,6 +15,14 @@ delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 await fs.writeFile(process.env.LH_AUTH_FILE, "{}", { mode: 0o600 });
 const require = createRequire(import.meta.url);
 const { SCOPES } = require("../electron/chatgpt.cjs");
+// Exercise the real Keychain adapter with an injected vault, never the OS Keychain.
+const keychain = require("../electron/chatgpt-keychain.cjs");
+const vault = new Map<string, string>();
+mock.method(keychain, "credentialStore", (file: string) => keychain.keychainStore(file, { entryFactory: (_service: string, id: string) => ({
+	setPassword: async (value: string) => { vault.set(id, value); },
+	getPassword: async () => vault.get(id) ?? null,
+	deletePassword: async () => vault.delete(id),
+}) }));
 const { createWebSubscriptionOwner, webSubscriptionOwner, webSubscriptionsEnabled } = await import("../src/server/web-subscriptions.ts");
 const { subscriptionControlsResponse, subscriptionBrowserResponse } = await import("../src/server/web-subscription-http.ts");
 const chat = await import("../src/agent/chatgpt-bridge.ts");

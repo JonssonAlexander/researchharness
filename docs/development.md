@@ -1,5 +1,12 @@
 # Development guide
 
+## Research Atlas: ChatGPT credentials on macOS
+
+ChatGPT OAuth records now use macOS Keychain in both `npm run dev` and Electron desktop. Start only one application writer per auth directory. Legacy owner-only ChatGPT JSON migrates on first access after a verified Keychain write; no real account is needed for an empty local instance. macOS may request access separately for Node and Electron. Denial leaves the connection unavailable; do not work around it by copying tokens into source files or API-key fields.
+
+Read [credential storage and recovery](credential-storage-plan.md) before changing the auth directory, restoring credentials, rolling back to upstream, or running a live Keychain test. Ordinary tests use injected dummy stores; `node scripts/smoke-chatgpt-keychain.cjs` only imports the native binding. `--exercise` explicitly opts into real Keychain CRUD with dummy records. `--cross-runtime` additionally tests sharing an item between Node and Electron and may require an OS prompt; it is not part of normal tests.
+
+
 The developer README (split out of the storefront README, 2026-10-10). Everything below is for people working ON LearnHarness, not using it.
 
 A standalone learning app (web + Electron desktop): a **teacher agent** (Next.js; the Vercel AI SDK's `UIMessage` protocol end-to-end, LLM engine [pi-ai](pi-engine-swap.md) via OpenRouter), probe→teach lessons with graded quiz/ask interactions, a formal **session plan tree** the teacher authors once (`plan_init`) and whose progress is derived from tagged quiz calls, and a persistent cross-session **knowledge graph** of what the learner knows — the graph is the app's home page.
@@ -197,3 +204,9 @@ The teaching methodology comes from an Obsidian-based POC (its `knowledge graph 
 Nothing under `data/` is ever tracked by git. Chats, graph ledgers, jobs, positions, and the settings records are plain files (JSON/JSONL) — inspect them freely; they are the canonical records. The desktop app relocates the whole directory via `LH_DATA_DIR`.
 
 **Schema stamps (2026-10-10):** chat records carry `version` (stamped at the store's write choke point; absence reads as v1 — lazy migration, no mass rewrite), and the graph family (ledgers, sources, render-settings) shares one sidecar `graph/format.json`, created on the family's first write. `positions.json` is deliberately unstamped (rebuildable). A record stamped NEWER than the running build is refused on read — honest refusal for the downgrade scenario: a read-modify-write store never rewrites what it doesn't understand.
+
+## Development route-cache recovery — 28 October 2026
+
+During local sign-in verification, several nested dev APIs returned Next HTML 404 pages even though their source files and app manifests existed. Top-level APIs still worked. Stopping the development server, preserving `.next/dev` outside the checkout, and starting with a fresh generated cache restored `/api/graph/status` and the subscription browser handler. App data and credential paths were preserved; there was no change to OAuth permissions or Keychain behavior. Any pending OAuth attempt is invalidated by a server restart and must be started again from the connection dialog.
+
+A separate temporary standalone instance verified login initiation, an HTTP 303 redirect to `auth.openai.com` with PKCE/state, one-use replay rejection (410), and cancellation. It stopped before following the OpenAI URL and used no real accounts or Keychain entries. The standalone server smoke now also checks nested graph APIs and the redirect handler with a fabricated action ID. A pasted or expired launch URL is not a reusable sign-in URL.

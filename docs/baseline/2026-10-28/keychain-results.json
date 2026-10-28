@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-28",
+  "requirement": "R16",
+  "base_revision": "1dea13aeea11786090722faea9aab2133c278f4a",
+  "binding": "@napi-rs/keyring@2.1.2",
+  "platform": "macOS arm64",
+  "exit_codes": {
+    "typecheck": 0,
+    "lint": 0,
+    "test": 0,
+    "build": 0,
+    "provider-runtime": 0,
+    "server-payload": 0,
+    "standalone-electron": 0,
+    "standalone-node": 0
+  },
+  "tests": {
+    "passed": 2536,
+    "failed": 0,
+    "skipped": 0,
+    "suites": 499
+  },
+  "dummy_keychain": {
+    "node": "passed",
+    "electron": "passed",
+    "cross_runtime": "not completed; owner asked to skip further live probes"
+  },
+  "real_account_oauth_checked": false,
+  "signed_installer_checked": false
+}

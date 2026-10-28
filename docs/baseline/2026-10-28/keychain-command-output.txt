@@ -1,0 +1,296 @@
+=== typecheck ===
+
+> learnharness@0.3.9 typecheck
+> tsc --noEmit
+
+
+=== lint ===
+
+> learnharness@0.3.9 lint
+> eslint .
+
+
+=== test ===
+✔ SetupKeysBody — stage 1's self-contained first-key screen (12.753958ms)
+▶ the dictation keyless seam (owner dictation trio)
+  ✔ the client-authored short line — not the route's dev-speak (0.234333ms)
+  ✔ the Deepgram row id matches the keys store (KeysSection openRow) (0.201542ms)
+✔ the dictation keyless seam (owner dictation trio) (0.814792ms)
+▶ strongKeyless — the pre-send guard's truth (owner interlude, no-orphan-chats)
+  ✔ strong pinned to a provider whose key is gone: the guard FIRES (0.314625ms)
+  ✔ strong provider's key present: the guard does NOT fire — the normal send path stays open (0.14375ms)
+  ✔ no strong pin (the models guard owns that case) or catalog not loaded: false — the server gate remains the belt (0.083333ms)
+✔ strongKeyless — the pre-send guard's truth (owner interlude, no-orphan-chats) (0.718417ms)
+ℹ tests 2536
+ℹ suites 499
+ℹ pass 2536
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101888.914084
+
+=== build ===
+
+> learnharness@0.3.9 build
+> next build
+
+▲ Next.js 16.3.2 (Turbopack)
+✓ Running next.config.ts took 125ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 25.7s
+  Running TypeScript ...
+  Finished TypeScript in 56s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/8) ...
+  Generating static pages using 7 workers (2/8) 
+  Generating static pages using 7 workers (4/8) 
+  Generating static pages using 7 workers (6/8) 
+✓ Generating static pages using 7 workers (8/8) in 1272ms
+Turbopack build encountered 4 warnings:
+./src/agent/subagents/headless.ts:183:16
+Warning: Dynamic filesystem access causes tracing of the whole project
+  181 | 			"--browser-service",
+  182 | 		];
+> 183 | 		const proc = spawn(binary, appArgs, {
+      |              ^^^^^^^^^^^^^^^^^^^^^^^
+> 184 | 			// Cast: the sanitizer is pure over a loose record; NODE_ENV is
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 185 | 			// always present in a real process.env.
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 186 | 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 187 | 			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 188 | 		});
+      | ^^
+  189 | 		browserServiceProc = proc;
+  190 | 		port = await new Promise<number | null>((resolve) => {
+  191 | 			let buf = "";
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: child_process.spawn(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./src/agent/subagents/headless.ts
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./app/api/chats/route.ts
+
+  #2 [App Route]:
+    ./src/agent/subagents/headless.ts
+    ./src/agent/subagents/visual-maker.ts
+    ./src/agent/subagents/runner.ts
+    ./src/server/chat-handler.ts
+    ./app/api/graph/coverage/extract/route.ts
+
+  #3 [Server Component]:
+    ./src/agent/subagents/headless.ts
+    ./src/agent/subagents/visual-maker.ts
+    ./src/agent/subagents/runner.ts
+    ./src/server/chat-handler.ts
+    ./src/server/index.ts
+    ./app/chat/new/page.tsx
+
+
+./src/agent/tools/pdf-read.ts:131:23
+Warning: Dynamic filesystem access causes tracing of the whole project
+  129 | 					if (bytes.length === 0) throw new Error("Empty response");
+  130 | 					if (bytes.length > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
+> 131 | 					const filePath = path.join(dir, pdfFileName(url));
+      |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  132 | 					await fs.writeFile(filePath, bytes);
+  133 | 					try {
+  134 | 						await pdfProbe(filePath);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: path.join(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./src/agent/tools/pdf-read.ts
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./app/api/chats/route.ts
+
+  #2 [App Route]:
+    ./src/agent/tools/pdf-read.ts
+    ./src/agent/subagents/researcher.ts
+    ./src/agent/subagents/runner.ts
+    ./src/server/chat-handler.ts
+    ./app/api/graph/coverage/extract/route.ts
+
+  #3 [Server Component]:
+    ./src/agent/tools/pdf-read.ts
+    ./src/agent/subagents/researcher.ts
+    ./src/agent/subagents/runner.ts
+    ./src/server/chat-handler.ts
+    ./src/server/index.ts
+    ./app/chat/new/page.tsx
+
+
+./src/store/graph.ts:320:8
+Warning: Dynamic filesystem access causes tracing of the whole project
+  318 | 		const file = path.join(graphDir, legacy);
+  319 | 		try {
+> 320 | 			if (fs.existsSync(file)) {
+      |     ^^^^^^^^^^^^^^^^^^^
+  321 | 				fs.rmSync(file);
+  322 | 				console.info(`[graph-store] purged legacy ledger: ${file}`);
+  323 | 			}
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: fs.existsSync(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  App Route:
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./app/api/chats/route.ts
+
+  Server Component:
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./src/server/index.ts
+    ./app/chat/new/page.tsx
+
+
+./src/store/graph.ts:318:16
+Warning: Dynamic filesystem access causes tracing of the whole project
+  316 | 	const graphDir = path.dirname(LEDGER_FILES.nodes);
+  317 | 	for (const legacy of ["edges.jsonl", "events.jsonl"]) {
+> 318 | 		const file = path.join(graphDir, legacy);
+      |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  319 | 		try {
+  320 | 			if (fs.existsSync(file)) {
+  321 | 				fs.rmSync(file);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: path.join(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  App Route:
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./app/api/chats/route.ts
+
+  Server Component:
+    ./src/store/graph.ts
+    ./src/server/stores.ts
+    ./src/server/index.ts
+    ./app/chat/new/page.tsx
+
+
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /api/activity
+├ ƒ /api/activity/abort
+├ ƒ /api/chat
+├ ƒ /api/chats
+├ ƒ /api/chats/[id]
+├ ƒ /api/chats/[id]/artifact-ui
+├ ƒ /api/chats/[id]/dismiss
+├ ƒ /api/chats/[id]/markdown
+├ ƒ /api/chats/[id]/settings
+├ ƒ /api/chats/[id]/steer
+├ ƒ /api/chats/[id]/stream
+├ ƒ /api/events
+├ ƒ /api/graph
+├ ƒ /api/graph/costs
+├ ƒ /api/graph/coverage/extract
+├ ƒ /api/graph/import
+├ ƒ /api/graph/nodes/[id]
+├ ƒ /api/graph/positions
+├ ƒ /api/graph/render-settings
+├ ƒ /api/graph/status
+├ ƒ /api/jobs
+├ ƒ /api/keys
+├ ƒ /api/keys/[id]
+├ ƒ /api/models
+├ ƒ /api/search
+├ ƒ /api/settings
+├ ƒ /api/settings/[section]
+├ ƒ /api/settings/prompts
+├ ƒ /api/settings/prompts/[...segment]
+├ ƒ /api/stt/token
+├ ƒ /api/subscriptions
+├ ƒ /api/subscriptions/browser
+├ ƒ /chat/[id]
+├ ƒ /chat/new
+└ ○ /settings
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+=== keychain-node ===
+[keychain-smoke] native binding initialized within selected payload; no credential access
+[keychain-smoke] create, restore, rotate and delete passed using dummy credentials only
+
+=== keychain-electron ===
+[keychain-smoke] native binding initialized within selected payload; no credential access
+[keychain-smoke] create, restore, rotate and delete passed using dummy credentials only
+
+=== standalone-electron ===
+[smoke-demo-runtime] puppeteer-core import ok; 160 modules confined to /Users/alexanderjonsson/Documents/Codex/2026-10-28/referenced-chatgpt-conversation-this-is-an/work/research-atlas/.next/standalone
+[smoke-provider-runtime] google: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] opencode: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] opencode-go: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] github-copilot: public native OAuth and 3 transport APIs initialized offline
+[smoke-provider-runtime] xai: public native OAuth and 1 transport APIs initialized offline
+[smoke-provider-runtime] native Pi Google initialization passed; 1163 modules confined to /Users/alexanderjonsson/Documents/Codex/2026-10-28/referenced-chatgpt-conversation-this-is-an/work/research-atlas/.next/standalone; zero network attempts
+[keychain-smoke] native binding initialized within selected payload; no credential access
+[smoke-server] runtime: Electron bundled Node
+[smoke-server] boot ok: GET / → 200 (http://127.0.0.1:61667)
+[smoke-server] GET /api/graph → 200
+[smoke-server] GET /api/models → 200
+[smoke-server] GET /api/settings → 200
+[smoke-server] smoke passed — the packaged server boots and serves.
+
+=== standalone-node ===
+[smoke-demo-runtime] puppeteer-core import ok; 160 modules confined to /Users/alexanderjonsson/Documents/Codex/2026-10-28/referenced-chatgpt-conversation-this-is-an/work/research-atlas/.next/standalone
+[smoke-provider-runtime] google: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] opencode: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] opencode-go: native lazy Google adapter reached onPayload; generation stopped
+[smoke-provider-runtime] github-copilot: public native OAuth and 3 transport APIs initialized offline
+[smoke-provider-runtime] xai: public native OAuth and 1 transport APIs initialized offline
+[smoke-provider-runtime] native Pi Google initialization passed; 1163 modules confined to /Users/alexanderjonsson/Documents/Codex/2026-10-28/referenced-chatgpt-conversation-this-is-an/work/research-atlas/.next/standalone; zero network attempts
+[keychain-smoke] native binding initialized within selected payload; no credential access
+[smoke-server] runtime: host Node
+[smoke-server] boot ok: GET / → 200 (http://127.0.0.1:61672)
+[smoke-server] GET /api/graph → 200
+[smoke-server] GET /api/models → 200
+[smoke-server] GET /api/settings → 200
+[smoke-server] smoke passed — the packaged server boots and serves.
