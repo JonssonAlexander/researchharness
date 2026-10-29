@@ -437,6 +437,8 @@ added explanations stay distinct; neither pass certifies mathematics or writes
 canonical knowledge. See [second-pass draft review](docs/atlas-map-refinement.md).
 Editable, versioned review copies, typeset node labels, amber review markers and
 explicit concept/typed-association integration are now implemented in schema v9.
+Shift-drag between nodes toggles connections in the editable proposed map; edits
+use the same versioned draft-save and approval path (R01, R07).
 Identity choices are owner-reviewed; exact-name duplicates are blocked, accepted
 relation keys are reused, and an exact approval receipt commits atomically with
 extension metadata. Existing knowledge and source originals are preserved. See

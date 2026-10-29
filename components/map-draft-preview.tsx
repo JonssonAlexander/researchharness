@@ -1,7 +1,7 @@
 "use client";
 
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
-import {DEFAULT_RENDER_SETTINGS,isSubscriptionModel,DRAFT_ORIGINS,projectMapDraft,mapImageLabel,type MapEvidence,type ProposalView,type MapDraft,type MapReview,type MapIntegration,type AtlasSnapshot,projectAtlas,mapReviewReasons} from "@/src/core";
+import {DEFAULT_RENDER_SETTINGS,isSubscriptionModel,DRAFT_ORIGINS,projectMapDraft,mapImageLabel,type MapEvidence,type ProposalView,type MapDraft,type MapReview,type MapIntegration,type AtlasSnapshot,projectAtlas,mapReviewReasons,toggleDraftConnection} from "@/src/core";
 import {graphMathLabel} from "./graph-math-label";
 import {DraftItemEditor,DraftAdd,DraftIntegration,reviewRequest} from "./map-draft-editor";
 import {GraphCanvasRenderer} from "./graph-canvas";
@@ -12,6 +12,8 @@ type Selection={kind:"concept"|"connection";key:string}|null;
 export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:ProposalView;onEvidence:(e:MapEvidence)=>void;onDirtyChange?:(dirty:boolean)=>void}) {
 	const [draft,setDraft]=useState<MapDraft>(proposal.draft!),[review,setReview]=useState<MapReview|null>(null),[dirty,setDirty]=useState(false),[saving,setSaving]=useState(false),[saveError,setSaveError]=useState(""),[atlas,setAtlas]=useState<AtlasSnapshot|null>(null),[plan,setPlan]=useState<MapIntegration|null>(null),[inAtlas,setInAtlas]=useState(false),[integrating,setIntegrating]=useState(false);
 	const currentDraft=useRef(draft);currentDraft.current=draft;
+	const cameras=useRef<{draft:{k:number;x:number;y:number}|null;atlas:{k:number;x:number;y:number}|null}>({draft:null,atlas:null});
+	const editable=!!review&&!review.integration&&!inAtlas&&!integrating&&!saving;
 	const canvas=useRef<HTMLCanvasElement>(null),renderer=useRef<GraphCanvasRenderer|null>(null);
 	const [selected,setSelected]=useState<Selection>(null),[error,setError]=useState<string|null>(null);
 	useEffect(()=>{onDirtyChange?.(dirty);return()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
@@ -33,7 +35,11 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 		const el=canvas.current;if(!el)return;
 		let graph:GraphCanvasRenderer|undefined;
 		try {
-			graph=new GraphCanvasRenderer(el,{onSelect:id=>setSelected({kind:"concept",key:plan?.concepts.find(n=>n.id===id)?.key??id}),onContext:()=>{},onStageClick:()=>setSelected(null),onCameraMove:()=>{},onCommit:p=>{for(const [id,v] of Object.entries(p))positions.current.set(id,v);}});
+			graph=new GraphCanvasRenderer(el,{onToggleConnection:editable?(source,target)=>{
+				try{const value=toggleDraftConnection(currentDraft.current,source,target,`edge_${crypto.randomUUID()}`);
+					if(value!==currentDraft.current){edit(value);setSaveError("");setSelected(null);}
+				}catch(e){setSaveError((e as Error).message);}
+			}:undefined,onSelect:id=>setSelected({kind:"concept",key:plan?.concepts.find(n=>n.id===id)?.key??id}),onContext:()=>{},onStageClick:()=>setSelected(null),onCameraMove:c=>{cameras.current[inAtlas?"atlas":"draft"]=c;},onCommit:p=>{for(const [id,v] of Object.entries(p))positions.current.set(id,v);}},cameras.current[inAtlas?"atlas":"draft"]);
 			graph.setSettings({...DEFAULT_RENDER_SETTINGS,nodeSize:4,labelSize:12,labelZoom:2,arrowLength:5,clusterLabels:false});
 			const dark=getComputedStyle(document.body).color;
 			// Resolve CSS/OKLCH to the renderer's hex channel without changing its theme API.
@@ -44,7 +50,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 			renderer.current=graph;setError(null);
 		}catch{graph?.destroy();graph=undefined;setError("Interactive map unavailable. The draft remains reviewable through the lists below.");}
 		return()=>{graph?.destroy();renderer.current=null;};
-	},[projection]);
+	},[projection,editable]);
 	const concept=selected?.kind==="concept"?draft.concepts.find(n=>n.key===selected.key):null;
 	const connection=selected?.kind==="connection"?draft.connections.find(e=>e.key===selected.key):null;
 	const title=(id:string)=>draft.concepts.find(n=>n.key===id)?.title??id;
@@ -66,7 +72,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 			</div>
 			{error&&<p role="status" className="p-3 text-xs text-muted-foreground">{error}</p>}
 			<div className="relative min-h-72 flex-1"><canvas ref={canvas} aria-label="Proposed mind map; select a concept to inspect its notes" className="absolute inset-0 h-full w-full" /></div>
-			<div className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 text-[11px] text-muted-foreground">{Object.values(DRAFT_ORIGINS).map(o=><span key={o.label}><span style={{color:o.color}}>●</span> {o.label}</span>)}<span>Dashed line: direction unclear · amber dot: unresolved, thin notes or unverified additions</span></div>
+			<div className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 text-[11px] text-muted-foreground">{Object.values(DRAFT_ORIGINS).map(o=><span key={o.label}><span style={{color:o.color}}>●</span> {o.label}</span>)}<span>Shift-drag between nodes: add/remove connection · dashed line: direction unclear · amber dot: unresolved, thin notes or unverified additions</span></div>
 		</section>
 		<aside aria-label="Draft notes and connections" className="space-y-4 overflow-y-auto p-5 text-sm">
 			<p className="break-words text-[11px] text-muted-foreground">Second pass · {proposal.model} · {proposal.usage?`${proposal.usage.steps} recorded model call(s)`:"Usage not reported"}<br/>{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</p>

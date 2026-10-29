@@ -151,6 +151,8 @@ export interface CanvasData {
 }
 
 export interface RendererCallbacks {
+	/** Opt-in draft editor gesture; ordinary canvases retain node dragging. */
+	onToggleConnection?: (sourceId: string, targetId: string) => void;
 	/** A node was clicked (screen position included for card anchoring). */
 	onSelect: (nodeId: string, screenPos: Pt) => void;
 	/** Right-click: the picked node (canvas-relative screen position) or
@@ -629,6 +631,7 @@ export class GraphCanvasRenderer {
 	// Hover transition: fade 0 = resting, 1 = fully hovered; the animating
 	// flag keeps the loop scheduled until the fade settles (then rAF stops).
 	private hoverId: string | null = null;
+	private connectionDrag: {sourceId: string; pointerId: number; position: Pt} | null = null;
 	/** The node the glow is drawn on. OUTLIVES hoverId on hover-out so the
 	 *  fade has something to draw (hoverId nulls instantly; without this
 	 *  the glow popped off in one frame instead of fading). Cleared when
@@ -716,6 +719,7 @@ export class GraphCanvasRenderer {
 		canvas.addEventListener("pointerdown", this.onPointerDown);
 		canvas.addEventListener("pointerup", this.onPointerUp);
 		canvas.addEventListener("pointercancel", this.onPointerCancel);
+		canvas.addEventListener("lostpointercapture", this.cancelConnection);
 		canvas.addEventListener("pointerleave", this.onPointerLeave);
 		// Right-click → the caller's context menu (node interlude). Always
 		// preventDefault: the native menu on a full-bleed custom canvas is
@@ -955,6 +959,7 @@ export class GraphCanvasRenderer {
 	}
 
 	destroy(): void {
+		this.cancelConnection();
 		for(const n of this.data?.nodes??[])n.htmlLabel?.remove();
 		if (this.frameId !== null) cancelAnimationFrame(this.frameId);
 		if (this.commitTimer) clearTimeout(this.commitTimer);
@@ -969,6 +974,7 @@ export class GraphCanvasRenderer {
 		this.canvas.removeEventListener("pointerdown", this.onPointerDown);
 		this.canvas.removeEventListener("pointerup", this.onPointerUp);
 		this.canvas.removeEventListener("pointercancel", this.onPointerCancel);
+		this.canvas.removeEventListener("lostpointercapture", this.cancelConnection);
 		this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
 		this.canvas.removeEventListener("contextmenu", this.onContextMenu);
 		this.canvas.style.cursor = "";
@@ -994,6 +1000,11 @@ export class GraphCanvasRenderer {
 
 	private onPointerMove = (e: PointerEvent) => {
 		const pos = this.eventPos(e);
+		if(this.connectionDrag){
+			if(e.pointerId!==this.connectionDrag.pointerId)return;
+			this.connectionDrag.position=pos;this.setHover(this.pickAt(pos.x,pos.y)?.id??null);
+			this.markDirty();return;
+		}
 		if (this.subjectDrag && this.data?.atlas) {
 			const drag = this.subjectDrag;
 			if (Math.hypot(pos.x-drag.origin.x, pos.y-drag.origin.y) <= CLICK_SLOP && !drag.dx && !drag.dy) return;
@@ -1051,6 +1062,13 @@ export class GraphCanvasRenderer {
 		// used to open under the menu).
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
+		const node = this.pickAt(pos.x, pos.y);
+		if(e.shiftKey&&node&&this.callbacks.onToggleConnection){
+			e.preventDefault();this.downPos=null;this.zoomTarget=null;
+			this.connectionDrag={sourceId:node.id,pointerId:e.pointerId,position:pos};
+			try{this.canvas.setPointerCapture(e.pointerId);}catch{/* best effort */}
+			this.canvas.style.cursor="crosshair";this.markDirty();return;
+		}
 		const subject = this.pickSubjectAt(pos);
 		if (subject) {
 			e.preventDefault();
@@ -1063,7 +1081,6 @@ export class GraphCanvasRenderer {
 			this.canvas.style.cursor = "grabbing";
 			return;
 		}
-		const node = this.pickAt(pos.x, pos.y);
 		if (node?.fixed && this.data?.atlas?.concepts.some(c => c.id === node.id)) {
 			e.preventDefault();
 			this.callbacks.onSelect(node.id, pos);
@@ -1097,7 +1114,15 @@ export class GraphCanvasRenderer {
 		this.zoomTarget = null; // a pan takes over — cancel any zoom glide
 	};
 
+	private cancelConnection = () => {
+		const drag=this.connectionDrag;if(!drag)return;
+		this.connectionDrag=null;
+		try{this.canvas.releasePointerCapture(drag.pointerId);}catch{/* already released */}
+		this.canvas.style.cursor="";this.setHover(null);this.markDirty();
+	};
+
 	private onPointerCancel = () => {
+		this.cancelConnection();
 		if (this.subjectDrag) {
 			for (const c of this.data?.atlas?.concepts ?? []) {
 				const n = this.nodeById.get(c.id);
@@ -1121,6 +1146,13 @@ export class GraphCanvasRenderer {
 
 	private onPointerUp = (e: PointerEvent) => {
 		if (e.button !== 0) return; // right-click is context-menu territory
+		if(this.connectionDrag){
+			const drag=this.connectionDrag;if(e.pointerId!==drag.pointerId)return;
+			const pos=this.eventPos(e),target=this.pickAt(pos.x,pos.y);
+			this.cancelConnection();
+			if(e.shiftKey&&target&&target.id!==drag.sourceId)this.callbacks.onToggleConnection?.(drag.sourceId,target.id);
+			return;
+		}
 		if (this.subjectDrag) {
 			const {id, dx, dy} = this.subjectDrag;
 			this.subjectDrag = null;
@@ -1182,7 +1214,7 @@ export class GraphCanvasRenderer {
 	};
 
 	private onPointerLeave = () => {
-		if (this.dragId || this.subjectDrag) return; // pointer capture keeps the drag alive
+		if (this.dragId || this.subjectDrag || this.connectionDrag) return; // pointer capture keeps the drag alive
 		this.downPos = null;
 		this.setHover(null);
 	};
@@ -1866,6 +1898,12 @@ export class GraphCanvasRenderer {
 			const { minX, minY, w, h } = this.regionRect;
 			ctx.imageSmoothingEnabled = true;
 			ctx.drawImage(this.regionCanvas, minX, minY, w, h);
+		}
+
+		if(this.connectionDrag){
+			const source=this.nodeById.get(this.connectionDrag.sourceId),pos=this.connectionDrag.position;
+			if(source){ctx.save();ctx.strokeStyle=data.colors.label;ctx.lineWidth=1.5/k;ctx.setLineDash([5/k,4/k]);
+				ctx.beginPath();ctx.moveTo(source.x,source.y);ctx.lineTo((pos.x-tx)/k,(pos.y-ty)/k);ctx.stroke();ctx.restore();}
 		}
 
 		// 3. Edges: shafts + arrowheads from cached paths; width constant on

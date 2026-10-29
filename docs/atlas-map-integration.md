@@ -8,7 +8,13 @@ slice of reviewed synchronization, not the complete Phase 3 semantic-sync engine
 A prepared second-pass map opens an editable review copy. Select a concept or
 connection and expand Edit; change names, note Markdown/LaTeX, reasoning,
 assumptions, uncertainty, endpoints, type and direction. Add concepts/connections,
-or remove a concept with its incident draft connections. Save draft edits before
+or remove a concept with its incident draft connections. In the editable isolated
+proposed map, hold Shift and drag between nodes to toggle their connection (either
+direction). An existing pair's connections are removed; a new pair gets an untyped
+association for review. A dashed guide follows the pointer without moving nodes.
+Dropping on empty space/the same node, releasing Shift early or cancelling does
+nothing. Save draft edits to retain the change. Main Atlas, comparison and
+integrated/read-only views keep their normal gestures. Save draft edits before
 leaving or integrating. Leaving with unsaved work asks before discarding it;
 saving is explicit and does not call a provider. Saved review versions are retained;
 model output, original handwriting and earlier readings remain unchanged. Text

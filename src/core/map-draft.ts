@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {mapEvidence,type MapImageLayout} from "./map-images.ts";
-import {atlasConceptId} from "./atlas.ts";
+import {AtlasError,atlasConceptId} from "./atlas.ts";
 import {RELATION_TYPES} from "./atlas-relations.ts";
 import {createGraphSimulation} from "./layout.ts";
 import type {MapFindings,ProposalContext} from "./map-proposals.ts";
@@ -53,4 +53,14 @@ export function projectMapDraft(draft:MapDraft,layout:MapImageLayout[]=[]) {
 	for(let i=0;i<180;i++)sim.tick();sim.stop();
 	return {nodes,edges:draft.connections.flatMap(e=>e.direction==="unclear"?[]:e.direction==="both"?[{from:e.source,to:e.target},{from:e.target,to:e.source}]:[{from:e.source,to:e.target}]),
 		semanticEdges:draft.connections.filter(e=>e.direction==="unclear").map(e=>({from:e.source,to:e.target}))};
+}
+
+/** Toggle the visible association between a pair, independently of arrow direction. */
+export function toggleDraftConnection(draft:MapDraft,source:string,target:string,key:string):MapDraft {
+	if(source===target||![source,target].every(id=>draft.concepts.some(n=>n.key===id)))return draft;
+	const connections=draft.connections.filter(e=>!(e.source===source&&e.target===target||e.source===target&&e.target===source));
+	if(connections.length<draft.connections.length)return {...draft,connections};
+	if(connections.length>=60)throw new AtlasError("Keep at most 60 draft connections. Remove one before adding another.");
+	return {...draft,connections:[...connections,{key,source,target,direction:"unclear",relationType:null,label:"",origin:"explanation",evidence:[],
+		rationale:"Owner-added during review; mathematical support still needs review.",assumptions:"",uncertainty:"Choose the meaning and direction before integration."}]};
 }
