@@ -9,6 +9,7 @@ import {
 	type AtlasSubject,
 	type GraphNode,
 } from "@/src/core";
+import { AtlasMindmaps } from "./atlas-mindmaps";
 import { AtlasViews, type AtlasViewActions } from "./atlas-views";
 import { AtlasDemo } from "./atlas-demo";
 import { AtlasQuery } from "./atlas-query";
@@ -165,6 +166,7 @@ export function AtlasPanel({
 					</p>
 				)}
 				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
+				<AtlasMindmaps snapshot={atlas.snapshot} selectedId={selectedId} refresh={atlas.refresh} />
 				{editing ? (
 					<form
 						className="space-y-3"

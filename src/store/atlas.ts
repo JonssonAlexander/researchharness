@@ -1,3 +1,4 @@
+import { createMindmapStore, readMindmaps } from "./mindmaps.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -49,7 +50,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 6)
+			if (version > 7)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -141,6 +142,21 @@ PRAGMA user_version = 5;`);
 					db.exec("ROLLBACK");
 					throw error;
 				}
+			}
+			if (version < 7) {
+				if (version === 6) db.prepare("VACUUM INTO ?").run(`${file}.v6-${randomUUID()}.bak`);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					db.exec(`CREATE TABLE mindmaps (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL, revision INTEGER NOT NULL,
+ currentRevision TEXT NOT NULL, archived INTEGER NOT NULL CHECK(archived IN (0,1))
+) STRICT;
+CREATE TABLE mindmap_captures (
+ id TEXT PRIMARY KEY, mapId TEXT NOT NULL REFERENCES mindmaps(id),
+ record TEXT NOT NULL CHECK(json_valid(record)), receipt TEXT NOT NULL
+) STRICT; PRAGMA user_version = 7;`);
+					db.exec("COMMIT");
+				} catch (error) { db.exec("ROLLBACK"); throw error; }
 			}
 			return run(db);
 		} finally {
@@ -269,9 +285,10 @@ PRAGMA user_version = 5;`);
 			const {kind: _kind, expectedRevision, ...fields} = parsed;
 			return {...fields, revision: expectedRevision};
 		});
-		return { subjects, concepts, relations, layoutRevision, views };
+		return { subjects, concepts, relations, layoutRevision, views, mindmaps: readMindmaps(db) };
 	}
 	return {
+		mindmaps: createMindmapStore(database, path.dirname(file)),
 		read: () => database(snapshot),
 		save: (input: AtlasCommand) =>
 			database((db) => {

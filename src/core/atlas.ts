@@ -1,3 +1,4 @@
+import type { Mindmap, MindmapStore } from "./mindmaps.ts";
 import { z } from "zod";
 import { atlasRelationSchema, type AtlasRelation } from "./atlas-relations.ts";
 
@@ -138,6 +139,7 @@ export interface AtlasView extends Omit<z.infer<typeof atlasViewInput>, "kind" |
 	revision: number;
 }
 export interface AtlasSnapshot {
+	mindmaps?: Mindmap[];
 	views?: AtlasView[];
 	/** Global optimistic version for an atomic layout commit. */
 	layoutRevision?: number;
@@ -146,6 +148,7 @@ export interface AtlasSnapshot {
 	subjects: AtlasSubject[];
 }
 export interface AtlasStore {
+	mindmaps: MindmapStore;
 	read(): AtlasSnapshot;
 	save(command: AtlasCommand): void;
 }

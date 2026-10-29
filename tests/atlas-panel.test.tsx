@@ -564,3 +564,27 @@ test("saved views restore without writes and require confirmed removal", async (
   await click('Confirm removal');assert.deepEqual(commands,[{kind:'view-delete',id:view.id,expectedRevision:1}]);
  } finally {await ui.close();}
 });
+
+test("mind map inspection shows revision-bound sources and preserves history when archiving is rejected", async () => {
+ const {AtlasMindmaps}=await import('../components/atlas-mindmaps.tsx');
+ const mapId='mm_00000000-0000-4000-8000-000000000001',revisionId='mr_00000000-0000-4000-8000-000000000001';
+ const map={id:mapId,title:'Brownian notes',revision:1,archived:false,currentRevision:revisionId,captures:[{
+  schemaVersion:1 as const,id:revisionId,mapId,hash:'a'.repeat(64),previewHash:'b'.repeat(64),filename:'brownian.rnote',capturedAt:'2026-10-28T12:00:00Z',
+  conceptIds:[id],validation:'unverified' as const,previewKind:'manual-png' as const,notice:'Owner-supplied export',
+ }]};
+ const attempts:unknown[]=[],oldFetch=globalThis.fetch;
+ globalThis.fetch=async(_url,options)=>{attempts.push(JSON.parse(String(options?.body)));return Response.json({error:'Reload before archiving'},{status:409});};
+ const ui=await mount(()=> <AtlasMindmaps snapshot={{...snapshot,mindmaps:[map]}} selectedId={id} refresh={async()=>{}} />);
+ try {
+  assert(ui.document.querySelector('img')?.getAttribute('src')?.includes(revisionId));
+  assert(ui.document.querySelector('a[href*="kind=original"]'));
+  assert(ui.document.body.textContent.includes('Not interpreted'));
+  const click=async(text:string)=>{await act(async()=>{
+   [...ui.document.querySelectorAll('button')].find(b=>b.textContent===text)!.dispatchEvent(new window.Event('click',{bubbles:true}));
+  });};
+  await click('Archive map');assert.equal(attempts.length,0);await click('Confirm archive');
+  assert.deepEqual(attempts,[{id:mapId,expectedRevision:1,archived:true}]);
+  assert(ui.document.querySelector('[role="alert"]')?.textContent?.includes('Reload'));
+  assert(ui.document.querySelector('a[href*="kind=original"]'));
+ } finally {await ui.close();globalThis.fetch=oldFetch;}
+});

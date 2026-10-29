@@ -423,6 +423,11 @@ schema v5. See [placement and browser verification](docs/atlas-layout.md). Whole
 see [schema v6, movement and views](docs/atlas-views.md). Hierarchical movement/lock
 inheritance and hierarchy visualization remain pending.
 
+The first Phase 3 slice now supports managed Rnote uploads, immutable original
+and preview revisions, per-revision concept references, archive/restore, a bounded
+native thumbnail adapter and a manual PNG fallback. See [Rnote import and limits](docs/atlas-mindmaps.md).
+Interpretation, approval, watchers and semantic synchronization remain pending.
+
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.
 Concept notes use revision-checked Markdown files with retained content-addressed

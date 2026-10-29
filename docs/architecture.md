@@ -14,6 +14,10 @@ concept/link removal; [demo and removal details](atlas-demo-and-removal.md).
 engine with atomic position batches; schema v5 adds subject locks and a layout revision. Schema v6 adds [named views and rigid subject movement](atlas-views.md).
 See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundation.md).
 
+Rnote import adds schema v7 source captures and immutable blobs under the data
+root; [source workflow, recovery and native adapter](atlas-mindmaps.md). These are
+manual source references; interpretation and semantic synchronization are pending.
+
 ## Research Atlas credential-storage update — 28 October 2026
 
 The Research Atlas fork changes ChatGPT OAuth storage on macOS (R16). Both the Node/browser owner and Electron main select `credentialStore` from `electron/chatgpt-keychain.cjs`. It uses `@napi-rs/keyring` 2.1.2 to store credential-bearing records in macOS Keychain; the local `chatgpt-credentials.json` becomes a nonsecret locator. Empty zero-account records may remain inline. A durable intent record and verified immutable Keychain entries handle migration, refresh rotation and cleanup recovery. Failure blocks this connection without falling back to plaintext.

@@ -5,6 +5,7 @@
  */
 
 export * from "./chat-handler.ts";
+export { importMindmapResponse, archiveMindmapResponse, mindmapAssetResponse } from "./mindmaps.ts";
 export { atlasResponse, saveAtlasResponse } from "./atlas.ts";
 export * from "./events-stream.ts";
 export * from "./chats.ts";
