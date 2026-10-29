@@ -6,6 +6,7 @@ import {isSubscriptionModel,mapImageLabel,type AtlasSnapshot,type Mindmap,type M
 import {MessageResponse} from "./ai-elements/message";
 import {useBackdropDismiss} from "./backdrop-dismiss";
 import {useServerEvent,useServerResync} from "./server-events";
+import {MapDraftPreview} from "./map-draft-preview";
 
 const button="rounded-md border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50";
 type Evidence=MapFindings["concepts"][number]["evidence"];
@@ -13,6 +14,7 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 	const [proposal,setProposal]=useState<ProposalView|null>(null),[model,setModel]=useState<string|null>(null),[error,setError]=useState<string|null>(null);
 	const [configError,setConfigError]=useState<string|null>(null);
 	const [attempt,setAttempt]=useState<string|null>(null);
+	const [view,setView]=useState<"source"|"map">("source");
 	const [busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false),[page,setPage]=useState(0),[evidence,setEvidence]=useState<Evidence|null>(null);
 	const root=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),sequence=useRef(0);
 	const refresh=useCallback(async()=>{
@@ -29,24 +31,26 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 	}).catch(()=>setConfigError("Vision model configuration is unavailable."));return()=>{sequence.current++;abort.current?.abort();};},[refresh]);
 	useServerEvent("atlas-changed",()=>void refresh());useServerResync(()=>void refresh());
 	useEffect(()=>{setPage(0);setEvidence(null);},[proposal?.id]);
+	const hasDraft=!!proposal?.draft;
+	useEffect(()=>{setView(hasDraft?"map":"source");},[proposal?.id,hasDraft]);
 	useEffect(()=>{
 		const previous=document.activeElement as HTMLElement|null;root.current?.focus();
 		return()=>previous?.focus();
 	},[]);
 	const close=()=>{abort.current?.abort();onClose();};
 	const backdrop=useBackdropDismiss(close);
-	async function generate() {
+	async function generate(parentId?:string) {
 		if(!model||busy)return;
 		setBusy(true);setError(null);abort.current=new AbortController();
 		try {
 			const response=await fetch("/api/atlas/proposals",{method:"POST",headers:{"content-type":"application/json"},signal:abort.current.signal,
-				body:JSON.stringify({id:`mp_${crypto.randomUUID()}`,sourceRevision:capture.id,expectedModel:model,consent:true,reprocess:true})});
+				body:JSON.stringify({id:`mp_${crypto.randomUUID()}`,sourceRevision:capture.id,expectedModel:model,consent:true,reprocess:true,...(parentId?{parentId}:{})})});
 			const value=await response.json();if(!response.ok)throw new Error(value.error);
 			setAttempt(null);setPage(0);setEvidence(null);setProposal(value);if(!attempt)await refresh();
 		}catch(error){setError((error as Error).name==="AbortError"?"Interpretation cancelled; the saved source remains unchanged.":(error as Error).message);}
 		finally{setBusy(false);abort.current=null;}
 	}
-	const focus=(source:Evidence)=>{setPage(source.page);setEvidence(source);};
+	const focus=(source:Evidence)=>{setView("source");setPage(source.page);setEvidence(source);};
 	return createPortal(<div className="lh-no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm" {...backdrop}>
 		<div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Review map interpretation"
 			className="flex h-[min(90vh,60rem)] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl outline-none"
@@ -64,18 +68,25 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 					<h2 className="mt-1 text-lg font-medium">{map.title}</h2><p className="mt-1 text-xs text-muted-foreground">Suggestions stay separate from your knowledge graph.</p></div>
 				<button type="button" className={button} onClick={close}>Close</button>
 			</header>
-			<ProposalReviewBody proposal={proposal} capture={capture} snapshot={snapshot} model={model} loaded={loaded} busy={busy} error={error??(!loaded||proposal?.status==="prepared"?null:configError)}
-				page={page} evidence={evidence} onPage={p=>{setPage(p);setEvidence(null);}} onEvidence={focus} onGenerate={()=>void generate()} onCancel={()=>abort.current?.abort()} />
+			{proposal?.refinement&&<nav aria-label="Draft review views" className="flex flex-wrap gap-2 border-b px-5 py-3">
+				<button type="button" className={button} disabled={!proposal.draft} aria-pressed={view==="map"} onClick={()=>setView("map")}>Proposed map</button>
+				<button type="button" className={button} aria-pressed={view==="source"} onClick={()=>setView("source")}>Source images</button>
+				<button type="button" className={button} disabled={busy} onClick={()=>setAttempt(proposal.refinement!.parentId)}>First-pass reading</button>
+			</nav>}
+			{view==="map"&&proposal?.draft?<MapDraftPreview key={proposal.id} proposal={proposal} onEvidence={focus}/>:<ProposalReviewBody proposal={proposal} capture={capture} snapshot={snapshot} model={model} loaded={loaded} busy={busy} error={error??(!loaded||proposal?.status==="prepared"?null:configError)}
+				page={page} evidence={evidence} onPage={p=>{setPage(p);setEvidence(null);}} onEvidence={focus} onGenerate={()=>void generate()} onCancel={()=>abort.current?.abort()}
+				onRefine={()=>void generate(proposal?.refinement?.parentId??proposal?.id)} />}
 			{(proposal?.attempts?.length??0)>1&&<label className="flex items-center gap-3 border-t px-5 py-3 text-xs text-muted-foreground">Interpretation attempt
 				<select aria-label="Interpretation attempt" className="min-w-0 rounded border bg-background px-2 py-1" disabled={busy} value={attempt??""} onChange={e=>{setAttempt(e.target.value||null);setPage(0);setEvidence(null);}}>
-					<option value="">Latest</option>{proposal!.attempts!.map((a,i)=><option key={a.id} value={a.id}>{i+1} · {a.status} · {a.model}</option>)}
+					<option value="">Latest</option>{proposal!.attempts!.map((a,i)=><option key={a.id} value={a.id}>{i+1} · {a.kind??"reading"} · {a.status} · {a.model}</option>)}
 				</select></label>}
 		</div>
 	</div>,document.body);
 }
-export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,error,page,evidence,onPage,onEvidence,onGenerate,onCancel}:{
+export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,error,page,evidence,onPage,onEvidence,onGenerate,onCancel,onRefine}:{
 	proposal:ProposalView|null;capture:MindmapCapture;snapshot:AtlasSnapshot;model:string|null;loaded:boolean;busy:boolean;error:string|null;
 	page:number;evidence:Evidence|null;onPage:(page:number)=>void;onEvidence:(source:Evidence)=>void;onGenerate:()=>void;onCancel:()=>void;
+	onRefine?:()=>void;
 }) {
 	const [zoom,setZoom]=useState(1),[broken,setBroken]=useState<string|null>(null),findings=proposal?.findings;
 	const label=(index:number)=>mapImageLabel(proposal?.imageLayout?.[index],index);
@@ -102,19 +113,26 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 			</div>
 		</section>
 		<section aria-label="Interpretation proposal" className="space-y-4 overflow-y-auto p-5 text-sm">
+			{proposal?.status==="prepared"&&proposal.findings&&onRefine&&<div className="space-y-3 rounded-xl border border-blue-500/30 p-4">
+				<h3 className="font-medium">Build a proposed mind map</h3>
+				<p className="text-xs leading-relaxed text-muted-foreground">A second pass sends this saved reading, source images and linked concept names to {model??"your vision model"}. It proposes coherent notes and connections, separating source readings, reconstructions and added explanations. Up to two model calls; nothing is added to Atlas.</p>
+				<button type="button" className={button} disabled={!model||busy} onClick={onRefine}>Refine into proposed map</button>
+			</div>}
 			{error&&<p role="alert" className="rounded-lg border border-destructive/40 p-3 text-xs text-destructive">{error}</p>}
 			{proposal && <div className="flex flex-wrap gap-2 text-xs text-muted-foreground"><span className="rounded-full border px-2 py-1">{proposal.status}</span>
 				<span className="py-1">{proposal.model}</span><span className="py-1">{notSent?"Model not called":proposal.usage?`${proposal.usage.steps} recorded model call(s)`:"Usage not reported"}</span>
 				{!notSent&&<span className="py-1">{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</span>}</div>}
 			{proposal && proposal.baseRevision!==snapshot.layoutRevision && <p className="rounded-lg border border-amber-500/40 p-3 text-xs">Atlas changed since this proposal was captured. Keep it for review; any future approval must revalidate its references.</p>}
 			{proposal?.error&&<p className="rounded-lg border p-3 text-xs">{proposal.error}</p>}
-			{(!proposal||proposal.status==="failed"||proposal.status==="cancelled"||proposal.status==="prepared") && <div className="space-y-3 rounded-xl border p-4">
+			{(!proposal||!proposal.refinement&&proposal.status!=="running") && <div className="space-y-3 rounded-xl border p-4">
 				<h3 className="font-medium">Interpret this saved revision</h3>
 				<p className="text-xs leading-relaxed text-muted-foreground">A whole-map overview and overlapping detail images (or your supplied PNG), plus names/aliases of up to 40 linked concepts will be sent to {model??"your configured vision model"}. Uses up to two model calls. Original files stay unchanged.</p>
 				<button type="button" className={button} disabled={!loaded||!model||busy} onClick={onGenerate}>{busy?"Interpreting…":proposal?.status==="prepared"?"Reinterpret with map layout":proposal?"Try interpretation again":"Interpret revision"}</button>
-				{busy&&<button type="button" className={`${button} ml-2`} onClick={onCancel}>Cancel</button>}
+
 				{proposal&&<p className="text-xs text-muted-foreground">A new attempt preserves earlier results and may use additional plan allowance or API credits.</p>}
 			</div>}
+			{proposal?.refinement&&(proposal.status==="failed"||proposal.status==="cancelled")&&onRefine&&<div className="space-y-2 rounded-xl border p-4"><p className="text-xs text-muted-foreground">Retry refinement with {model??"your vision model"} using the retained first reading and source images. This starts a new attempt and may use additional plan allowance or API credits.</p><button type="button" className={button} disabled={!model||busy} onClick={onRefine}>Retry refinement</button></div>}
+			{busy&&<button type="button" className={button} onClick={onCancel}>Cancel current attempt</button>}
 			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?"Source views captured. Waiting for the model’s suggestions (up to 5 minutes)…":"Preparing whole-map and detail views locally…"}</p>}
 			{findings&&<>
 				<div><h3 className="font-medium">Labels and concepts <span className="text-muted-foreground">{findings.concepts.length}</span></h3>

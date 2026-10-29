@@ -8,17 +8,18 @@ const globalOwner=globalThis as typeof globalThis & {__atlasProposalOwner?:strin
 const owner=globalOwner.__atlasProposalOwner??=randomUUID();
 export function mapProposalDigest(p:MapProposal) {
 	const content:unknown[]=[p.sourceRevision,p.sourceHash,p.baseRevision,p.context,p.model,p.images,p.findings];
-	if(p.schemaVersion===2)content.push(p.imageLayout);
+	if(p.schemaVersion>=2)content.push(p.imageLayout);
+	if(p.schemaVersion===3)content.push(p.refinement,p.draft);
 	return createHash("sha256").update(JSON.stringify(content)).digest("hex");
 }
 export function createMapProposalStore(database:Database,files:Pick<MapProposalStore,"retainImage"|"image">):MapProposalStore {
 	function parse(db:DatabaseSync,row:Record<string,unknown>|undefined):MapProposal|null {
 		if(!row)return null;
 		const raw=JSON.parse(String(row.record));
-		if(raw.schemaVersion>2)throw new AtlasError("This proposal needs a newer app.",409);
+		if(raw.schemaVersion>3)throw new AtlasError("This proposal needs a newer app.",409);
 		let p=proposalRecord.parse(raw);
 		if(p.id!==row.id||p.sourceRevision!==row.sourceRevision||p.status!==row.status)throw new AtlasError("Broken proposal identity.",500);
-		if(p.status==="prepared"&&(!p.findings||p.digest!==mapProposalDigest(p)))throw new AtlasError("Proposal content changed outside Atlas.",409);
+		if(p.status==="prepared"&&(!(p.refinement?p.draft:p.findings)||p.digest!==mapProposalDigest(p)))throw new AtlasError("Proposal content changed outside Atlas.",409);
 		if(p.status==="running"&&row.owner!==owner) {
 			p={...p,status:"failed",updatedAt:new Date().toISOString(),error:"Interpretation was interrupted by an app restart. It was not retried; provider usage may be incomplete."};
 			db.prepare("UPDATE map_proposals SET status=?,record=? WHERE id=?").run(p.status,JSON.stringify(p),p.id);
@@ -35,11 +36,15 @@ export function createMapProposalStore(database:Database,files:Pick<MapProposalS
 			return database(db=>{
 				db.exec("BEGIN IMMEDIATE");
 				try {
-					if(p.status!=="running"||p.findings||p.images.length)throw new AtlasError("Start with an empty running proposal.");
+					if(p.status!=="running"||p.findings||p.draft||p.images.length)throw new AtlasError("Start with an empty running proposal.");
 					const source=db.prepare("SELECT record FROM mindmap_captures WHERE id=?").get(p.sourceRevision);
 					if(!source||JSON.parse(String(source.record)).hash!==p.sourceHash)throw new AtlasError("Source revision changed.",409);
 					const old=parse(db,db.prepare("SELECT * FROM map_proposals WHERE id=?").get(p.id));
 					if(old) {if(old.sourceRevision!==p.sourceRevision)throw new AtlasError("Proposal token belongs to a different revision.",409);db.exec("COMMIT");return false;}
+					if(p.refinement){const parent=parse(db,db.prepare("SELECT * FROM map_proposals WHERE id=?").get(p.refinement.parentId));
+						if(!parent||parent.status!=="prepared"||parent.refinement||!parent.findings||parent.digest!==p.refinement.parentDigest||parent.sourceRevision!==p.sourceRevision||parent.sourceHash!==p.sourceHash)
+							throw new AtlasError("Refinement needs an intact prepared first reading of this source.",409);
+					}
 					if(Number(db.prepare("SELECT revision FROM atlas_layout_version").get()!.revision)!==p.baseRevision)
 						throw new AtlasError("Atlas changed before interpretation. Reopen the review.",409);
 					if(Number(db.prepare("SELECT count(*) AS n FROM map_proposals WHERE sourceRevision=?").get(p.sourceRevision)!.n)>=20)
@@ -54,13 +59,13 @@ export function createMapProposalStore(database:Database,files:Pick<MapProposalS
 		update(input) {
 			const p=proposalRecord.parse(input);
 			if(p.status==="prepared") {
-				if(!p.findings||!p.images.length)throw new AtlasError("Proposal has no findings or source pages.");
+				if(!(p.refinement?p.draft:p.findings)||!p.images.length)throw new AtlasError("Proposal has no findings or source pages.");
 				p.digest=mapProposalDigest(p);
 			}
 			database(db=>{
 				const row=db.prepare("SELECT * FROM map_proposals WHERE id=?").get(p.id),old=parse(db,row);
-				if(!old || JSON.stringify([old.schemaVersion,old.sourceRevision,old.sourceHash,old.baseRevision,old.context,old.model,old.createdAt])!==
-					JSON.stringify([p.schemaVersion,p.sourceRevision,p.sourceHash,p.baseRevision,p.context,p.model,p.createdAt]))
+				if(!old || JSON.stringify([old.schemaVersion,old.refinement,old.sourceRevision,old.sourceHash,old.baseRevision,old.context,old.model,old.createdAt])!==
+					JSON.stringify([p.schemaVersion,p.refinement,p.sourceRevision,p.sourceHash,p.baseRevision,p.context,p.model,p.createdAt]))
 					throw new AtlasError("Proposal source or base changed.",409);
 				const result=db.prepare("UPDATE map_proposals SET status=?,record=? WHERE id=? AND owner=? AND status='running'")
 					.run(p.status,JSON.stringify(p),p.id,owner);

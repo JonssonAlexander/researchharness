@@ -2,6 +2,8 @@
 
 29 October 2026; R06, R07, R09, R14, R16 and R17. This is the interpretation and
 read-only preview slice of AGENTS.md §8.1, not the approval/commit workflow.
+An explicit [second pass and isolated proposed-map view](atlas-map-refinement.md)
+now develops a prepared reading into retained draft notes without changing Atlas.
 
 ## Owner workflow and appearance
 
@@ -82,7 +84,7 @@ Atlas relation directions. Nothing becomes an accepted relationship or theorem.
 
 Schema v8 adds one `map_proposals` table. Existing v7 data receives a
 `.v7-<uuid>.bak` backup before transactional migration; future schemas are refused.
-New proposal envelopes use version 2, while version 1 stays readable with its
+New first-reading envelopes use version 2, while version 1 stays readable with its
 original digest behavior. Version 2 adds per-image layout/dimensions bound into the
 prepared digest; image and layout counts must agree. Both versions retain source revision/hash,
 base Atlas revision, bounded identity context, model stamp, page hashes, timestamps,

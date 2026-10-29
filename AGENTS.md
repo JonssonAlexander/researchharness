@@ -431,7 +431,11 @@ submit runner, preserve whole-canvas context with overlapping positioned details
 and separate observed drawings from proposed mathematical meaning in a source/evidence
 review dialog. Earlier attempts remain readable; reprocessing is explicit. See
 [proposal storage, limits and remaining gates](docs/atlas-map-proposals.md).
-Identity auditing, editable review, approval, watchers and semantic synchronization
+An explicit second pass now retains source-bound refined notes and an isolated
+proposed map using the existing renderer. Source readings, reconstructions and
+added explanations stay distinct; neither pass certifies mathematics or writes
+canonical knowledge. See [second-pass draft review](docs/atlas-map-refinement.md).
+Atlas-context comparison, identity auditing, editable review, approval, watchers and semantic synchronization
 remain pending. Existing teacher extraction is unchanged by this source-only slice.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,

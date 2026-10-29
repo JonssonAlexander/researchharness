@@ -5,6 +5,7 @@ export const mapRegion=z.object({x:z.number().min(0).max(1),y:z.number().min(0).
 export const mapImageLayout=z.object({kind:z.enum(["overview","detail","manual"]),region:mapRegion,
 	width:z.number().int().positive().max(8192),height:z.number().int().positive().max(8192)}).strict();
 export type MapImageLayout=z.infer<typeof mapImageLayout>;
+export const mapEvidence=z.object({page:z.number().int().min(0).max(7),quote:z.string().min(1).max(1000),region:mapRegion.nullable()}).strict();
 export interface MapImageSet {pages:Uint8Array[];layout:MapImageLayout[]}
 export const wholeMapRegion={x:0,y:0,w:1,h:1};
 

@@ -2,10 +2,11 @@ import { z } from "zod";
 import { atlasConceptId, type AtlasConcept } from "./atlas.ts";
 import { mindmapRevisionId } from "./mindmaps.ts";
 import { RELATION_TYPES } from "./atlas-relations.ts";
-import {mapRegion,mapImageLayout} from "./map-images.ts";
+import {mapEvidence,mapImageLayout} from "./map-images.ts";
+import {mapDraft} from "./map-draft.ts";
 
 const text = z.string().max(4000);
-const evidence = z.object({page:z.number().int().min(0).max(7),quote:z.string().min(1).max(1000),region:mapRegion.nullable()}).strict();
+const evidence = mapEvidence;
 const additionalEvidence=z.array(evidence).max(3).optional();
 const depictions=z.array(z.object({source:z.string().max(46),target:z.string().max(46),label:z.string().max(1000),
 	direction:z.enum(["forward","both","unclear"]),evidence,additionalEvidence,uncertainty:text}).strict()).max(60);
@@ -41,7 +42,9 @@ export function validateMapFindings(value:MapFindings,context:ProposalContext[],
 const count=z.number().finite().nonnegative().optional();
 const call=z.object({inputTokens:count,outputTokens:count,cacheReadTokens:count,cacheWriteTokens:count,cacheWrite1hTokens:count,reasoningTokens:count}).strict();
 export const proposalRecord = z.object({
-	schemaVersion:z.union([z.literal(1),z.literal(2)]),id:z.string().regex(/^mp_[0-9a-f-]{36}$/),sourceRevision:mindmapRevisionId,
+	schemaVersion:z.union([z.literal(1),z.literal(2),z.literal(3)]),id:z.string().regex(/^mp_[0-9a-f-]{36}$/),sourceRevision:mindmapRevisionId,
+	refinement:z.object({parentId:z.string().regex(/^mp_[0-9a-f-]{36}$/),parentDigest:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
+	draft:mapDraft.nullable().optional(),
 	sourceHash:z.string().regex(/^[a-f0-9]{64}$/),baseRevision:z.number().int().nonnegative(),
 	context:z.array(z.object({id:atlasConceptId,title:z.string().max(160),aliases:z.array(z.string().max(160)).max(10),revision:z.number().int().positive()}).strict()).max(40),
 	model:z.string().min(1).max(240),status:z.enum(["running","prepared","failed","cancelled"]),
@@ -49,11 +52,12 @@ export const proposalRecord = z.object({
 	createdAt:z.iso.datetime(),updatedAt:z.iso.datetime(),error:z.string().max(2000).nullable(),
 	usage:z.object({model:z.string(),steps:z.number().int().nonnegative(),inputTokens:count,outputTokens:count,cacheReadTokens:count,
 		cacheWriteTokens:count,cacheWrite1hTokens:count,reasoningTokens:count,calls:z.array(call).optional(),lastStep:call.optional()}).strict().optional(),
-}).strict().refine(p=>p.schemaVersion===1||p.imageLayout?.length===p.images.length,"Images need matching layout records");
+}).strict().refine(p=>p.schemaVersion===1||p.imageLayout?.length===p.images.length,"Images need matching layout records")
+	.refine(p=>p.schemaVersion===3?!!p.refinement&&(!p.findings)&&(p.status!=="prepared"||!!p.draft):!p.refinement&&!p.draft,"Refinements need their own source-bound draft envelope");
 export type MapProposal=z.infer<typeof proposalRecord>;
 export interface ProposalView extends MapProposal {
 	estimatedCost:number|null;
-	attempts?: {id:string;status:MapProposal["status"];model:string;calls:number|null;estimatedCost:number|null}[];
+	attempts?: {id:string;status:MapProposal["status"];model:string;calls:number|null;estimatedCost:number|null;kind?:"reading"|"refinement"}[];
 }
 export interface MapProposalStore {
 	read(id:string):MapProposal|null;

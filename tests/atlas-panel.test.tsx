@@ -626,3 +626,22 @@ test('proposal review keeps drawing beside evidence, exposes uncertainty and off
   assert.equal((selected.at(-1) as typeof evidence).page,1);
  }finally{await modern.close();}
 });
+
+test('refined draft starts with the whole-map overview and exposes provenance, notes and source evidence without graph writes',async()=>{
+ const {MapDraftPreview}=await import('../components/map-draft-preview.tsx');
+ const {draftFixture}=await import('./fixtures/map-draft.ts');const selected:unknown[]=[];
+ const proposal={schemaVersion:3 as const,id:'mp_00000000-0000-4000-8000-000000000022',sourceRevision:'mr_00000000-0000-4000-8000-000000000022',sourceHash:'a'.repeat(64),baseRevision:0,context:[],model:'fake:vision',status:'prepared' as const,images:['b'.repeat(64)],imageLayout:[{kind:'manual' as const,region:{x:0,y:0,w:1,h:1},width:1,height:1}],findings:null,draft:draftFixture,refinement:{parentId:'mp_00000000-0000-4000-8000-000000000001',parentDigest:'c'.repeat(64)},digest:'d'.repeat(64),createdAt:'2026-10-29T12:00:00Z',updatedAt:'2026-10-29T12:00:00Z',error:null,estimatedCost:null};
+ const before=JSON.stringify(proposal),ui=await mount(()=> <MapDraftPreview proposal={proposal} onEvidence={e=>selected.push(e)}/>);
+ try{
+  assert(ui.document.querySelector('[aria-label="Isolated proposed mind map"]'));
+  assert(ui.document.body.textContent.includes('Draft overview · model synthesis'));
+  assert(ui.document.body.textContent.includes('Check the convergence mode.'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Brownian motion')!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert(ui.document.body.textContent.includes('The drawing names Brownian motion.'));
+  assert(ui.document.body.textContent.includes('Added explanation'));
+  assert(ui.document.body.textContent.includes('Background supplied by the model.'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent?.includes('Source image ·'))!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.equal(selected.length,1);assert.equal(JSON.stringify(proposal),before);
+  assert(![...ui.document.querySelectorAll('button')].some(b=>/Accept|Approve|Apply/.test(b.textContent??'')));
+ }finally{await ui.close();}
+});
