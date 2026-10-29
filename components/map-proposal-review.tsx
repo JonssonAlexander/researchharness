@@ -72,6 +72,7 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 	page:number;evidence:Evidence|null;onPage:(page:number)=>void;onEvidence:(source:Evidence)=>void;onGenerate:()=>void;onCancel:()=>void;
 }) {
 	const [zoom,setZoom]=useState(1),[broken,setBroken]=useState<string|null>(null),findings=proposal?.findings;
+	const notSent=proposal&&(proposal.status==="failed"||proposal.status==="cancelled")&&!proposal.images.length&&!proposal.usage;
 	const image=proposal?.images.length?`/api/atlas/proposals?id=${proposal.id}&page=${Math.min(page,proposal.images.length-1)}`:
 		capture.previewHash?`/api/atlas/mindmaps?revision=${capture.id}&kind=preview`:null;
 	return <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1.1fr)_minmax(22rem,1fr)] md:overflow-hidden">
@@ -95,8 +96,8 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 		<section aria-label="Interpretation proposal" className="space-y-4 overflow-y-auto p-5 text-sm">
 			{error&&<p role="alert" className="rounded-lg border border-destructive/40 p-3 text-xs text-destructive">{error}</p>}
 			{proposal && <div className="flex flex-wrap gap-2 text-xs text-muted-foreground"><span className="rounded-full border px-2 py-1">{proposal.status}</span>
-				<span className="py-1">{proposal.model}</span><span className="py-1">{proposal.usage?`${proposal.usage.steps} recorded model call(s)`:"Usage not reported"}</span>
-				<span className="py-1">{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</span></div>}
+				<span className="py-1">{proposal.model}</span><span className="py-1">{notSent?"Model not called":proposal.usage?`${proposal.usage.steps} recorded model call(s)`:"Usage not reported"}</span>
+				{!notSent&&<span className="py-1">{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</span>}</div>}
 			{proposal && proposal.baseRevision!==snapshot.layoutRevision && <p className="rounded-lg border border-amber-500/40 p-3 text-xs">Atlas changed since this proposal was captured. Keep it for review; any future approval must revalidate its references.</p>}
 			{proposal?.error&&<p className="rounded-lg border p-3 text-xs">{proposal.error}</p>}
 			{(!proposal||proposal.status==="failed"||proposal.status==="cancelled") && <div className="space-y-3 rounded-xl border p-4">

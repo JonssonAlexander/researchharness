@@ -24,8 +24,16 @@ Rnote's supported `export doc-pages` command produces readable PNG pages from th
 hash-verified captured original, in a private temporary directory. These are not
 the browsing thumbnails. An owner-confirmed PNG attached to the capture is used
 directly instead. Export supports 1–8 pages, 20 MB total, the existing PNG
-validation limits and a 30-second CLI timeout. Missing/failed export needs a
+validation limits and a 60-second CLI timeout. Export timeout/rejection is reported
+separately from model failure. A failed attempt with no retained pages or usage
+shows "Model not called" instead of implying subscription usage. Missing/failed export needs a
 readable manual PNG or smaller source; it never silently sends a thumbnail.
+
+29 October 2026: an owner attempt failed at 30.112 seconds with no retained pages
+or recorded calls, confirming the original export timeout. After raising the bound,
+the exact saved revision exported six validated 1685 × 2381 pages (1,549,420 bytes
+total) in 6.19 seconds in a warm local check. No provider was called by the check;
+the existing failed attempt remains intact for an explicit owner retry.
 
 Interpretation uses the existing extraction `runSubmitAgent`/`runSubagent` seam,
 with an optional image message, the shared LLM semaphore, injected settings-resolved

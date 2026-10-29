@@ -8,6 +8,7 @@ import {crc32,deflateSync,gzipSync} from "node:zlib";
 import {DatabaseSync,backup} from "node:sqlite";
 import {createFauxCore,fauxAssistantMessage,fauxToolCall} from "@earendil-works/pi-ai";
 import {createAtlasStore} from "../src/store/atlas.ts";
+import {AtlasError} from "../src/core/atlas.ts";
 import {validateMapFindings,type MapFindings} from "../src/core/map-proposals.ts";
 import {interpretMap} from "../src/agent/subagents/map-interpretation.ts";
 
@@ -24,13 +25,21 @@ function engine() {
  const faux=createFauxCore({models:[{id:'map-vision',input:['text','image'],maxTokens:9000}]});
  return {faux,engine:{model:faux.getModel(),streamFn:faux.streamSimple}};
 }
-function fixture() {
+function fixture(previewKind:'manual-png'|'rnote-thumbnail'='manual-png') {
  const file=path.join(root,randomUUID(),'atlas.sqlite'),store=createAtlasStore(file),id=`ac_${randomUUID()}`,mapId=`mm_${randomUUID()}`,source=`mr_${randomUUID()}`;
  store.save({kind:'concept',id,expectedRevision:0,title:'Brownian motion',aliases:['Wiener process'],subjectIds:[],preferredSubjectId:null,propositionIds:[]});
- store.mindmaps.capture({id:mapId,captureId:source,expectedRevision:0,title:'Fixture',filename:'source.rnote',conceptIds:[id],manualPreviewAcknowledged:true},gzipSync('opaque fixture'),png,{validation:'unverified',previewKind:'manual-png',notice:null});
+ store.mindmaps.capture({id:mapId,captureId:source,expectedRevision:0,title:'Fixture',filename:'source.rnote',conceptIds:[id],manualPreviewAcknowledged:previewKind==='manual-png'},gzipSync('opaque fixture'),png,{validation:'unverified',previewKind,notice:null});
  const pair=engine();return {file,store,id,source,...pair};
 }
 const command=(source:string,model:string,id=`mp_${randomUUID()}`)=>({id,sourceRevision:source,expectedModel:model,consent:true as const});
+
+test('page export failure retains the attempt without invoking the model or changing the graph',async()=>{
+ const f=fixture('rnote-thumbnail'),before=f.store.read();let calls=0;
+ const service=createMapProposalService(f.store,()=>f.engine,async()=>{calls++;return findings;},async()=>{throw new AtlasError('Rnote page export timed out. No model request was made.',422);});
+ const result=await service.generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+ assert.equal(result?.status,'failed');assert.equal(calls,0);assert.deepEqual(result?.images,[]);assert.equal(result?.usage,undefined);
+ assert.match(result!.error!,/page export timed out/);assert.deepEqual(f.store.read(),before);
+});
 
 test('image-aware submit reuses extraction runner, retains proposal/usage/pages, and never writes knowledge',async()=>{
  const f=fixture(),before=f.store.read();let calls=0,imageSeen=false;

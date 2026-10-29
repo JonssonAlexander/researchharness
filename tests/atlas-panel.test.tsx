@@ -608,4 +608,11 @@ test('proposal review keeps drawing beside evidence, exposes uncertainty and off
   await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent?.includes('Page 1'))!.dispatchEvent(new window.Event('click',{bubbles:true}));});
   assert.deepEqual(chosen,[evidence]);
  }finally{await ui.close();}
+ const failed=await mount(()=> <ProposalReviewBody proposal={{...proposal,status:'failed',images:[],findings:null,error:'Export timed out',model:'chatgpt:test'}} capture={capture} snapshot={snapshot} model='chatgpt:test' loaded busy={false} error={null}
+  page={0} evidence={null} onPage={()=>{}} onEvidence={()=>{}} onGenerate={()=>{}} onCancel={()=>{}} />);
+ try {
+  assert(failed.document.body.textContent.includes('Model not called'));
+  assert(!failed.document.body.textContent.includes('Counts toward plan usage'));
+  assert(!failed.document.body.textContent.includes('Usage not reported'));
+ }finally{await failed.close();}
 });

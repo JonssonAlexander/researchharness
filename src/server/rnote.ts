@@ -110,10 +110,17 @@ export async function exportRnotePages(original:Uint8Array,signal?:AbortSignal):
 	try {
 		const source=path.join(dir,"source.rnote"),pages=path.join(dir,"pages");
 		await fs.writeFile(source,original,{mode:0o600});await fs.mkdir(pages,{mode:0o700});
-		await run(cli,["export","doc-pages","--output-dir",pages,"--output-file-stem","page","--export-format","png","--bitmap-scalefactor","1.5","--on-conflict","overwrite",source],{
-			timeout:30000,maxBuffer:65536,killSignal:"SIGKILL",signal,
-			env:{NODE_ENV:process.env.NODE_ENV,PATH:process.env.PATH,HOME:os.homedir(),LANG:"en_US.UTF-8",TMPDIR:os.tmpdir()},
-		});
+		try {
+			await run(cli,["export","doc-pages","--output-dir",pages,"--output-file-stem","page","--export-format","png","--bitmap-scalefactor","1.5","--on-conflict","overwrite",source],{
+				timeout:60000,maxBuffer:65536,killSignal:"SIGKILL",signal,
+				env:{NODE_ENV:process.env.NODE_ENV,PATH:process.env.PATH,HOME:os.homedir(),LANG:"en_US.UTF-8",TMPDIR:os.tmpdir()},
+			});
+		} catch(error) {
+			if(signal?.aborted)throw error;
+			throw new AtlasError((error as {killed?:boolean}).killed
+				? "Rnote page export timed out after 60 seconds. No model request was made. Retry or import a full PNG exported from Rnote."
+				: "Rnote could not export readable pages. No model request was made. Import a full PNG exported from Rnote.",422);
+		}
 		const names=(await fs.readdir(pages)).filter(n=>/^page.*\.png$/.test(n)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
 		if(!names.length||names.length>8)throw new AtlasError("Interpretation supports 1–8 pages. Export a smaller map or a readable PNG.",422);
 		const images:Uint8Array[]=[];let total=0;
