@@ -18,6 +18,7 @@
 export * from "./contracts.ts";
 export * from "./atlas.ts";
 export * from "./mindmaps.ts";
+export * from "./map-proposals.ts";
 export * from "./atlas-layout.ts";
 export * from "./atlas-relations.ts";
 export * from "./atlas-query.ts";

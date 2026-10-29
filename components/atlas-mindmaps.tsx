@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {MapProposalDialog} from "./map-proposal-review";
 import type { AtlasSnapshot, Mindmap, MindmapInput } from "@/src/core";
 
 const button = "rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50";
@@ -87,6 +88,7 @@ function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive}: {
 	map: Mindmap; snapshot: AtlasSnapshot; selectedId: string | null; busy: boolean; onEdit: () => void; onArchive: () => void;
 }) {
 	const [revision, setRevision] = useState<string | null>(null), [confirm, setConfirm] = useState(false);
+	const [review,setReview] = useState(false);
 	const [brokenPreview, setBrokenPreview] = useState<string | null>(null);
 	const current = map.captures.find(c => c.id === map.currentRevision)!;
 	const latest = selectedId && !current.conceptIds.includes(selectedId) ? [...map.captures].reverse().find(c => c.conceptIds.includes(selectedId))! : current;
@@ -100,16 +102,18 @@ function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive}: {
 			{/* eslint-disable-next-line @next/next/no-img-element -- bounded local source PNG; no image optimization or external host. */}
 			<img src={asset(capture.id,"preview")} alt={`Preview of ${map.title}, source revision ${map.captures.indexOf(capture)+1}`} className="max-h-48 w-full rounded bg-white object-contain" onError={() => setBrokenPreview(capture.id)} />
 		</a> : <p className="text-muted-foreground">Preview unavailable for this revision. The original remains downloadable.</p>}
-		<p className="text-muted-foreground">{capture.validation === "rnote-cli" ? "Rnote format checked" : "Rnote format unchecked"} · {capture.previewKind === "manual-png" ? "Owner-supplied PNG" : capture.previewKind === "rnote-thumbnail" ? "Rnote thumbnail" : "No preview"} · Not interpreted</p>
+		<p className="text-muted-foreground">{capture.validation === "rnote-cli" ? "Rnote format checked" : "Rnote format unchecked"} · {capture.previewKind === "manual-png" ? "Owner-supplied PNG" : capture.previewKind === "rnote-thumbnail" ? "Rnote thumbnail" : "No preview"}</p>
 		{capture.notice && <p>{capture.notice}</p>}
 		{capture.conceptIds.length > 0 && <p>References: {capture.conceptIds.map(id => snapshot.concepts.find(c => c.id === id)?.title ?? "Removed concept").join(", ")}</p>}
 		<a className="underline" href={asset(capture.id,"original")}>Download Rnote original</a>
 		<p className="text-muted-foreground">Edit the downloaded copy in Rnote, then import it as a new revision here.</p>
 		<div className="flex flex-wrap gap-1">
+			<button type="button" className={button} disabled={busy} onClick={()=>setReview(true)}>Interpret / review</button>
 			<button type="button" className={button} disabled={busy} onClick={onEdit}>Import new revision</button>
 			{confirm ? <><button type="button" className={button} disabled={busy} onClick={onArchive}>Confirm archive</button>
 				<button type="button" className={button} disabled={busy} onClick={() => setConfirm(false)}>Cancel</button></> :
 				<button type="button" className={button} disabled={busy} onClick={() => setConfirm(true)}>Archive map</button>}
 		</div>
+		{review&&<MapProposalDialog key={capture.id} map={map} capture={capture} snapshot={snapshot} onClose={()=>setReview(false)} />}
 	</section>;
 }

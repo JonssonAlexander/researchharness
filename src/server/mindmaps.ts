@@ -27,7 +27,7 @@ export function createMindmapService(store: AtlasStore, prepare = prepareRnote) 
 		},
 	};
 }
-async function body(request: Request, limit: number) {
+export async function readSourceBody(request: Request, limit: number) {
 	if (Number(request.headers.get("content-length")) > limit) throw new AtlasError("Import exceeds the upload limit.", 413);
 	const reader = request.body?.getReader();
 	if (!reader) throw new AtlasError("Expected an upload.");
@@ -46,7 +46,7 @@ export async function importMindmapResponse(request: Request): Promise<Response>
 	try {
 		const type = request.headers.get("content-type") ?? "";
 		if (!type.startsWith("multipart/form-data;")) throw new AtlasError("Expected a file upload.", 415);
-		const bytes = await body(request, MINDMAP_LIMITS.request);
+		const bytes = await readSourceBody(request, MINDMAP_LIMITS.request);
 		const form = await new Response(bytes, {headers: {"content-type": type}}).formData();
 		for (const key of form.keys())
 			if (!["metadata", "original", "preview"].includes(key) || form.getAll(key).length !== 1) throw new AtlasError("Unexpected or repeated upload field.");
@@ -63,7 +63,7 @@ export async function importMindmapResponse(request: Request): Promise<Response>
 export async function archiveMindmapResponse(request: Request): Promise<Response> {
 	try {
 		if (request.headers.get("content-type")?.split(";")[0] !== "application/json") throw new AtlasError("Expected JSON.", 415);
-		return Response.json(createMindmapService(stores.atlasStore).archive(JSON.parse((await body(request, 4096)).toString("utf8"))));
+		return Response.json(createMindmapService(stores.atlasStore).archive(JSON.parse((await readSourceBody(request, 4096)).toString("utf8"))));
 	} catch (error) { return failure(error); }
 }
 export function mindmapAssetResponse(request: Request): Response {

@@ -35,7 +35,7 @@ export function readMindmaps(db: DatabaseSync): Mindmap[] {
 
 /** Immutable files land before SQL references. Interrupted writes can leave only
  * unreferenced blobs; retry verifies/reuses them and never overwrites an original. */
-export function createMindmapStore(database: Database, dataRoot: string): MindmapStore {
+export function createMindmapStore(database: Database, dataRoot: string): MindmapStore & {retainImage(bytes:Uint8Array):string;image(hash:string):Uint8Array} {
 	function directory(kind: "original" | "preview") {
 		let target = dataRoot;
 		for (const segment of ["mindmaps", kind === "original" ? "revisions" : "previews"]) {
@@ -79,6 +79,8 @@ export function createMindmapStore(database: Database, dataRoot: string): Mindma
 		return hash;
 	}
 	return {
+		retainImage: bytes => writeBlob("preview",bytes),
+		image: hash => readBlob("preview",hash),
 		capture(raw, original, preview, info) {
 			const input = mindmapInput.parse(raw);
 			if ((info.previewKind === "manual-png") !== input.manualPreviewAcknowledged)

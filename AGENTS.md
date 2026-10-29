@@ -426,7 +426,11 @@ inheritance and hierarchy visualization remain pending.
 The first Phase 3 slice now supports managed Rnote uploads, immutable original
 and preview revisions, per-revision concept references, archive/restore, a bounded
 native thumbnail adapter and a manual PNG fallback. See [Rnote import and limits](docs/atlas-mindmaps.md).
-Interpretation, approval, watchers and semantic synchronization remain pending.
+Saved source interpretation proposals now reuse the image-capable extraction
+submit runner and open in a source/evidence review dialog; see
+[proposal storage, limits and remaining gates](docs/atlas-map-proposals.md).
+Identity auditing, editable review, approval, watchers and semantic synchronization
+remain pending. Existing teacher extraction is unchanged by this source-only slice.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.

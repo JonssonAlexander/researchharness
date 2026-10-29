@@ -7,7 +7,7 @@
  * defaults) applies at the capture.
  */
 
-import type { Usage } from "@earendil-works/pi-ai";
+import type { ImageContent, Usage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 import { invalidInputResult, toToolResult } from "../tool-execute.ts";
@@ -55,6 +55,7 @@ export async function runSubmitAgent<T>(opts: {
 	fill: (input: any) => T;
 	systemPrompt: string;
 	prompt: string;
+	images?: ImageContent[];
 	engine: PiEngine | undefined;
 	signal: AbortSignal | undefined;
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void;
@@ -110,7 +111,8 @@ export async function runSubmitAgent<T>(opts: {
 			role: opts.role,
 			engine: opts.engine,
 			systemPrompt: opts.systemPrompt,
-			prompt: opts.prompt,
+			prompt: opts.images?.length ? undefined : opts.prompt,
+			messages: opts.images?.length ? [{role:"user",content:[{type:"text",text:opts.prompt},...opts.images],timestamp:Date.now()}] : undefined,
 			maxTurns: opts.maxTurns ?? 4,
 			abortSignal: opts.signal,
 			chatId: opts.chatId,

@@ -1,3 +1,4 @@
+import type { MapProposalStore } from "./map-proposals.ts";
 import type { Mindmap, MindmapStore } from "./mindmaps.ts";
 import { z } from "zod";
 import { atlasRelationSchema, type AtlasRelation } from "./atlas-relations.ts";
@@ -148,6 +149,7 @@ export interface AtlasSnapshot {
 	subjects: AtlasSubject[];
 }
 export interface AtlasStore {
+	proposals: MapProposalStore;
 	mindmaps: MindmapStore;
 	read(): AtlasSnapshot;
 	save(command: AtlasCommand): void;

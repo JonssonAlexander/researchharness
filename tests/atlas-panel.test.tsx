@@ -578,7 +578,7 @@ test("mind map inspection shows revision-bound sources and preserves history whe
  try {
   assert(ui.document.querySelector('img')?.getAttribute('src')?.includes(revisionId));
   assert(ui.document.querySelector('a[href*="kind=original"]'));
-  assert(ui.document.body.textContent.includes('Not interpreted'));
+  assert(ui.document.body.textContent.includes('Interpret / review'));
   const click=async(text:string)=>{await act(async()=>{
    [...ui.document.querySelectorAll('button')].find(b=>b.textContent===text)!.dispatchEvent(new window.Event('click',{bubbles:true}));
   });};
@@ -587,4 +587,25 @@ test("mind map inspection shows revision-bound sources and preserves history whe
   assert(ui.document.querySelector('[role="alert"]')?.textContent?.includes('Reload'));
   assert(ui.document.querySelector('a[href*="kind=original"]'));
  } finally {await ui.close();globalThis.fetch=oldFetch;}
+});
+
+test('proposal review keeps drawing beside evidence, exposes uncertainty and offers no graph-write action', async()=>{
+ const {ProposalReviewBody}=await import('../components/map-proposal-review.tsx');
+ const source='mr_00000000-0000-4000-8000-000000000001';
+ const capture={schemaVersion:1 as const,id:source,mapId:'mm_00000000-0000-4000-8000-000000000001',hash:'a'.repeat(64),previewHash:'b'.repeat(64),filename:'a.rnote',capturedAt:'2026-10-29T12:00:00Z',conceptIds:[],validation:'rnote-cli' as const,previewKind:'rnote-thumbnail' as const,notice:null};
+ const evidence={page:0,quote:'Brownian motion',region:{x:0.1,y:0.1,w:0.3,h:0.2}};
+ const proposal={schemaVersion:1 as const,id:'mp_00000000-0000-4000-8000-000000000001',sourceRevision:source,sourceHash:capture.hash,baseRevision:1,context:[],model:'fake:vision',status:'prepared' as const,images:['c'.repeat(64)],digest:'d'.repeat(64),createdAt:'2026-10-29T12:00:00Z',updatedAt:'2026-10-29T12:00:00Z',error:null,estimatedCost:null,
+  findings:{transcription:'Brownian motion',concepts:[{key:'draft_a',title:'Brownian motion',aliases:[],existingId:null,notes:'Visible label',evidence,uncertainty:'Domain assumption unclear'}],relations:[],questions:['Which filtration?']}};
+ const chosen:unknown[]=[];
+ const ui=await mount(()=> <ProposalReviewBody proposal={proposal} capture={capture} snapshot={{...snapshot,layoutRevision:1}} model='fake:vision' loaded busy={false} error={null}
+  page={0} evidence={evidence} onPage={()=>{}} onEvidence={e=>chosen.push(e)} onGenerate={()=>{throw Error('must not dispatch on read');}} onCancel={()=>{}} />);
+ try {
+  assert(ui.document.querySelector('[aria-label="Saved source drawing"] img'));
+  assert(ui.document.body.textContent.includes('Domain assumption unclear'));
+  assert(ui.document.body.textContent.includes('Which filtration?'));
+  assert(ui.document.body.textContent.includes('Review only'));
+  assert(![...ui.document.querySelectorAll('button')].some(b=>/Accept|Approve|Apply|Interpret revision/.test(b.textContent??'')));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent?.includes('Page 1'))!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(chosen,[evidence]);
+ }finally{await ui.close();}
 });

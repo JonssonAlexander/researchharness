@@ -98,3 +98,29 @@ export async function prepareRnote(original: Uint8Array, manual: Uint8Array | nu
 		}
 	} finally { await fs.rm(dir, {recursive: true, force: true}); }
 }
+
+/** Readable pages for interpretation; thumbnails are never a model-input fallback. */
+export async function exportRnotePages(original:Uint8Array,signal?:AbortSignal):Promise<Uint8Array[]> {
+	const cli=rnoteExecutable();
+	if(!cli || !(await fs.stat(cli).catch(()=>null))?.isFile())
+		throw new AtlasError("Full-page export is unavailable. Import this revision with a readable PNG exported from Rnote.",422);
+	const dir=await fs.mkdtemp(path.join(os.tmpdir(),"atlas-rnote-pages-"));
+	try {
+		const source=path.join(dir,"source.rnote"),pages=path.join(dir,"pages");
+		await fs.writeFile(source,original,{mode:0o600});await fs.mkdir(pages,{mode:0o700});
+		await run(cli,["export","doc-pages","--output-dir",pages,"--output-file-stem","page","--export-format","png","--bitmap-scalefactor","1.5","--on-conflict","overwrite",source],{
+			timeout:30000,maxBuffer:65536,killSignal:"SIGKILL",signal,
+			env:{NODE_ENV:process.env.NODE_ENV,PATH:process.env.PATH,HOME:os.homedir(),LANG:"en_US.UTF-8",TMPDIR:os.tmpdir()},
+		});
+		const names=(await fs.readdir(pages)).filter(n=>/^page.*\.png$/.test(n)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+		if(!names.length||names.length>8)throw new AtlasError("Interpretation supports 1–8 pages. Export a smaller map or a readable PNG.",422);
+		const images:Uint8Array[]=[];let total=0;
+		for(const name of names) {
+			const file=path.join(pages,name),stat=await fs.lstat(file);
+			if(!stat.isFile()||stat.size>MINDMAP_LIMITS.preview||(total+=stat.size)>20*1024*1024)
+				throw new AtlasError("Exported pages exceed the interpretation image limit.",422);
+			const bytes=await fs.readFile(file);validateMindmapPng(bytes);images.push(bytes);
+		}
+		return images;
+	} finally {await fs.rm(dir,{recursive:true,force:true});}
+}
