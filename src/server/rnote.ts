@@ -72,16 +72,18 @@ export async function prepareRnote(original: Uint8Array, manual: Uint8Array | nu
 	try {
 		const source = path.join(dir, "source.rnote"), preview = path.join(dir, "preview.png");
 		await fs.writeFile(source, original, {mode: 0o600});
-		const options = {timeout: 15000, maxBuffer: 65536, signal, killSignal: "SIGKILL" as const,
+		const options = {timeout: 30000, maxBuffer: 65536, signal, killSignal: "SIGKILL" as const,
 			env: {NODE_ENV: process.env.NODE_ENV, PATH: process.env.PATH, HOME: os.homedir(), LANG: "en_US.UTF-8", TMPDIR: os.tmpdir()}};
 		try {
-			const checked = await run(cli, ["test", source], {...options, encoding: "utf8"});
+			const checked = await run(cli, ["test", source], {...options, timeout: 60000, encoding: "utf8"});
 			if (!checked.stdout.includes("Test succeeded for file")) throw new Error("Rnote did not confirm validation");
 		}
 		catch (error) {
 			if (signal?.aborted) throw error;
 			if (typeof (error as NodeJS.ErrnoException).code === "string") return {preview: manual, info};
-			throw new AtlasError("Rnote could not validate this file within 15 seconds. Nothing was imported; save it in Rnote and retry.", 422);
+			throw new AtlasError((error as {killed?:boolean}).killed
+				? "Rnote validation timed out after 60 seconds. Nothing was imported; your original is unchanged. Retry once Rnote has finished opening."
+				: "Rnote could not validate this file. Nothing was imported; open it in Rnote and check that it loads correctly.", 422);
 		}
 		info.validation = "rnote-cli"; info.notice = null;
 		if (manual) return {preview: manual, info};

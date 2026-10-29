@@ -22,7 +22,8 @@ On macOS the adapter uses `/Applications/Rnote.app/Contents/MacOS/rnote-cli`.
 host. It runs `test` on the captured temporary copy and requires an explicit
 success message, then calls `thumbnail --size 1024`. There is no shell, external
 path supplied by a request, network/model call, arbitrary file opener or mutation
-of an external original. Each process has a 15-second timeout and bounded output;
+of an external original. Validation has a 60-second timeout and thumbnail generation
+has a 30-second timeout, with bounded output;
 request cancellation kills the process. Only a small non-provider environment is
 passed. Temporary files are removed after success, failure or cancellation.
 
@@ -81,6 +82,13 @@ Installed Rnote CLI 0.12.0 imported a generated Xournal fixture into a genuine
 `.rnote`, validated it and generated a visible PNG. The first adapter invocation
 in the check took 10.94 seconds; the second took 0.21 seconds on that small fixture.
 These are observed runs, not a large-map or cold-launch performance guarantee.
+
+29 October 2026: an owner file that hit the original 15-second validation cutoff
+was independently accepted by Rnote CLI. The adapter now allows 60 seconds for
+validation and 30 for a thumbnail, distinguishes timeout from rejection, and shows
+local preparation progress. The exact adapter subsequently validated that file
+and produced a 60,467-byte thumbnail in 6.89 seconds; no source was imported and
+no model request was made by that diagnostic check.
 
 Focused tests cover exact original retention, immutable revisions/reference
 history, reopen/backup restore, stale saves, retry token conflicts, injected SQL

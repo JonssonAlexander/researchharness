@@ -73,6 +73,7 @@ export function AtlasMindmaps({snapshot, selectedId, refresh}: {
 				</details>
 				<button className={button} disabled={busy || !original || !editing.title.trim() || (!!preview && !editing.manualPreviewAcknowledged)}>{busy ? "Importing…" : "Save map revision"}</button>{" "}
 				<button type="button" className={button} onClick={() => busy ? abort.current?.abort() : setEditing(null)}>Cancel</button>
+				{busy && <p role="status" className="text-muted-foreground">Checking the Rnote file and making a preview locally. This can take up to 90 seconds; no AI model is being used.</p>}
 			</form>}
 		{error && <p role="alert" className="text-destructive">{error}</p>}
 		{maps.filter(m => !m.archived && linked(m)).map(map => <MindmapCard key={map.id} map={map} snapshot={snapshot} selectedId={selectedId}
