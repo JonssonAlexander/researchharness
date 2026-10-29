@@ -20,7 +20,11 @@ remain historical IDs and display as removed; their source bytes are not deleted
 On macOS the adapter uses `/Applications/Rnote.app/Contents/MacOS/rnote-cli`.
 `RNOTE_CLI` may select an administrator-configured absolute executable path on any
 host. It runs `test` on the captured temporary copy and requires an explicit
-success message, then calls `thumbnail --size 1024`. There is no shell, external
+success message, then calls `thumbnail --size 3072`. This triples the overview's
+linear resolution compared with the initial 1024-pixel preview, while retaining
+the existing PNG byte/pixel limits. The compact card links to the full-size image.
+Existing capture previews stay immutable; a new capture can retain the same
+original bytes with a sharper generated preview. There is no shell, external
 path supplied by a request, network/model call, arbitrary file opener or mutation
 of an external original. Validation has a 60-second timeout and thumbnail generation
 has a 30-second timeout, with bounded output;
@@ -89,6 +93,11 @@ validation and 30 for a thumbnail, distinguishes timeout from rejection, and sho
 local preparation progress. The exact adapter subsequently validated that file
 and produced a 60,467-byte thumbnail in 6.89 seconds; no source was imported and
 no model request was made by that diagnostic check.
+
+The higher-resolution adapter produced a validated 3072 × 2187 preview (435,912
+bytes) from that file in 8.86 seconds. The owner's existing map was refreshed via
+the normal import API as revision 2: identical original hash, intact revision 1,
+and unchanged Atlas graph metadata. Source/UI tests (21) and targeted lint passed.
 
 Focused tests cover exact original retention, immutable revisions/reference
 history, reopen/backup restore, stale saves, retry token conflicts, injected SQL

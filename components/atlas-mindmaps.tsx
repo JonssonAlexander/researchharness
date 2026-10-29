@@ -102,6 +102,7 @@ function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive}: {
 		{capture.previewHash && brokenPreview !== capture.id ? <a href={asset(capture.id,"preview")} target="_blank" rel="noreferrer">
 			{/* eslint-disable-next-line @next/next/no-img-element -- bounded local source PNG; no image optimization or external host. */}
 			<img src={asset(capture.id,"preview")} alt={`Preview of ${map.title}, source revision ${map.captures.indexOf(capture)+1}`} className="max-h-48 w-full rounded bg-white object-contain" onError={() => setBrokenPreview(capture.id)} />
+			<span className="mt-1 block text-muted-foreground underline underline-offset-4">Open full-size preview ↗</span>
 		</a> : <p className="text-muted-foreground">Preview unavailable for this revision. The original remains downloadable.</p>}
 		<p className="text-muted-foreground">{capture.validation === "rnote-cli" ? "Rnote format checked" : "Rnote format unchecked"} · {capture.previewKind === "manual-png" ? "Owner-supplied PNG" : capture.previewKind === "rnote-thumbnail" ? "Rnote thumbnail" : "No preview"}</p>
 		{capture.notice && <p>{capture.notice}</p>}

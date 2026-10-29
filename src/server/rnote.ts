@@ -88,7 +88,7 @@ export async function prepareRnote(original: Uint8Array, manual: Uint8Array | nu
 		info.validation = "rnote-cli"; info.notice = null;
 		if (manual) return {preview: manual, info};
 		try {
-			await run(cli, ["thumbnail", "--size", "1024", source, preview], options);
+			await run(cli, ["thumbnail", "--size", "3072", source, preview], options);
 			const stat = await fs.stat(preview);
 			if (stat.size > MINDMAP_LIMITS.preview) throw new Error("Preview too large");
 			const bytes = await fs.readFile(preview);
