@@ -20,7 +20,7 @@ function chunk(type:string,b:Buffer){const c=Buffer.alloc(b.length+12);c.writeUI
 const header=Buffer.alloc(13);header.writeUInt32BE(1);header.writeUInt32BE(1,4);header[8]=8;header[9]=6;
 const png=Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',deflateSync(Buffer.from([0,255,255,255,255]))),chunk('IEND',Buffer.alloc(0))]);
 const evidence={page:0,quote:'Brownian motion',region:{x:0.1,y:0.1,w:0.4,h:0.3}};
-const findings:MapFindings={transcription:'Brownian motion',concepts:[{key:'draft_a',title:'Brownian motion',aliases:[],existingId:null,notes:'Visible label.',evidence,uncertainty:''}],relations:[],questions:['What assumptions does the arrow require?']};
+const findings:MapFindings & {depictions:NonNullable<MapFindings["depictions"]>}={transcription:'Brownian motion',depictions:[],concepts:[{key:'draft_a',title:'Brownian motion',aliases:[],existingId:null,notes:'Visible label.',evidence,uncertainty:''}],relations:[],questions:['What assumptions does the arrow require?']};
 function engine() {
  const faux=createFauxCore({models:[{id:'map-vision',input:['text','image'],maxTokens:9000}]});
  return {faux,engine:{model:faux.getModel(),streamFn:faux.streamSimple}};
@@ -117,7 +117,7 @@ test('model deadline starts after export and is retained as a timeout without au
  const f=fixture('rnote-thumbnail'),before=f.store.read(),deadline=new AbortController();let deadlines=0,calls=0;
  const service=createMapProposalService(f.store,()=>f.engine,async(_e,pages,_c,signal)=>{
   calls++;assert.equal(deadlines,1);assert.equal(pages.length,1);deadline.abort();assert(signal.aborted);return findings;
- },async(_original,signal)=>{assert.equal(deadlines,0);assert(!signal?.aborted);return [png];},()=>{deadlines++;return deadline.signal;});
+ },async(_original,signal)=>{assert.equal(deadlines,0);assert(!signal?.aborted);return {pages:[png],layout:[{kind:"overview",region:{x:0,y:0,w:1,h:1},width:1,height:1}]};},()=>{deadlines++;return deadline.signal;});
  const c=command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),signal=new AbortController().signal;
  const result=await service.generate(c,signal);
  assert.equal(result?.status,'failed');assert.match(result!.error!,/model response timed out after 5 minutes/);
@@ -131,9 +131,31 @@ test('restart leaves an interrupted attempt without auto retry; v7 migration and
  assert(f.store.proposals.begin(record));db.prepare("UPDATE map_proposals SET owner='previous process'").run();
  assert.equal(createAtlasStore(f.file).proposals.latest(f.source)?.status,'failed');
  const row=db.prepare('SELECT record FROM map_proposals').get()!;
- db.prepare('UPDATE map_proposals SET record=?').run(JSON.stringify({...JSON.parse(String(row.record)),schemaVersion:2}));
+ db.prepare('UPDATE map_proposals SET record=?').run(JSON.stringify({...JSON.parse(String(row.record)),schemaVersion:3}));
  assert.throws(()=>f.store.proposals.latest(f.source),/newer app/);
  db.exec('DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
  const before=f.store.read();assert.deepEqual(createAtlasStore(f.file).read(),before);
  assert(fs.readdirSync(path.dirname(f.file)).some(n=>n.includes('.v7-')));
+});
+
+test('positioned views travel in one model request, drawn arrows stay distinct, and layouts survive explicit reprocessing',async()=>{
+ const f=fixture('rnote-thumbnail'),before=f.store.read();let calls=0;
+ const layout=[{kind:'overview' as const,region:{x:0,y:0,w:1,h:1},width:1,height:1},{kind:'detail' as const,region:{x:0.4,y:0,w:0.6,h:1},width:1,height:1}];
+ const reading={...findings,concepts:[...findings.concepts,{...findings.concepts[0]!,key:'draft_b',title:'Quadratic variation'}],depictions:[{source:'draft_a',target:'draft_b',label:'',direction:'forward' as const,evidence:{...evidence,page:1},additionalEvidence:[evidence],uncertainty:'The arrow is unlabelled.'}]};
+ f.faux.setResponses([context=>{
+  calls++;const messages=context.messages.filter(m=>m.role==='user'),content=messages.flatMap(m=>Array.isArray(m.content)?m.content:[]);
+  assert.equal(content.filter(c=>c.type==='image').length,2);assert(content.some(c=>c.type==='text'&&c.text.includes('"x":0.4')));
+  return fauxAssistantMessage(fauxToolCall('submit_map_proposal',reading),{stopReason:'toolUse'});
+ },()=>{calls++;return fauxAssistantMessage(fauxToolCall('submit_map_proposal',reading),{stopReason:'toolUse'});}]);
+ const service=createMapProposalService(f.store,()=>f.engine,interpretMap,async()=>({pages:[png,png],layout}));
+ const c=command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),signal=new AbortController().signal;
+ const first=await service.generate(c,signal);assert.equal(first?.status,'prepared');assert.equal(first?.schemaVersion,2);
+ assert.deepEqual(first?.imageLayout,layout);assert.equal(first?.findings?.depictions?.length,1);assert.equal(first?.findings?.relations.length,0);
+ assert.equal(validateMapFindings({...reading,depictions:[{...reading.depictions[0]!,additionalEvidence:[{...evidence,page:7}]}]},[],2),'Relations need distinct draft endpoints and a real evidence page.');
+ const again=await service.generate({...command(f.source,c.expectedModel),reprocess:true},signal);
+ assert.equal(again?.status,'prepared');assert.notEqual(again.id,first?.id);assert.equal(calls,2);
+ assert.equal(service.read(f.source,first!.id)?.id,first!.id);assert.equal(service.read(f.source)?.attempts?.length,2);assert.deepEqual(f.store.read(),before);
+ const db=new DatabaseSync(f.file),raw=db.prepare('SELECT record FROM map_proposals WHERE id=?').get(first!.id)!;
+ const altered=JSON.parse(String(raw.record));altered.imageLayout[1].region.x=.3;
+ db.prepare('UPDATE map_proposals SET record=? WHERE id=?').run(JSON.stringify(altered),first!.id);assert.throws(()=>f.store.proposals.read(first!.id),/changed outside/);db.close();
 });

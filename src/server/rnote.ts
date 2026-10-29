@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { crc32, inflateSync, gunzipSync } from "node:zlib";
 import { AtlasError } from "../core/atlas.ts";
+import type {MapImageSet} from "../core/map-images.ts";
 import { MINDMAP_LIMITS, type MindmapPreparation } from "../core/mindmaps.ts";
 
 /** Accept bounded, noninterlaced 8-bit PNGs, not executable SVG/HTML or APNG.
@@ -101,17 +102,17 @@ export async function prepareRnote(original: Uint8Array, manual: Uint8Array | nu
 	} finally { await fs.rm(dir, {recursive: true, force: true}); }
 }
 
-/** Readable pages for interpretation; thumbnails are never a model-input fallback. */
-export async function exportRnotePages(original:Uint8Array,signal?:AbortSignal):Promise<Uint8Array[]> {
+/** Whole-canvas context and overlapping details; never substitute a thumbnail. */
+export async function exportRnoteImages(original:Uint8Array,signal?:AbortSignal):Promise<MapImageSet> {
 	const cli=rnoteExecutable();
 	if(!cli || !(await fs.stat(cli).catch(()=>null))?.isFile())
 		throw new AtlasError("Full-page export is unavailable. Import this revision with a readable PNG exported from Rnote.",422);
-	const dir=await fs.mkdtemp(path.join(os.tmpdir(),"atlas-rnote-pages-"));
+	const dir=await fs.mkdtemp(path.join(os.tmpdir(),"atlas-rnote-images-"));
 	try {
-		const source=path.join(dir,"source.rnote"),pages=path.join(dir,"pages");
-		await fs.writeFile(source,original,{mode:0o600});await fs.mkdir(pages,{mode:0o700});
+		const source=path.join(dir,"source.rnote"),output=path.join(dir,"map.svg");
+		await fs.writeFile(source,original,{mode:0o600});
 		try {
-			await run(cli,["export","doc-pages","--output-dir",pages,"--output-file-stem","page","--export-format","png","--bitmap-scalefactor","1.5","--on-conflict","overwrite",source],{
+			await run(cli,["export","doc","--output-file",output,"--no-pattern","--on-conflict","overwrite",source],{
 				timeout:60000,maxBuffer:65536,killSignal:"SIGKILL",signal,
 				env:{NODE_ENV:process.env.NODE_ENV,PATH:process.env.PATH,HOME:os.homedir(),LANG:"en_US.UTF-8",TMPDIR:os.tmpdir()},
 			});
@@ -121,15 +122,13 @@ export async function exportRnotePages(original:Uint8Array,signal?:AbortSignal):
 				? "Rnote page export timed out after 60 seconds. No model request was made. Retry or import a full PNG exported from Rnote."
 				: "Rnote could not export readable pages. No model request was made. Import a full PNG exported from Rnote.",422);
 		}
-		const names=(await fs.readdir(pages)).filter(n=>/^page.*\.png$/.test(n)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-		if(!names.length||names.length>8)throw new AtlasError("Interpretation supports 1–8 pages. Export a smaller map or a readable PNG.",422);
-		const images:Uint8Array[]=[];let total=0;
-		for(const name of names) {
-			const file=path.join(pages,name),stat=await fs.lstat(file);
-			if(!stat.isFile()||stat.size>MINDMAP_LIMITS.preview||(total+=stat.size)>20*1024*1024)
-				throw new AtlasError("Exported pages exceed the interpretation image limit.",422);
-			const bytes=await fs.readFile(file);validateMindmapPng(bytes);images.push(bytes);
-		}
-		return images;
+		const stat=await fs.lstat(output);
+		if(!stat.isFile()||stat.size>32*1024*1024)throw new AtlasError("Whole-map export exceeds the 32 MB limit.",422);
+		const {renderMapImages}=await import("./map-images.ts");
+		const rendering=AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(30000)]);
+		let images;
+		try{images=await renderMapImages(await fs.readFile(output,"utf8"),rendering);}
+		catch(error){if(!signal?.aborted&&rendering.aborted)throw new AtlasError("Whole-map rendering timed out. No model request was made. Try a smaller map or import a full PNG.",422);throw error;}
+		images.pages.forEach(validateMindmapPng);return images;
 	} finally {await fs.rm(dir,{recursive:true,force:true});}
 }

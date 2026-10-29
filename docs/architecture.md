@@ -17,6 +17,7 @@ See [the as-built schema, boundaries and remaining Phase 2 work](atlas-foundatio
 Rnote import adds schema v7 source captures and immutable blobs under the data
 root; [source workflow, recovery and native adapter](atlas-mindmaps.md). These are
 manual source references. Schema v8 adds [retained interpretation proposals](atlas-map-proposals.md)
+with backward-compatible v1/v2 proposal envelopes and whole-map image layout metadata
 through the existing extraction runner; semantic approval and synchronization are pending.
 
 ## Research Atlas credential-storage update — 28 October 2026

@@ -615,4 +615,14 @@ test('proposal review keeps drawing beside evidence, exposes uncertainty and off
   assert(!failed.document.body.textContent.includes('Counts toward plan usage'));
   assert(!failed.document.body.textContent.includes('Usage not reported'));
  }finally{await failed.close();}
+ const drawn={...proposal,schemaVersion:2 as const,images:['c'.repeat(64),'e'.repeat(64)],imageLayout:[{kind:'overview' as const,region:{x:0,y:0,w:1,h:1},width:100,height:100},{kind:'detail' as const,region:{x:0.4,y:0,w:0.6,h:1},width:100,height:100}],findings:{...proposal.findings,concepts:[...proposal.findings.concepts,{...proposal.findings.concepts[0]!,key:'draft_b',title:'Quadratic variation'}],depictions:[{source:'draft_a',target:'draft_b',direction:'unclear' as const,label:'',evidence:{...evidence,page:1},additionalEvidence:[evidence],uncertainty:'Arrow endpoint unclear'}]}};
+ const selected:unknown[]=[];
+ const modern=await mount(()=> <ProposalReviewBody proposal={drawn} capture={capture} snapshot={snapshot} model='fake:vision' loaded busy={false} error={null}
+  page={1} evidence={null} onPage={()=>{}} onEvidence={e=>selected.push(e)} onGenerate={()=>{}} onCancel={()=>{}} />);
+ try {
+  assert(modern.document.body.textContent.includes('Drawn connections'));assert(modern.document.body.textContent.includes('direction unclear'));
+  const links=[...modern.document.querySelectorAll('button')];assert(links.some(b=>b.textContent?.includes('Whole map ·')));
+  await act(async()=>{links.find(b=>b.textContent?.includes('Detail 1 ·'))!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.equal((selected.at(-1) as typeof evidence).page,1);
+ }finally{await modern.close();}
 });

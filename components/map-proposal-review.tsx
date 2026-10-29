@@ -2,7 +2,7 @@
 
 import {useCallback,useEffect,useRef,useState} from "react";
 import {createPortal} from "react-dom";
-import {isSubscriptionModel,type AtlasSnapshot,type Mindmap,type MindmapCapture,type MapFindings,type ProposalView} from "@/src/core";
+import {isSubscriptionModel,mapImageLabel,type AtlasSnapshot,type Mindmap,type MindmapCapture,type MapFindings,type ProposalView} from "@/src/core";
 import {MessageResponse} from "./ai-elements/message";
 import {useBackdropDismiss} from "./backdrop-dismiss";
 import {useServerEvent,useServerResync} from "./server-events";
@@ -12,21 +12,23 @@ type Evidence=MapFindings["concepts"][number]["evidence"];
 export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;capture:MindmapCapture;snapshot:AtlasSnapshot;onClose:()=>void}) {
 	const [proposal,setProposal]=useState<ProposalView|null>(null),[model,setModel]=useState<string|null>(null),[error,setError]=useState<string|null>(null);
 	const [configError,setConfigError]=useState<string|null>(null);
+	const [attempt,setAttempt]=useState<string|null>(null);
 	const [busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false),[page,setPage]=useState(0),[evidence,setEvidence]=useState<Evidence|null>(null);
 	const root=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),sequence=useRef(0);
 	const refresh=useCallback(async()=>{
 		const request=++sequence.current;
 		try {
-			const response=await fetch(`/api/atlas/proposals?revision=${capture.id}`,{cache:"no-store"}),value=await response.json();
+			const response=await fetch(`/api/atlas/proposals?revision=${capture.id}${attempt?`&id=${attempt}`:""}`,{cache:"no-store"}),value=await response.json();
 			if(request!==sequence.current)return;
 			if(!response.ok)throw new Error(value.error);
 			setProposal(value);setLoaded(true);setError(null);
 		}catch(error){if(request===sequence.current){setError((error as Error).message);setLoaded(true);}}
-	},[capture.id]);
+	},[capture.id,attempt]);
 	useEffect(()=>{void refresh();void fetch("/api/atlas/proposals?config=1",{cache:"no-store"}).then(async r=>{
 		const value=await r.json();if(r.ok)setModel(value.model);else setConfigError(value.error);
 	}).catch(()=>setConfigError("Vision model configuration is unavailable."));return()=>{sequence.current++;abort.current?.abort();};},[refresh]);
 	useServerEvent("atlas-changed",()=>void refresh());useServerResync(()=>void refresh());
+	useEffect(()=>{setPage(0);setEvidence(null);},[proposal?.id]);
 	useEffect(()=>{
 		const previous=document.activeElement as HTMLElement|null;root.current?.focus();
 		return()=>previous?.focus();
@@ -38,9 +40,9 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 		setBusy(true);setError(null);abort.current=new AbortController();
 		try {
 			const response=await fetch("/api/atlas/proposals",{method:"POST",headers:{"content-type":"application/json"},signal:abort.current.signal,
-				body:JSON.stringify({id:`mp_${crypto.randomUUID()}`,sourceRevision:capture.id,expectedModel:model,consent:true})});
+				body:JSON.stringify({id:`mp_${crypto.randomUUID()}`,sourceRevision:capture.id,expectedModel:model,consent:true,reprocess:true})});
 			const value=await response.json();if(!response.ok)throw new Error(value.error);
-			setProposal(value);await refresh();
+			setAttempt(null);setPage(0);setEvidence(null);setProposal(value);if(!attempt)await refresh();
 		}catch(error){setError((error as Error).name==="AbortError"?"Interpretation cancelled; the saved source remains unchanged.":(error as Error).message);}
 		finally{setBusy(false);abort.current=null;}
 	}
@@ -64,6 +66,10 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 			</header>
 			<ProposalReviewBody proposal={proposal} capture={capture} snapshot={snapshot} model={model} loaded={loaded} busy={busy} error={error??(!loaded||proposal?.status==="prepared"?null:configError)}
 				page={page} evidence={evidence} onPage={p=>{setPage(p);setEvidence(null);}} onEvidence={focus} onGenerate={()=>void generate()} onCancel={()=>abort.current?.abort()} />
+			{(proposal?.attempts?.length??0)>1&&<label className="flex items-center gap-3 border-t px-5 py-3 text-xs text-muted-foreground">Interpretation attempt
+				<select aria-label="Interpretation attempt" className="min-w-0 rounded border bg-background px-2 py-1" disabled={busy} value={attempt??""} onChange={e=>{setAttempt(e.target.value||null);setPage(0);setEvidence(null);}}>
+					<option value="">Latest</option>{proposal!.attempts!.map((a,i)=><option key={a.id} value={a.id}>{i+1} · {a.status} · {a.model}</option>)}
+				</select></label>}
 		</div>
 	</div>,document.body);
 }
@@ -72,22 +78,24 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 	page:number;evidence:Evidence|null;onPage:(page:number)=>void;onEvidence:(source:Evidence)=>void;onGenerate:()=>void;onCancel:()=>void;
 }) {
 	const [zoom,setZoom]=useState(1),[broken,setBroken]=useState<string|null>(null),findings=proposal?.findings;
+	const label=(index:number)=>mapImageLabel(proposal?.imageLayout?.[index],index);
 	const notSent=proposal&&(proposal.status==="failed"||proposal.status==="cancelled")&&!proposal.images.length&&!proposal.usage;
 	const image=proposal?.images.length?`/api/atlas/proposals?id=${proposal.id}&page=${Math.min(page,proposal.images.length-1)}`:
 		capture.previewHash?`/api/atlas/mindmaps?revision=${capture.id}&kind=preview`:null;
 	return <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1.1fr)_minmax(22rem,1fr)] md:overflow-hidden">
 		<section aria-label="Saved source drawing" className="flex min-h-64 flex-col border-b bg-muted/20 md:min-h-0 md:border-b-0 md:border-r">
-			<div className="flex items-center justify-between gap-2 border-b px-4 py-3 text-xs"><span>{proposal?.images.length?"Captured interpretation pages":"Source overview"}</span>
+			<div className="flex items-center justify-between gap-2 border-b px-4 py-3 text-xs"><span>{proposal?.images.length?"Captured source views":"Source overview"}</span>
 				<div className="flex items-center gap-1">
 				<button type="button" className={button} aria-label="Zoom out source" disabled={zoom===1} onClick={()=>setZoom(Math.max(1,zoom-0.5))}>−</button>
 				<button type="button" className={button} onClick={()=>setZoom(1)}>Fit</button>
 				<button type="button" className={button} aria-label="Zoom in source" disabled={zoom===3} onClick={()=>setZoom(Math.min(3,zoom+0.5))}>+</button>
 				{proposal && proposal.images.length>1 && <select aria-label="Source page" className="rounded border bg-background px-2 py-1" value={page} onChange={e=>onPage(Number(e.target.value))}>
-					{proposal.images.map((_,i)=><option key={i} value={i}>Page {i+1}</option>)}</select>}</div></div>
+					{proposal.images.map((_,i)=><option key={i} value={i}>{label(i)}</option>)}</select>}</div></div>
+			{proposal?.imageLayout?.[page]?.kind==="detail"&&<p className="border-b px-4 py-2 text-[11px] text-muted-foreground">{label(page)} · position on whole map: {Math.round(proposal.imageLayout[page]!.region.x*100)}% from left, {Math.round(proposal.imageLayout[page]!.region.y*100)}% from top. Neighbouring details overlap.</p>}
 			<div className={`flex flex-1 items-start overflow-auto p-4 ${zoom===1?"justify-center":"justify-start"}`}>
-				{image && broken!==image?<div className="relative inline-block shrink-0" style={{width:zoom>1?`${zoom*100}%`:undefined}}>
+				{image && broken!==image?<div className="relative inline-block shrink-0" style={{width:`${zoom*100}%`}}>
 					{/* eslint-disable-next-line @next/next/no-img-element -- immutable local page; no external image request. */}
-					<img src={image} alt={`Saved map drawing, page ${page+1}`} className="block max-w-full rounded bg-white" style={{maxHeight:zoom===1?"70vh":undefined,width:zoom>1?"100%":undefined}} onError={()=>setBroken(image)} />
+					<img src={image} alt={`Saved map drawing, ${label(page)}`} className="block max-w-full rounded bg-white" style={{width:"100%"}} onError={()=>setBroken(image)} />
 					{evidence?.page===page&&evidence.region&&<div aria-hidden="true" className="pointer-events-none absolute rounded border-2 border-amber-500 bg-amber-300/20"
 						style={{left:`${evidence.region.x*100}%`,top:`${evidence.region.y*100}%`,width:`${evidence.region.w*100}%`,height:`${evidence.region.h*100}%`}} />}
 				</div>:<p className="py-12 text-sm text-muted-foreground">Source image unavailable. Restore its files before interpretation.</p>}
@@ -100,28 +108,34 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 				{!notSent&&<span className="py-1">{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</span>}</div>}
 			{proposal && proposal.baseRevision!==snapshot.layoutRevision && <p className="rounded-lg border border-amber-500/40 p-3 text-xs">Atlas changed since this proposal was captured. Keep it for review; any future approval must revalidate its references.</p>}
 			{proposal?.error&&<p className="rounded-lg border p-3 text-xs">{proposal.error}</p>}
-			{(!proposal||proposal.status==="failed"||proposal.status==="cancelled") && <div className="space-y-3 rounded-xl border p-4">
+			{(!proposal||proposal.status==="failed"||proposal.status==="cancelled"||proposal.status==="prepared") && <div className="space-y-3 rounded-xl border p-4">
 				<h3 className="font-medium">Interpret this saved revision</h3>
-				<p className="text-xs leading-relaxed text-muted-foreground">Readable page images and names/aliases of up to 40 linked concepts will be sent to {model??"your configured vision model"}. Uses up to two model calls. Original files stay unchanged.</p>
-				<button type="button" className={button} disabled={!loaded||!model||busy} onClick={onGenerate}>{busy?"Interpreting…":proposal?"Try interpretation again":"Interpret revision"}</button>
+				<p className="text-xs leading-relaxed text-muted-foreground">A whole-map overview and overlapping detail images (or your supplied PNG), plus names/aliases of up to 40 linked concepts will be sent to {model??"your configured vision model"}. Uses up to two model calls. Original files stay unchanged.</p>
+				<button type="button" className={button} disabled={!loaded||!model||busy} onClick={onGenerate}>{busy?"Interpreting…":proposal?.status==="prepared"?"Reinterpret with map layout":proposal?"Try interpretation again":"Interpret revision"}</button>
 				{busy&&<button type="button" className={`${button} ml-2`} onClick={onCancel}>Cancel</button>}
-				{proposal&&<p className="text-xs text-muted-foreground">Retry starts a new attempt and may use additional plan allowance or API credits.</p>}
+				{proposal&&<p className="text-xs text-muted-foreground">A new attempt preserves earlier results and may use additional plan allowance or API credits.</p>}
 			</div>}
-			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?"Pages captured. Waiting for the model’s suggestions (up to 5 minutes)…":"Preparing readable source pages locally…"}</p>}
+			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?"Source views captured. Waiting for the model’s suggestions (up to 5 minutes)…":"Preparing whole-map and detail views locally…"}</p>}
 			{findings&&<>
-				<div><h3 className="font-medium">Concepts <span className="text-muted-foreground">{findings.concepts.length}</span></h3>
+				<div><h3 className="font-medium">Labels and concepts <span className="text-muted-foreground">{findings.concepts.length}</span></h3>
 					<div className="mt-2 space-y-2">{findings.concepts.map(c=><article key={c.key} className="space-y-2 rounded-xl border p-3">
 						<div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-medium">{c.title}</h4><span className="text-[11px] text-muted-foreground">{c.existingId?`Possible match: ${proposal?.context.find(n=>n.id===c.existingId)?.title??c.title}`:"Identity to review"}</span></div>
 						{c.notes&&<MessageResponse mode="static">{c.notes}</MessageResponse>}
 						{c.uncertainty&&<p className="text-xs text-amber-600 dark:text-amber-300">Uncertain: {c.uncertainty}</p>}
-						<button type="button" className="text-left text-xs text-muted-foreground underline underline-offset-4" onClick={()=>onEvidence(c.evidence)}>Page {c.evidence.page+1} · {c.evidence.quote}</button>
+						<button type="button" className="text-left text-xs text-muted-foreground underline underline-offset-4" onClick={()=>onEvidence(c.evidence)}>{label(c.evidence.page)} · {c.evidence.quote}</button>
 					</article>)}</div>
 				</div>
-				{findings.relations.length>0&&<div><h3 className="font-medium">Depicted connections</h3><div className="mt-2 space-y-2">{findings.relations.map((r,i)=><article key={i} className="space-y-2 rounded-xl border p-3">
+				{(findings.depictions?.length??0)>0&&<div><h3 className="font-medium">Drawn connections</h3><div className="mt-2 space-y-2">{findings.depictions!.map((r,i)=><article key={i} className="space-y-2 rounded-xl border p-3">
+					<p>{findings.concepts.find(c=>c.key===r.source)?.title} {r.direction==="forward"?"→":r.direction==="both"?"↔":"—"} {findings.concepts.find(c=>c.key===r.target)?.title}</p>
+					<p className="text-xs text-muted-foreground">Observed drawing · {r.label||"unlabelled connection"}{r.direction==="unclear"?" · direction unclear":""}</p>
+					{r.uncertainty&&<p className="text-xs text-amber-600 dark:text-amber-300">Uncertain: {r.uncertainty}</p>}
+					{[r.evidence,...r.additionalEvidence??[]].map((e,j)=><button key={j} type="button" className="block text-left text-xs text-muted-foreground underline" onClick={()=>onEvidence(e)}>{label(e.page)} · {e.quote}</button>)}
+				</article>)}</div></div>}
+				{findings.relations.length>0&&<div><h3 className="font-medium">Proposed mathematical meaning</h3><div className="mt-2 space-y-2">{findings.relations.map((r,i)=><article key={i} className="space-y-2 rounded-xl border p-3">
 					<p>{findings.concepts.find(c=>c.key===r.source)?.title} → {findings.concepts.find(c=>c.key===r.target)?.title}</p>
 					<p className="text-xs text-muted-foreground">{r.type} · proposed association</p>{r.conditions&&<MessageResponse mode="static">{r.conditions}</MessageResponse>}
 					{r.uncertainty&&<p className="text-xs text-amber-600 dark:text-amber-300">Uncertain: {r.uncertainty}</p>}
-					<button type="button" className="text-left text-xs text-muted-foreground underline" onClick={()=>onEvidence(r.evidence)}>Page {r.evidence.page+1} · {r.evidence.quote}</button>
+					{[r.evidence,...r.additionalEvidence??[]].map((e,j)=><button key={j} type="button" className="block text-left text-xs text-muted-foreground underline" onClick={()=>onEvidence(e)}>{label(e.page)} · {e.quote}</button>)}
 				</article>)}</div></div>}
 				{findings.questions.length>0&&<div className="space-y-2 rounded-xl border border-amber-500/30 p-3"><h3 className="font-medium">Needs clarification</h3>{findings.questions.map((q,i)=><p key={i} className="text-xs leading-relaxed">{q}</p>)}</div>}
 				{!findings.concepts.length&&!findings.relations.length&&<p className="text-muted-foreground">No safe concept or connection suggestions were found.</p>}

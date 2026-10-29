@@ -42,9 +42,10 @@ not full-page image exports or model interpretation inputs.
 Archive requires confirmation, keeps every source and preview, and offers Restore.
 There is no permanent-erasure UI. Imports remain independent of interpretation; use **Interpret / review** to inspect
 or explicitly request a proposal. Watchers,
-automatic external-save capture, native Edit launching, full-page/multipage exports,
+automatic external-save capture, native Edit launching,
 editable proposal review, approval receipts and canonical synchronization are still pending.
-Saved interpretation drafts and a read-only source review are now available; see
+Whole-canvas interpretation with overlapping detail images, saved drafts and a
+read-only source review are now available; see
 [map proposals](atlas-map-proposals.md).
 No teaching, extraction, provider or graph-layout policy was changed by this slice.
 
