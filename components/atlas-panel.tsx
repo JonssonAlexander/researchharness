@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+	visibleMapConnections,
 	type AtlasCommand,
 	type AtlasPathFocus,
 	type AtlasConcept,
@@ -395,7 +396,7 @@ export function AtlasPanel({
 									<>
 										<p>
 											Remove this concept and its memberships? Propositions stay. Notes and a copy of this
-											concept are archived.
+											concept are archived. Its ordinary mind-map connections are archived with it.
 										</p>
 										{atlas.snapshot.relations
 											.filter((r) => r.sourceId === editing.id || r.targetId === editing.id)
@@ -471,6 +472,7 @@ export function AtlasPanel({
 								{selected.aliases.length > 0 && (
 									<p className="text-muted-foreground">{selected.aliases.join(", ")}</p>
 								)}
+								{visibleMapConnections(atlas.snapshot).some(c=>c.sourceId===selected.id||c.targetId===selected.id)&&<details><summary>Mind-map associations · dotted lines</summary><p className="text-muted-foreground">Source connections, not mathematical implications.</p>{visibleMapConnections(atlas.snapshot).filter(c=>c.sourceId===selected.id||c.targetId===selected.id).map(c=><div key={c.id} className="mt-2 rounded border p-2"><button type="button" className="underline" onClick={()=>onSelect(c.sourceId===selected.id?c.targetId:c.sourceId)}>{atlas.snapshot.concepts.find(n=>n.id===(c.sourceId===selected.id?c.targetId:c.sourceId))?.title}</button>{c.label&&<MessageResponse mode="static">{c.label}</MessageResponse>}<p className="text-muted-foreground">{atlas.snapshot.mindmaps?.find(m=>m.captures.some(r=>r.id===c.sourceRevision))?.title} · {c.direction==="unclear"?"Direction unclear":"Direction recorded in source"}</p>{c.uncertainty&&<p className="text-amber-600">{c.uncertainty}</p>}</div>)}</details>}
 								{selected.markdown && <MessageResponse mode="static">{selected.markdown}</MessageResponse>}
 								<AtlasRelations
 									key={selected.id}

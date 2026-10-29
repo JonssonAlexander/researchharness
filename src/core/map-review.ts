@@ -1,3 +1,4 @@
+import {draftMapConnections,type MapConnection} from "./map-connections.ts";
 import {z} from "zod";
 import {AtlasError,atlasConceptId,type AtlasSnapshot} from "./atlas.ts";
 import {mapDraft,DRAFT_ORIGINS,projectMapDraft,type MapDraft} from "./map-draft.ts";
@@ -17,11 +18,13 @@ export const integrationChoices=z.object({
 	identities:z.record(z.string(),z.union([z.literal("new"),atlasConceptId,z.null()])),
 	subjectId:z.string().regex(/^as_[0-9a-f-]{36}$/).nullable(),
 	connections:z.array(z.string()).max(60),
+	mapConnections:z.array(z.string()).max(60).optional(),
 }).strict();
 export type IntegrationChoices=z.infer<typeof integrationChoices>;
 export interface MapIntegration {
-	schemaVersion:1;id:string;proposalId:string;reviewRevision:number;digest:string;baseRevision:number;
+	schemaVersion:1|2;id:string;proposalId:string;reviewRevision:number;digest:string;baseRevision:number;
 	choices:IntegrationChoices;concepts:{key:string;id:string;title:string;existing:boolean;markdown:string;x:number;y:number;reasons:string[]}[];
+	mapConnections?:MapConnection[];repairOf?:string;skippedConnections?:string[];
 	relations:RelationInput[];reusedRelations:string[];sourceRevision:string;sourceHash:string;mapId:string;
 	status:"prepared"|"committed";committedAt?:string;
 }
@@ -29,6 +32,7 @@ export interface MapReviewStore {
 	read(proposalId:string):MapReview;
 	save(input:z.infer<typeof mapReviewInput>):MapReview;
 	prepare(proposalId:string,expectedRevision:number,choices:IntegrationChoices,expectedBase?:number):MapIntegration;
+	prepareConnections(proposalId:string,expectedBase:number):MapIntegration;
 	commit(id:string,digest:string):MapIntegration;
 }
 export function identityCandidates(title:string,atlas:AtlasSnapshot) {
@@ -39,8 +43,9 @@ export function identityCandidates(title:string,atlas:AtlasSnapshot) {
 /** No identity inference: every kept node has an explicit create/reuse choice. */
 export function planMapIntegration(p:MapProposal,review:MapReview,atlas:AtlasSnapshot,choices:IntegrationChoices,id:string,mint:(key:string)=>string):Omit<MapIntegration,"digest"> {
 	if(!p.draft||!p.digest||p.status!=="prepared")throw new AtlasError("Only prepared map drafts can be integrated.");
-	const draft=mapDraft.parse(review.draft),keys=new Set(draft.concepts.map(n=>n.key)),picked=new Set(choices.connections);
+	const draft=mapDraft.parse(review.draft),keys=new Set(draft.concepts.map(n=>n.key)),picked=new Set(choices.connections),ordinary=new Set(choices.mapConnections??[]);
 	if(Object.keys(choices.identities).some(k=>!keys.has(k))||draft.concepts.some(n=>!(n.key in choices.identities)))throw new AtlasError("Choose an identity for every concept.");
+	if(ordinary.size!==(choices.mapConnections?.length??0)||[...ordinary].some(k=>!draft.connections.some(e=>e.key===k)))throw new AtlasError("Invalid mind-map connection selection.");
 	if(picked.size!==choices.connections.length||choices.connections.some(k=>!draft.connections.some(e=>e.key===k)))throw new AtlasError("Invalid connection selection.");
 	if(choices.subjectId&&!atlas.subjects.some(s=>s.id===choices.subjectId))throw new AtlasError("Subject no longer exists.",409);
 	const map=atlas.mindmaps?.find(m=>!m.archived&&m.currentRevision===p.sourceRevision);
@@ -61,6 +66,9 @@ export function planMapIntegration(p:MapProposal,review:MapReview,atlas:AtlasSna
 	});
 	if(new Set([...map.captures.find(c=>c.id===p.sourceRevision)!.conceptIds,...concepts.map(n=>n.id)]).size>200)throw new AtlasError("This source revision cannot link more than 200 concepts.");
 	if(!concepts.length)throw new AtlasError("Keep at least one concept.");
+	const mapping=new Map(concepts.map(c=>[c.key,c.id]));
+	if(draft.connections.some(e=>ordinary.has(e.key)&&(!mapping.has(e.source)||!mapping.has(e.target))))throw new AtlasError("A selected map connection depends on an excluded concept.");
+	const mapConnections=draftMapConnections(p,draft,mapping,[...ordinary],mint);
 	const relations:RelationInput[]=[],reusedRelations:string[]=[];
 	for(const edge of draft.connections.filter(e=>picked.has(e.key))) {
 		const source=concepts.find(n=>n.key===edge.source),target=concepts.find(n=>n.key===edge.target);
@@ -73,5 +81,21 @@ export function planMapIntegration(p:MapProposal,review:MapReview,atlas:AtlasSna
 			else if(!relations.some(r=>r.sourceId===relation.sourceId&&r.targetId===relation.targetId&&r.relationType===relation.relationType&&r.conditions===relation.conditions))relations.push(relation);
 		}
 	}
-	return {schemaVersion:1,id,proposalId:p.id,reviewRevision:review.revision,baseRevision:atlas.layoutRevision??0,choices,concepts,relations,reusedRelations,sourceRevision:p.sourceRevision,sourceHash:p.sourceHash,mapId:map.id,status:"prepared"};
+	return {schemaVersion:2,id,mapConnections,proposalId:p.id,reviewRevision:review.revision,baseRevision:atlas.layoutRevision??0,choices,concepts,relations,reusedRelations,sourceRevision:p.sourceRevision,sourceHash:p.sourceHash,mapId:map.id,status:"prepared"};
+}
+
+/** Reuse the original approved mapping; repairs never create/rename concepts or promote claims. */
+export function planMapConnectionRepair(p:MapProposal,review:MapReview,original:MapIntegration,atlas:AtlasSnapshot,id:string,mint:(key:string)=>string):Omit<MapIntegration,"digest"> {
+	if(original.status!=="committed"||original.repairOf||original.proposalId!==p.id||original.reviewRevision!==review.revision||original.sourceRevision!==p.sourceRevision||original.sourceHash!==p.sourceHash)
+		throw new AtlasError("Repair needs the unchanged original integration.",409);
+	if(!atlas.mindmaps?.some(m=>!m.archived&&m.currentRevision===p.sourceRevision&&m.captures.some(c=>c.id===p.sourceRevision&&c.hash===p.sourceHash)))
+		throw new AtlasError("This map was rewritten or archived. Review the current revision instead.",409);
+	const ids=new Set(atlas.concepts.map(n=>n.id)),mapping=new Map(original.concepts.filter(n=>ids.has(n.id)).map(n=>[n.key,n.id]));
+	const present=new Set(atlas.mapConnections?.filter(c=>c.proposalId===p.id).map(c=>c.connectionKey));
+	const skipped=review.draft.connections.filter(e=>!mapping.has(e.source)||!mapping.has(e.target)).map(e=>e.key);
+	const keys=review.draft.connections.filter(e=>!skipped.includes(e.key)&&!present.has(e.key)).map(e=>e.key);
+	return {schemaVersion:2,id,proposalId:p.id,reviewRevision:review.revision,baseRevision:atlas.layoutRevision??0,repairOf:original.id,
+		choices:{identities:Object.fromEntries(mapping),subjectId:null,connections:[],mapConnections:keys},concepts:[],relations:[],reusedRelations:[],
+		mapConnections:draftMapConnections(p,review.draft,mapping,keys,mint),skippedConnections:skipped,
+		sourceRevision:p.sourceRevision,sourceHash:p.sourceHash,mapId:original.mapId,status:"prepared"};
 }

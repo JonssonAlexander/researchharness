@@ -670,8 +670,19 @@ test('integration UI sends explicit identities and exact approval, exposing fail
  const click=async(name:string)=>{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});};
  try{
   assert(!ui.document.body.textContent.includes('Approve and integrate'));
-  await click('Preview integration');assert.equal(requests[0]!.baseRevision,3);assert.deepEqual(requests[0]!.choices,{identities:{draft_a:'new',draft_b:'new'},subjectId:null,connections:[]});assert.deepEqual(prepared.at(-1),plan);
+  await click('Preview integration');assert.equal(requests[0]!.baseRevision,3);assert.deepEqual(requests[0]!.choices,{identities:{draft_a:'new',draft_b:'new'},subjectId:null,connections:[],mapConnections:['edge_qv']});assert.deepEqual(prepared.at(-1),plan);
   await click('Approve and integrate');assert.deepEqual(requests[1],{action:'commit',id:plan.id,digest:plan.digest,approve:true});assert.equal(done,0);assert(ui.document.body.textContent.includes('Atlas changed.'));
   fail=false;await click('Approve and integrate');assert.equal(done,1);
  }finally{await ui.close();globalThis.fetch=oldFetch;}
+});
+
+test('connection repair previews saved identities and requires exact approval without creating nodes',async()=>{
+ const {MapConnectionRepair}=await import('../components/map-draft-editor.tsx'),{draftFixture}=await import('./fixtures/map-draft.ts');
+ const review={schemaVersion:1 as const,proposalId:'mp_00000000-0000-4000-8000-000000000022',revision:1,draft:draftFixture,digest:'a'.repeat(64),integration:{id:'mi_00000000-0000-4000-8000-000000000001',committedAt:'2026-10-29T12:00:00Z'}};
+ const plan={id:'mi_00000000-0000-4000-8000-000000000002',digest:'b'.repeat(64),concepts:[],relations:[],mapConnections:[{id:'mc_00000000-0000-4000-8000-000000000002',sourceId:id,targetId:'ac_00000000-0000-4000-8000-000000000002',label:'Drawn connection',uncertainty:'Meaning unclear'}],skippedConnections:[]};
+ const requests:Record<string,unknown>[]=[],prepared:unknown[]=[];let done=0;const oldFetch=globalThis.fetch;
+ globalThis.fetch=async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return Response.json(body.action==='prepare-connections'?plan:{...plan,status:'committed'});};
+ const ui=await mount(()=> <MapConnectionRepair review={review} atlas={{...snapshot,layoutRevision:5}} onPrepared={p=>prepared.push(p)} onCommitted={()=>done++} onCancel={()=>{}}/>);
+ const click=async(name:string)=>{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});};
+ try{assert(!ui.document.body.textContent.includes('Approve and restore connections'));await click('Preview missing connections');assert.deepEqual(requests[0],{action:'prepare-connections',proposalId:review.proposalId,baseRevision:5});assert.deepEqual(prepared.at(-1),plan);assert(ui.document.body.textContent.includes('0 new nodes'));assert(ui.document.body.textContent.includes('Meaning unclear'));assert.equal(done,0);await click('Approve and restore connections');assert.deepEqual(requests[1],{action:'commit',id:plan.id,digest:plan.digest,approve:true});assert.equal(done,1);}finally{await ui.close();globalThis.fetch=oldFetch;}
 });

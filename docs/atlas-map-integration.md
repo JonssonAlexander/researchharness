@@ -44,12 +44,14 @@ or defer them in the draft first. There is no automatic destructive Atlas merge,
 redirect maintenance, or mathematical identity auditor in this slice.
 
 Choose a subject for new concepts and explicitly select connections. A connection
-needs an owner-reviewed type and direction; an untyped/unclear drawn association
-stays in the source draft until resolved. Excluding an endpoint requires excluding
-its connection. Conditions come from the connection's assumptions. Analogy is
+can be kept as an ordinary mind-map association regardless of type or direction.
+These map lines default to included for kept endpoints; review/exclude them
+individually. Optionally, explicitly select a typed mathematical relation with
+an owner-reviewed type and direction. Ordinary lines never imply a theorem. Excluding an endpoint also excludes its map lines from the submitted choices. Conditions come from the connection's assumptions. Analogy is
 normalized symmetrically, other types keep their direction. Equal endpoints/type/
 conditions reuse an accepted relation; a disputed/pending equivalent blocks
-integration. No equality is inferred across different conditions.
+integration. No equality is inferred across different conditions. Ordinary associations are
+not used by mathematical path queries or the proposition/argument ledger.
 
 **Preview integration** persists the exact operations and shows counts. **In Atlas**
 compares the proposed additions with the current Atlas concept projection;
@@ -72,19 +74,24 @@ repeated request returns the original receipt.
 
 ## Storage and recovery
 
-SQLite schema **v9** adds `map_reviews` (append-only review versions),
+SQLite schema **v9** introduced `map_reviews` (append-only review versions),
 `map_integrations` (prepared operations and exact committed approval receipts),
 and `map_concept_reviews` (per-integration source provenance and review reasons).
 The v8 baseline is backed up using SQLite before migration. Newer schema versions
-are refused. Proposal envelopes remain v1/v2/v3; editable reviews and integration receipts
-use envelope v1 and refuse unsupported versions. Prepared model drafts keep their
+are refused. Proposal envelopes remain v1/v2/v3; editable reviews use envelope v1. New
+integration receipts use v2, binding ordinary lines separately from typed
+relations. Old committed v1 receipts keep their original digest and retry
+behavior. Old uncommitted v1 previews require preparing again; their approval
+is never silently expanded. Prepared model drafts keep their
 original digest. Review digests bind the parent proposal digest, version and
 complete editable content; approval digests bind choices, operations and Atlas
 base. Review saves require their expected revision. At most 100 integration
 previews per draft are retained. Prepared receipts are retained but only one
-committed receipt per proposal is permitted.
+original committed receipt per proposal is permitted, plus explicit connection-only
+repair receipts.
 
-The existing extension owner applies only concept/typed-relation operations.
+The existing extension owner applies concept, typed-relation and ordinary
+source-map-association operations.
 Content-addressed Markdown is written via a same-directory temporary file,
 fsync, non-replacing publication and directory fsync before SQL references it.
 A SQLite transaction commits all concept/relation rows, source links, review
@@ -133,3 +140,62 @@ correctly excluded. No live provider calls were made. Native browser interaction
 was unavailable (`noWindowsAvailable`), so live visual/drag QA remains pending;
 the screenshots obtainable before that failure do not establish the new view's
 appearance. The owner's actual source was not integrated by engineering checks.
+
+
+## Ordinary map lines and repair (schema v10)
+
+The earlier v9 UI only integrated explicitly selected typed links, leaving ordinary
+lines behind. Schema v10 adds `map_connections`, with source/target concept IDs,
+proposal and connection keys, source revision/hash, observed direction, label,
+origin, evidence, rationale, assumptions and uncertainty. The unique
+(proposalId, connectionKey) preserves each reviewed depiction once. Rows have
+strict envelopes and content hashes. The v9 database is backed up before upgrade;
+future schema/envelope versions are refused. No migration automatically accepts
+old omitted lines.
+
+Main Atlas renders ordinary map associations as dotted lines without arrowheads;
+accepted typed links retain their dashed appearance. Multiple source depictions
+of the same pair draw one line, and an accepted typed link takes visual priority.
+The source rows remain distinct for provenance. Concept inspection lists source
+map associations, labels and uncertainty. They take part in local spatial layout,
+never mathematical path finding, logical depth or proof derivation. Query focus
+hides ordinary lines to avoid presenting them as steps of a typed path.
+
+Only active, current source revisions project their depictions. Archiving a map
+or importing a replacement hides the old source lines without deleting their
+records or any mathematical relation. This is bounded source-depiction visibility,
+not complete semantic reconciliation across rewrites. Removing a concept archives
+its source-line records with the concept, then cascades active references; the
+original integration receipt and drawing remain retained. Per-line post-integration
+correction/removal UI is future work.
+
+An already-integrated draft offers **Restore map connections…** → **Preview missing
+connections**. The server uses only the original receipt's approved node mapping,
+never title matching, new nodes, renames, notes changes or relation promotion.
+Excluded/deleted endpoints are listed as skipped. Already-present connection keys
+are omitted. The exact v2 repair receipt binds the original receipt ID, source,
+review, Atlas base and full proposed associations. **In Atlas** shows their placement;
+**Approve and restore connections** commits that digest. A changed source/base or
+competing repair invalidates approval. Repeated commit returns the saved receipt;
+subsequent preview finds zero missing lines. The original receipt is immutable.
+
+Repair receipts share the existing integration journal, but the uniqueness rule
+now limits one *original* committed integration per proposal while permitting
+separate explicit repairs. All association inserts, journal receipt and global
+Atlas version commit in one SQLite transaction. No model call is made. Preview
+alone leaves graph data unchanged. Only the explicit approved repair adds lines.
+
+Focused checks cover untyped/unclear lines, preservation of annotations, legacy
+v1 repair, excluded/deleted endpoints, stale/concurrent repairs, rollback/retry,
+source archive/replacement projection, row tampering, upgrade/backup/restore and
+separation from mathematical path queries. UI tests cover preview-before-approval
+and exact digest submission. Live graphical appearance remains a separate gate.
+
+Verification for this slice (29 October 2026): 132 targeted checks passed,
+with the added connection-row tamper case also passing in the 20-test store run.
+The 19-test Electron store run, typecheck, targeted lint, production build and
+packaged Electron/server smoke passed. A real, uncommitted repair preview for
+stoch init found 15 missing lines and skipped 4 excluded-endpoint connections;
+it proposed zero new concepts or typed relations. No model calls or semantic
+writes to the owner's graph were made by that preview. Source originals and old
+approval receipts were preserved. Live visual appearance remains unverified.

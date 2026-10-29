@@ -93,3 +93,5 @@ export * from "./session-markdown.ts";
 
 export * from "./map-review.ts";
 export {readContentSpans} from "./content-reader.ts";
+
+export * from "./map-connections.ts";

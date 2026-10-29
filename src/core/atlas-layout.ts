@@ -1,3 +1,4 @@
+import {visibleMapConnections} from "./map-connections.ts";
 import { createGraphSimulation, type LayoutNode } from "./layout.ts";
 import { AtlasError, type AtlasSnapshot } from "./atlas.ts";
 
@@ -21,6 +22,11 @@ export function createAtlasLayout(
 	const edges = snapshot.relations
 		.filter(r => r.reviewStatus === "accepted" && (active.has(r.sourceId) || active.has(r.targetId)))
 		.map(r => ({from: r.sourceId, to: r.targetId}));
+	const pairs=new Set(edges.map(e=>[e.from,e.to].sort().join(":")));
+	for(const c of visibleMapConnections(snapshot)){
+		const pair=[c.sourceId,c.targetId].sort().join(":");
+		if((active.has(c.sourceId)||active.has(c.targetId))&&!pairs.has(pair)){edges.push({from:c.sourceId,to:c.targetId});pairs.add(pair);}
+	}
 	// Repulsion only needs the local region and directly connected boundary nodes.
 	const included = new Set([...active, ...edges.flatMap(e => [e.from, e.to])]);
 	if (included.size > 500 || edges.length > 2000) throw new Error("Too many boundary links for local arrangement.");

@@ -135,6 +135,8 @@ export interface CanvasData {
 	edges: CanvasEdge[];
 	/** Non-logical, accepted concept links. Excluded from formal layout/derivation. */
 	semanticEdges?: (CanvasEdge & { id?: string })[];
+	/** Source mind-map associations; dotted, no mathematical implication. */
+	mapEdges?: CanvasEdge[];
 	atlas?: AtlasSnapshot;
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
@@ -663,6 +665,7 @@ export class GraphCanvasRenderer {
 	private atlasLayoutRevision = 0;
 	private subjectDrag: {id: string; origin: Pt; dx: number; dy: number} | null = null;
 	private semanticPath = new Path2D();
+	private mapPath = new Path2D();
 	private semanticFocus: ReadonlySet<string> | null = null;
 	private shaftsPath: Path2D = new Path2D();
 	private headsPath: Path2D = new Path2D();
@@ -1484,6 +1487,13 @@ export class GraphCanvasRenderer {
 			this.semanticPath.lineTo(to.x, to.y);
 		}
 
+		this.mapPath=new Path2D();
+		if(!this.semanticFocus)for(const edge of data.mapEdges??[]){
+			if(!isVisible(edge.from)||!isVisible(edge.to))continue;
+			const from=this.nodeById.get(edge.from),to=this.nodeById.get(edge.to);if(!from||!to)continue;
+			this.mapPath.moveTo(from.x,from.y);this.mapPath.lineTo(to.x,to.y);
+		}
+
 		// Edge shafts + arrowheads (rendering arc, owner 2026-09-30): all
 		// arrows are PLAIN single shafts — the old double-shaft glyph is
 		// gone entirely. An argument's geometry: lines INTO an implication
@@ -1763,7 +1773,7 @@ export class GraphCanvasRenderer {
 			rctx.beginPath();
 			// Endpoints actually covered by a stroke's round caps.
 			const touched = new Set<string>();
-			for (const e of [...data.edges, ...(data.semanticEdges ?? [])]) {
+			for (const e of [...data.edges, ...(data.semanticEdges ?? []),...(data.mapEdges??[])]) {
 				if (clusterOf.get(e.from) !== ci) continue;
 				if (clusterOf.get(e.to) !== ci) continue;
 				// Search filter: stroke only fully-visible edges. Invisible-node
@@ -1927,6 +1937,7 @@ export class GraphCanvasRenderer {
 			ctx.lineWidth = settings.edgeWidth / k;
 			ctx.setLineDash([5 / k, 5 / k]);
 			ctx.stroke(this.semanticPath);
+			ctx.globalAlpha=.65;ctx.setLineDash([2/k,4/k]);ctx.stroke(this.mapPath);
 			ctx.restore();
 		}
 

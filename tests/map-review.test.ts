@@ -3,7 +3,7 @@ import test,{after} from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {randomUUID} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import {gzipSync} from "node:zlib";
 import {DatabaseSync,backup} from "node:sqlite";
 import {createAtlasStore} from "../src/store/atlas.ts";
@@ -101,10 +101,10 @@ test("new duplicate titles inside one proposal and a changed identity-review bas
  assert.throws(()=>f.store.reviews.prepare(f.p.id,1,f.choices,999),/Atlas changed/);
 });
 test("v8 upgrade backs up prior proposals and a migration error leaves its version and data intact",()=>{
- const f=fixture(),db=new DatabaseSync(f.file);db.exec("DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; PRAGMA user_version=8");db.close();
+ const f=fixture(),db=new DatabaseSync(f.file);db.exec("DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; PRAGMA user_version=8");db.close();
  assert.equal(createAtlasStore(f.file).proposals.read(f.p.id)!.digest,f.p.digest);
  assert(fs.readdirSync(path.dirname(f.file)).some(p=>p.includes('.v8-')&&p.endsWith('.bak')));
- const broken=fixture(),old=new DatabaseSync(broken.file);old.exec("DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; CREATE TABLE map_reviews(unrecognized TEXT); PRAGMA user_version=8");old.close();
+ const broken=fixture(),old=new DatabaseSync(broken.file);old.exec("DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; CREATE TABLE map_reviews(unrecognized TEXT); PRAGMA user_version=8");old.close();
  assert.throws(()=>createAtlasStore(broken.file).read(),/already exists/);
  const unchanged=new DatabaseSync(broken.file);assert.equal(unchanged.prepare('PRAGMA user_version').get()!.user_version,8);assert.equal(unchanged.prepare('SELECT count(*) AS n FROM map_proposals').get()!.n,2);assert.equal(unchanged.prepare("SELECT name FROM sqlite_master WHERE name='map_integrations'").get(),undefined);unchanged.close();
 });
@@ -112,6 +112,70 @@ test("unsupported review/approval envelopes and corrupted row identities are ref
  const f=fixture();f.store.reviews.save({proposalId:f.p.id,expectedRevision:0,draft:f.review.draft});
  const db=new DatabaseSync(f.file);db.prepare("UPDATE map_reviews SET record=json_set(record,'$.schemaVersion',2) WHERE proposalId=?").run(f.p.id);db.close();
  assert.throws(()=>f.store.reviews.read(f.p.id),/newer app/);
- const other=fixture(),plan=other.store.reviews.prepare(other.p.id,0,other.choices),changed=new DatabaseSync(other.file);changed.prepare("UPDATE map_integrations SET record=json_set(record,'$.schemaVersion',2) WHERE id=?").run(plan.id);changed.close();
+ const other=fixture(),plan=other.store.reviews.prepare(other.p.id,0,other.choices),changed=new DatabaseSync(other.file);changed.prepare("UPDATE map_integrations SET record=json_set(record,'$.schemaVersion',3) WHERE id=?").run(plan.id);changed.close();
  assert.throws(()=>other.store.reviews.commit(plan.id,plan.digest),/newer app/);assert.equal(other.store.read().concepts.length,0);
+});
+
+test("ordinary lines integrate without types or direction and do not enter mathematical path queries",async()=>{
+ const {findAtlasPath}=await import('../src/core/atlas-query.ts'),f=fixture(),draft=structuredClone(f.review.draft);
+ draft.connections[0]!.relationType=null;draft.connections[0]!.direction='unclear';f.store.reviews.save({proposalId:f.p.id,expectedRevision:0,draft});
+ const plan=f.store.reviews.prepare(f.p.id,1,{...f.choices,connections:[],mapConnections:['edge_qv']});assert.equal(plan.schemaVersion,2);assert.equal(plan.mapConnections!.length,1);assert.equal(plan.relations.length,0);
+ f.store.reviews.commit(plan.id,plan.digest);const snapshot=f.store.read();assert.equal(snapshot.relations.length,0);assert.equal(projectAtlas(snapshot).mapEdges.length,1);
+ assert.equal(findAtlasPath(snapshot,snapshot.concepts[0]!.id,snapshot.concepts[1]!.id).status,'no-path');assert.equal(snapshot.mapConnections![0]!.uncertainty,draft.connections[0]!.uncertainty);
+ const dir=path.join(root,randomUUID());fs.cpSync(path.dirname(f.file),dir,{recursive:true});const db=new DatabaseSync(f.file);await backup(db,path.join(dir,'atlas.sqlite'));db.close();assert.deepEqual(createAtlasStore(path.join(dir,'atlas.sqlite')).read(),snapshot);
+});
+function legacyIntegration(){
+ const f=fixture(),plan=f.store.reviews.prepare(f.p.id,0,{...f.choices,connections:[]}),receipt=f.store.reviews.commit(plan.id,plan.digest);
+ // The owner's existing integration is envelope v1; retain its old digest shape.
+ const {mapConnections:_lines,digest:_digest,status:_status,committedAt,...content}=receipt;void _lines;void _digest;void _status;
+ const old={...content,schemaVersion:1 as const,status:'prepared' as const},digest=createHash('sha256').update(JSON.stringify(old)).digest('hex');
+ const record={...old,digest,status:'committed',committedAt},db=new DatabaseSync(f.file);db.prepare('UPDATE map_integrations SET record=? WHERE id=?').run(JSON.stringify(record),receipt.id);db.close();
+ return {...f,original:record};
+}
+test("legacy repair restores missing lines using saved identities, preserving original receipt, nodes and notes",()=>{
+ const f=legacyIntegration(),before=f.store.read(),review=f.store.reviews.read(f.p.id),plan=f.store.reviews.prepareConnections(f.p.id,before.layoutRevision!);
+ assert.equal(plan.repairOf,f.original.id);assert.equal(plan.concepts.length,0);assert.equal(plan.relations.length,0);assert.equal(plan.mapConnections!.length,1);assert.deepEqual(f.store.read(),before);
+ assert.throws(()=>f.store.reviews.commit(plan.id,'0'.repeat(64)),/approval/);
+ const competing=f.store.reviews.prepareConnections(f.p.id,before.layoutRevision!),receipt=f.store.reviews.commit(plan.id,plan.digest),after=f.store.read();
+ assert.deepEqual(after.concepts,before.concepts);assert.deepEqual(after.relations,before.relations);assert.deepEqual(after.mindmaps,before.mindmaps);assert.equal(after.mapConnections!.length,1);assert.equal(projectAtlas(after).mapEdges.length,1);
+ assert.deepEqual(createAtlasStore(f.file).reviews.commit(plan.id,plan.digest),receipt);assert.throws(()=>f.store.reviews.commit(competing.id,competing.digest),/changed/);
+ assert.deepEqual(f.store.reviews.read(f.p.id),review);const db=new DatabaseSync(f.file);assert.deepEqual(JSON.parse(String(db.prepare('SELECT record FROM map_integrations WHERE id=?').get(f.original.id)!.record)),f.original);db.close();
+ assert.equal(f.store.reviews.prepareConnections(f.p.id,after.layoutRevision!).mapConnections!.length,0);
+});
+test("repair skips excluded/removed endpoints; removal archives associations instead of stranding references",()=>{
+ const f=fixture(),plan=f.store.reviews.prepare(f.p.id,0,{...f.choices,connections:[],mapConnections:['edge_qv']});f.store.reviews.commit(plan.id,plan.digest);
+ const concept=f.store.read().concepts[1]!;f.store.save({kind:'concept-delete',id:concept.id,expectedRevision:concept.revision});
+ assert.equal(f.store.read().mapConnections!.length,0);const repair=f.store.reviews.prepareConnections(f.p.id,f.store.read().layoutRevision!);assert.equal(repair.mapConnections!.length,0);assert.deepEqual(repair.skippedConnections,['edge_qv']);
+ const db=new DatabaseSync(f.file),archive=JSON.parse(String(db.prepare("SELECT record FROM atlas_archive WHERE kind='concept' AND id=?").get(concept.id)!.record));assert.equal(archive.history.length,1);db.close();
+ const other=fixture(),excluded=other.store.reviews.prepare(other.p.id,0,{...other.choices,connections:[],identities:{draft_a:'new',draft_b:null}});other.store.reviews.commit(excluded.id,excluded.digest);
+ assert.deepEqual(other.store.reviews.prepareConnections(other.p.id,other.store.read().layoutRevision!).skippedConnections,['edge_qv']);
+});
+test("archived/rewritten sources stop projection and invalidate pending repair",()=>{
+ const f=legacyIntegration(),plan=f.store.reviews.prepareConnections(f.p.id,f.store.read().layoutRevision!),map=f.store.read().mindmaps![0]!;
+ f.store.mindmaps.setArchived(map.id,map.revision,true);assert.throws(()=>f.store.reviews.commit(plan.id,plan.digest),/archived/);
+ assert.throws(()=>f.store.reviews.prepareConnections(f.p.id,f.store.read().layoutRevision!),/archived/);
+});
+test("a failed repair is atomic and exact retry cannot duplicate nodes or lines",()=>{
+ const f=legacyIntegration(),before=f.store.read(),plan=f.store.reviews.prepareConnections(f.p.id,before.layoutRevision!),db=new DatabaseSync(f.file);
+ db.exec("CREATE TRIGGER fail_connection BEFORE INSERT ON map_connections BEGIN SELECT RAISE(ABORT,'fixture line failure'); END;");db.close();
+ assert.throws(()=>f.store.reviews.commit(plan.id,plan.digest),/fixture line failure/);assert.deepEqual(f.store.read(),before);
+ const reset=new DatabaseSync(f.file);reset.exec('DROP TRIGGER fail_connection');reset.close();f.store.reviews.commit(plan.id,plan.digest);assert.equal(f.store.read().concepts.length,2);assert.equal(f.store.read().mapConnections!.length,1);
+});
+test("v9 upgrade preserves old integration records and creates a recoverable backup",()=>{
+ const f=legacyIntegration(),db=new DatabaseSync(f.file);db.exec("DROP TABLE map_connections; DROP INDEX one_map_commit; CREATE UNIQUE INDEX one_map_commit ON map_integrations(proposalId) WHERE status='committed'; PRAGMA user_version=9");db.close();
+ const store=createAtlasStore(f.file);assert.equal(store.reviews.read(f.p.id).integration!.id,f.original.id);assert.deepEqual(store.read().mapConnections,[]);assert(fs.readdirSync(path.dirname(f.file)).some(p=>p.includes('.v9-')&&p.endsWith('.bak')));
+});
+test("projection deduplicates repeated drawings, prioritizes typed lines, and hides archived/replaced depictions",()=>{
+ const f=fixture(),draft=structuredClone(f.review.draft);draft.connections.push({...draft.connections[0]!,key:'edge_other',source:'draft_b',target:'draft_a'});
+ f.store.reviews.save({proposalId:f.p.id,expectedRevision:0,draft});const plan=f.store.reviews.prepare(f.p.id,1,{...f.choices,connections:[],mapConnections:['edge_qv','edge_other']});f.store.reviews.commit(plan.id,plan.digest);
+ const snapshot=f.store.read();assert.equal(snapshot.mapConnections!.length,2);assert.equal(projectAtlas(snapshot).mapEdges.length,1);
+ const m=snapshot.mindmaps![0]!;assert.equal(projectAtlas({...snapshot,mindmaps:[{...m,archived:true}]}).mapEdges.length,0);
+ assert.equal(projectAtlas({...snapshot,mindmaps:[{...m,currentRevision:'mr_00000000-0000-4000-8000-000000000099'}]}).mapEdges.length,0);
+ f.store.save({kind:'relation',id:`ar_${randomUUID()}`,sourceId:snapshot.concepts[0]!.id,targetId:snapshot.concepts[1]!.id,expectedRevision:0,relationType:'application',conditions:'',claimStatus:'external-assertion',reviewStatus:'accepted',evidence:[{citation:'Reviewed separately',locator:''}]});
+ assert.equal(projectAtlas(f.store.read()).mapEdges.length,0);assert.equal(projectAtlas(f.store.read()).semanticEdges.length,1);assert.equal(f.store.read().mapConnections!.length,2);
+});
+test("ordinary connection tampering and future envelopes are refused",()=>{
+ const f=fixture(),plan=f.store.reviews.prepare(f.p.id,0,{...f.choices,connections:[],mapConnections:['edge_qv']});f.store.reviews.commit(plan.id,plan.digest);
+ const db=new DatabaseSync(f.file);db.exec("UPDATE map_connections SET record=json_set(record,'$.label','Changed outside Atlas')");db.close();assert.throws(()=>f.store.read(),/provenance/);
+ const future=new DatabaseSync(f.file);future.exec("UPDATE map_connections SET record=json_set(record,'$.schemaVersion',2)");future.close();assert.throws(()=>f.store.read(),/newer app/);
 });

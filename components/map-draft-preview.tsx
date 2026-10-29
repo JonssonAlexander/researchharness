@@ -3,7 +3,7 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {DEFAULT_RENDER_SETTINGS,isSubscriptionModel,DRAFT_ORIGINS,projectMapDraft,mapImageLabel,type MapEvidence,type ProposalView,type MapDraft,type MapReview,type MapIntegration,type AtlasSnapshot,projectAtlas,mapReviewReasons,toggleDraftConnection} from "@/src/core";
 import {graphMathLabel} from "./graph-math-label";
-import {DraftItemEditor,DraftAdd,DraftIntegration,reviewRequest} from "./map-draft-editor";
+import {DraftItemEditor,DraftAdd,DraftIntegration,MapConnectionRepair,reviewRequest} from "./map-draft-editor";
 import {GraphCanvasRenderer} from "./graph-canvas";
 import {MessageResponse} from "./ai-elements/message";
 
@@ -22,7 +22,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 		const p=projectMapDraft(draft,proposal.imageLayout);
 		for(const n of p.nodes){const old=positions.current.get(n.id);if(old){n.x=old.x;n.y=old.y;}Object.assign(n,{badgeColor:mapReviewReasons(draft.concepts.find(c=>c.key===n.id)!).length?"#e6b35a":undefined,htmlLabel:typeof document!=="undefined"?graphMathLabel(n.label):undefined});}
 		if(inAtlas&&plan&&atlas){const base=projectAtlas(atlas);
-			return {nodes:[...base.nodes.map(n=>({...n,draggable:false,htmlLabel:graphMathLabel(n.label)})),...p.nodes.filter(n=>{const c=plan.concepts.find(c=>c.key===n.id);return c&&!c.existing;}).map(n=>{const c=plan.concepts.find(c=>c.key===n.id)!;return {...n,id:c.id,x:c.x,y:c.y,draggable:false};})],edges:[],semanticEdges:[...base.semanticEdges,...plan.relations.map(r=>({from:r.sourceId,to:r.targetId}))]};
+			return {nodes:[...base.nodes.map(n=>({...n,draggable:false,htmlLabel:graphMathLabel(n.label)})),...p.nodes.filter(n=>{const c=plan.concepts.find(c=>c.key===n.id);return c&&!c.existing;}).map(n=>{const c=plan.concepts.find(c=>c.key===n.id)!;return {...n,id:c.id,x:c.x,y:c.y,draggable:false};})],edges:[],mapEdges:[...base.mapEdges,...(plan.mapConnections??[]).map(c=>({from:c.sourceId,to:c.targetId}))],semanticEdges:[...base.semanticEdges,...plan.relations.map(r=>({from:r.sourceId,to:r.targetId}))]};
 		}
 		return p;
 	},[draft,proposal.imageLayout,inAtlas,plan,atlas]);
@@ -39,7 +39,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 				try{const value=toggleDraftConnection(currentDraft.current,source,target,`edge_${crypto.randomUUID()}`);
 					if(value!==currentDraft.current){edit(value);setSaveError("");setSelected(null);}
 				}catch(e){setSaveError((e as Error).message);}
-			}:undefined,onSelect:id=>setSelected({kind:"concept",key:plan?.concepts.find(n=>n.id===id)?.key??id}),onContext:()=>{},onStageClick:()=>setSelected(null),onCameraMove:c=>{cameras.current[inAtlas?"atlas":"draft"]=c;},onCommit:p=>{for(const [id,v] of Object.entries(p))positions.current.set(id,v);}},cameras.current[inAtlas?"atlas":"draft"]);
+			}:undefined,onSelect:id=>setSelected({kind:"concept",key:plan?.concepts.find(n=>n.id===id)?.key??Object.entries(plan?.choices.identities??{}).find(([,value])=>value===id)?.[0]??id}),onContext:()=>{},onStageClick:()=>setSelected(null),onCameraMove:c=>{cameras.current[inAtlas?"atlas":"draft"]=c;},onCommit:p=>{for(const [id,v] of Object.entries(p))positions.current.set(id,v);}},cameras.current[inAtlas?"atlas":"draft"]);
 			graph.setSettings({...DEFAULT_RENDER_SETTINGS,nodeSize:4,labelSize:12,labelZoom:2,arrowLength:5,clusterLabels:false});
 			const dark=getComputedStyle(document.body).color;
 			// Resolve CSS/OKLCH to the renderer's hex channel without changing its theme API.
@@ -68,7 +68,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 				<div><p className="font-medium">{inAtlas?"In Atlas · integration preview":"This map only · proposed"}</p><p className="mt-1 text-muted-foreground">{draft.concepts.length} concepts · {draft.connections.length} connections · no Atlas changes</p></div>
 				<div className="flex flex-wrap gap-1"><button type="button" className={button} onClick={()=>renderer.current?.fit()}>Fit map</button>{plan&&<button type="button" className={button} onClick={()=>setInAtlas(!inAtlas)}>{inAtlas?"This map only":"In Atlas"}</button>}
 				<button type="button" className={button} disabled={!dirty||saving||!review||!!review.integration} onClick={()=>void save()}>{saving?"Saving…":dirty?"Save draft edits":"Draft saved"}</button>
-				<button type="button" className={button} disabled={dirty||saving||integrating||!review||!!review.integration} onClick={()=>void integrate()}>{review?.integration?"Integrated":"Integrate…"}</button></div>
+				<button type="button" className={button} disabled={dirty||saving||integrating||!review} onClick={()=>void integrate()}>{review?.integration?"Restore map connections…":"Integrate…"}</button></div>
 			</div>
 			{error&&<p role="status" className="p-3 text-xs text-muted-foreground">{error}</p>}
 			<div className="relative min-h-72 flex-1"><canvas ref={canvas} aria-label="Proposed mind map; select a concept to inspect its notes" className="absolute inset-0 h-full w-full" /></div>
@@ -78,7 +78,8 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 			<p className="break-words text-[11px] text-muted-foreground">Second pass · {proposal.model} · {proposal.usage?`${proposal.usage.steps} recorded model call(s)`:"Usage not reported"}<br/>{isSubscriptionModel(proposal.model)?"Counts toward plan usage":proposal.estimatedCost===null?"API estimate unavailable":`Estimated $${proposal.estimatedCost.toFixed(4)}`}</p>
 			{saveError&&<p role="alert" className="text-xs text-destructive">{saveError}</p>}
 			{dirty&&<p className="text-xs text-amber-600">Unsaved draft edits · save before integration or leaving this view.</p>}
-			{integrating&&review&&atlas&&<DraftIntegration key={`${review.revision}:${atlas.layoutRevision}`} review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setReview({...review,integration:{id:plan!.id,committedAt:new Date().toISOString()}});setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
+			{integrating&&review?.integration&&atlas&&<MapConnectionRepair review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
+			{integrating&&review&&!review.integration&&atlas&&<DraftIntegration key={`${review.revision}:${atlas.layoutRevision}`} review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setReview({...review,integration:{id:plan!.id,committedAt:new Date().toISOString()}});setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
 			<button type="button" className={button} onClick={()=>setSelected(null)}>Draft overview</button>
 			{concept?<article className="space-y-3"><h3 className="text-lg font-medium"><MessageResponse mode="static">{concept.title}</MessageResponse></h3>{support(concept)}
 				{concept.existingId&&<p className="text-xs text-muted-foreground">Possible existing match: {proposal.context.find(n=>n.id===concept.existingId)?.title??concept.title}. Identity still needs review.</p>}

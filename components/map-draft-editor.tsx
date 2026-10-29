@@ -28,19 +28,44 @@ export function DraftAdd({draft,onChange}:{draft:MapDraft;onChange:(d:MapDraft)=
 	</div></details>;
 }
 export function DraftIntegration({review,atlas,onPrepared,onCommitted,onCancel}:{review:MapReview;atlas:AtlasSnapshot;onPrepared:(plan:MapIntegration|null)=>void;onCommitted:()=>void;onCancel?:()=>void}){
-	const [choices,setChoices]=useState<IntegrationChoices>(()=>({identities:Object.fromEntries(review.draft.concepts.map(n=>[n.key,identityCandidates(n.title,atlas).length?null:"new"])),subjectId:null,connections:[]}));
+	const [choices,setChoices]=useState<IntegrationChoices>(()=>({identities:Object.fromEntries(review.draft.concepts.map(n=>[n.key,identityCandidates(n.title,atlas).length?null:"new"])),subjectId:null,connections:[],mapConnections:review.draft.connections.map(e=>e.key)}));
 	const [plan,setPlan]=useState<MapIntegration|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
-	function change(c:IntegrationChoices){setChoices(c);setPlan(null);onPrepared(null);}
+	function change(c:IntegrationChoices){setChoices({...c,connections:c.connections.filter(key=>{const e=review.draft.connections.find(e=>e.key===key)!;return c.identities[e.source]&&c.identities[e.target];})});setPlan(null);onPrepared(null);}
 	useEffect(()=>()=>onPrepared(null),[onPrepared]);
-	async function run(commit=false){setBusy(true);setError("");try{if(commit&&plan){await reviewRequest({action:"commit",id:plan.id,digest:plan.digest,approve:true});onCommitted();}else {const p=await reviewRequest({action:"prepare",proposalId:review.proposalId,expectedRevision:review.revision,choices,baseRevision:atlas.layoutRevision??0});setPlan(p);onPrepared(p);}}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+	async function run(commit=false){setBusy(true);setError("");try{if(commit&&plan){await reviewRequest({action:"commit",id:plan.id,digest:plan.digest,approve:true});onCommitted();}else {const p=await reviewRequest({action:"prepare",proposalId:review.proposalId,expectedRevision:review.revision,choices:{...choices,mapConnections:choices.mapConnections?.filter(key=>{const e=review.draft.connections.find(e=>e.key===key)!;return choices.identities[e.source]&&choices.identities[e.target];})},baseRevision:atlas.layoutRevision??0});setPlan(p);onPrepared(p);}}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
 	return <section className="space-y-3 rounded-xl border p-3"><h3 className="text-sm font-medium">Integrate into Atlas</h3>
 		<p className="text-xs text-muted-foreground">Choose identities explicitly. Reuse adds sourced notes without renaming or replacing existing notes. Ambiguous matches need your judgment; name matching cannot prove identity.</p>
 		{review.draft.concepts.map(n=><label key={n.key} className="block text-xs">{n.title}{mapReviewReasons(n).length>0?" · ● needs review":""}<select className={field} value={choices.identities[n.key]??""} onChange={e=>change({...choices,identities:{...choices.identities,[n.key]:e.target.value||null}})}><option value="">Exclude / defer</option><option value="new">Create new concept</option>{atlas.concepts.map(c=><option key={c.id} value={c.id}>Reuse: {c.title}{identityCandidates(n.title,atlas).some(x=>x.id===c.id)?" · possible match":""}</option>)}</select></label>)}
 		<label className="block text-xs">Subject for new concepts<select className={field} value={choices.subjectId??""} onChange={e=>change({...choices,subjectId:e.target.value||null})}><option value="">Unassigned</option>{atlas.subjects.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
-		<p className="text-xs">Connections · explicitly select typed, directed links. Untyped connections remain in the saved source draft.</p>
-		{review.draft.connections.map(e=><label key={e.key} className="block text-xs"><input type="checkbox" disabled={!e.relationType||e.direction==="unclear"||!choices.identities[e.source]||!choices.identities[e.target]} checked={choices.connections.includes(e.key)} onChange={event=>change({...choices,connections:event.target.checked?[...choices.connections,e.key]:choices.connections.filter(k=>k!==e.key)})}/> {review.draft.concepts.find(n=>n.key===e.source)?.title} → {review.draft.concepts.find(n=>n.key===e.target)?.title} · {e.relationType??"assign a type in the editor"}{e.direction==="unclear"?" · direction unclear":""}</label>)}
+		<p className="text-xs">Mind-map lines are ordinary associations. Keep them without assigning a mathematical type; promoting a typed relation is a separate choice.</p>
+		{review.draft.connections.map(e=>{const eligible=!!choices.identities[e.source]&&!!choices.identities[e.target];return <div key={e.key} className="space-y-1 rounded border p-2 text-xs">
+			<label className="block"><input type="checkbox" disabled={!eligible||busy} checked={eligible&&(choices.mapConnections??[]).includes(e.key)} onChange={event=>change({...choices,mapConnections:event.target.checked?[...(choices.mapConnections??[]),e.key]:choices.mapConnections?.filter(k=>k!==e.key)})}/> Keep line: {review.draft.concepts.find(n=>n.key===e.source)?.title} — {review.draft.concepts.find(n=>n.key===e.target)?.title}</label>
+			{e.relationType&&e.direction!=="unclear"&&<label className="block text-muted-foreground"><input type="checkbox" disabled={!eligible||busy} checked={choices.connections.includes(e.key)} onChange={event=>change({...choices,connections:event.target.checked?[...choices.connections,e.key]:choices.connections.filter(k=>k!==e.key)})}/> Also accept typed relation: {e.relationType}</label>}
+		</div>;})}
 		{error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
 		<button type="button" className={button} disabled={busy} onClick={()=>void run()}>Preview integration</button> {onCancel&&<button type="button" className={button} disabled={busy} onClick={onCancel}>Back to editing</button>}
-		{plan&&<div className="space-y-2 border-t pt-3 text-xs"><p>{plan.concepts.filter(n=>!n.existing).length} new concepts · {plan.concepts.filter(n=>n.existing).length} reused · {plan.relations.length} new links · {plan.reusedRelations.length} matching links reused.</p><p>See “In Atlas” for placement. Approval accepts the listed typed associations and sourced notes. Mathematical claims remain external assertions, with review markers preserved.</p><button type="button" className={button} disabled={busy} onClick={()=>void run(true)}>Approve and integrate</button></div>}
+		{plan&&<div className="space-y-2 border-t pt-3 text-xs"><p>{plan.concepts.filter(n=>!n.existing).length} new concepts · {plan.concepts.filter(n=>n.existing).length} reused · {plan.mapConnections?.length??0} mind-map lines · {plan.relations.length} typed links · {plan.reusedRelations.length} matching links reused.</p><p>See “In Atlas” for placement. Approval keeps the listed ordinary map lines, sourced notes and any explicitly selected typed relations. Mathematical claims remain external assertions, with review markers preserved.</p><button type="button" className={button} disabled={busy} onClick={()=>void run(true)}>Approve and integrate</button></div>}
+	</section>;
+}
+
+
+export function MapConnectionRepair({review,atlas,onPrepared,onCommitted,onCancel}:{review:MapReview;atlas:AtlasSnapshot;onPrepared:(plan:MapIntegration|null)=>void;onCommitted:()=>void;onCancel:()=>void}){
+	const [plan,setPlan]=useState<MapIntegration|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
+	useEffect(()=>()=>onPrepared(null),[onPrepared]);
+	async function run(commit=false){setBusy(true);setError("");try{
+		if(commit&&plan){await reviewRequest({action:"commit",id:plan.id,digest:plan.digest,approve:true});onCommitted();}
+		else{const p=await reviewRequest({action:"prepare-connections",proposalId:review.proposalId,baseRevision:atlas.layoutRevision??0});setPlan(p);onPrepared(p);}
+	}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+	const title=(id:string)=>atlas.concepts.find(n=>n.id===id)?.title??id;
+	return <section className="space-y-3 rounded-xl border p-3 text-xs" aria-label="Restore integrated map connections">
+		<h3 className="text-sm font-medium">Restore missing map connections</h3>
+		<p>Uses the identities from your original integration. Adds ordinary associations only; existing nodes, notes, positions and mathematical relations stay intact.</p>
+		<button type="button" className={button} disabled={busy} onClick={()=>void run()}>Preview missing connections</button>{" "}<button type="button" className={button} disabled={busy} onClick={onCancel}>Cancel</button>
+		{error&&<p role="alert" className="text-destructive">{error}</p>}
+		{plan&&<><p>{plan.mapConnections?.length??0} missing lines · 0 new nodes · {plan.skippedConnections?.length??0} lines skipped because an endpoint was excluded or removed.</p>
+			{plan.mapConnections?.map(c=><div key={c.id} className="rounded border p-2"><p>{title(c.sourceId)} — {title(c.targetId)}</p>{c.label&&<p className="text-muted-foreground">{c.label}</p>}{c.uncertainty&&<p className="text-amber-600">{c.uncertainty}</p>}</div>)}
+			{!!plan.skippedConnections?.length&&<details><summary>Skipped connections</summary>{plan.skippedConnections.map(key=>{const e=review.draft.connections.find(e=>e.key===key)!;return <p key={key}>{review.draft.concepts.find(n=>n.key===e.source)?.title} — {review.draft.concepts.find(n=>n.key===e.target)?.title}</p>;})}</details>}
+			{plan.mapConnections?.length?<><p>Use “In Atlas” to inspect the dotted source associations before approving.</p><button type="button" className={button} disabled={busy} onClick={()=>void run(true)}>Approve and restore connections</button></>:<p>All available connections are already present.</p>}
+		</>}
 	</section>;
 }

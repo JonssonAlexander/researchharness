@@ -436,7 +436,11 @@ proposed map using the existing renderer. Source readings, reconstructions and
 added explanations stay distinct; neither pass certifies mathematics or writes
 canonical knowledge. See [second-pass draft review](docs/atlas-map-refinement.md).
 Editable, versioned review copies, typeset node labels, amber review markers and
-explicit concept/typed-association integration are now implemented in schema v9.
+explicit concept/typed-association integration are now implemented (schema v10).
+Ordinary reviewed mind-map associations now persist separately from typed
+mathematical relations and appear as dotted lines. Existing imports can preview
+and approve restoring missing lines using the original identity mapping, without
+creating nodes or promoting claims.
 Shift-drag between nodes toggles connections in the editable proposed map; edits
 use the same versioned draft-save and approval path (R01, R07).
 Identity choices are owner-reviewed; exact-name duplicates are blocked, accepted

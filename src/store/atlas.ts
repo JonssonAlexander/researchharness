@@ -1,3 +1,4 @@
+import {mapConnection} from "../core/map-connections.ts";
 import {createMapReviewStore} from "./map-review.ts";
 import { createMapProposalStore } from "./map-proposals.ts";
 import { createMindmapStore, readMindmaps } from "./mindmaps.ts";
@@ -52,7 +53,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 9)
+			if (version > 10)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -181,6 +182,19 @@ CREATE TABLE map_integrations (id TEXT PRIMARY KEY, proposalId TEXT NOT NULL REF
 CREATE UNIQUE INDEX one_map_commit ON map_integrations(proposalId) WHERE status='committed';
 CREATE TABLE map_concept_reviews (integrationId TEXT NOT NULL REFERENCES map_integrations(id), conceptId TEXT NOT NULL, sourceRevision TEXT NOT NULL REFERENCES mindmap_captures(id), reasons TEXT NOT NULL CHECK(json_valid(reasons)), PRIMARY KEY(integrationId,conceptId)) STRICT;
 PRAGMA user_version=9; COMMIT;`);
+			}
+			if(version<10){
+				if(version===9)db.prepare("VACUUM INTO ?").run(`${file}.v9-${randomUUID()}.bak`);
+				db.exec(`BEGIN IMMEDIATE;
+DROP INDEX one_map_commit;
+CREATE UNIQUE INDEX one_map_commit ON map_integrations(proposalId) WHERE status='committed' AND json_extract(record,'$.repairOf') IS NULL;
+CREATE TABLE map_connections (
+ id TEXT PRIMARY KEY, proposalId TEXT NOT NULL REFERENCES map_proposals(id), connectionKey TEXT NOT NULL,
+ sourceRevision TEXT NOT NULL REFERENCES mindmap_captures(id), sourceId TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+ targetId TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE, record TEXT NOT NULL CHECK(json_valid(record)), contentHash TEXT NOT NULL,
+ UNIQUE(proposalId,connectionKey), CHECK(sourceId!=targetId)
+) STRICT;
+PRAGMA user_version=10; COMMIT;`);
 			}
 			return run(db);
 		} finally {
@@ -315,7 +329,13 @@ PRAGMA user_version=9; COMMIT;`);
 		const conceptReviews:Record<string,string[]>={};
 		for(const row of db.prepare("SELECT conceptId,reasons FROM map_concept_reviews").all())
 			conceptReviews[String(row.conceptId)]=[...new Set([...(conceptReviews[String(row.conceptId)]??[]),...JSON.parse(String(row.reasons))])];
-		return { subjects, concepts, relations, layoutRevision, views, mindmaps: readMindmaps(db), conceptReviews };
+		const mindmaps=readMindmaps(db),mapConnections=db.prepare("SELECT * FROM map_connections ORDER BY rowid").all().map(row=>{
+			const raw=JSON.parse(String(row.record));if(raw.schemaVersion!==1)throw new AtlasError("These mind-map connections need a newer app.",409);
+			const c=mapConnection.parse(raw);
+			if(c.id!==row.id||c.proposalId!==row.proposalId||c.connectionKey!==row.connectionKey||c.sourceRevision!==row.sourceRevision||c.sourceId!==row.sourceId||c.targetId!==row.targetId||digest(JSON.stringify(c))!==row.contentHash||!mindmaps.some(m=>m.captures.some(r=>r.id===c.sourceRevision&&r.hash===c.sourceHash)))throw new AtlasError("Broken mind-map connection provenance.",409);
+			return c;
+		});
+		return { subjects, concepts, relations, layoutRevision, views, mindmaps, conceptReviews,mapConnections };
 	}
 	const mindmaps = createMindmapStore(database, path.dirname(file));
 	const proposals=createMapProposalStore(database,mindmaps);
@@ -410,7 +430,7 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, 
 										.prepare("SELECT record FROM relation_revisions WHERE id=? ORDER BY revision")
 										.all(command.id)
 										.map((r) => JSON.parse(String(r.record)))
-								: [];
+								: (current.mapConnections??[]).filter(c=>c.sourceId===command.id||c.targetId===command.id);
 						db.prepare("INSERT INTO atlas_archive VALUES (?, ?, ?, ?)").run(
 							kind,
 							command.id,

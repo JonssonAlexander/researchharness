@@ -1,3 +1,4 @@
+import {visibleMapConnections,type MapConnection} from "./map-connections.ts";
 import type { MapProposalStore } from "./map-proposals.ts";
 import type { Mindmap, MindmapStore } from "./mindmaps.ts";
 import type {MapReviewStore} from "./map-review.ts";
@@ -142,6 +143,7 @@ export interface AtlasView extends Omit<z.infer<typeof atlasViewInput>, "kind" |
 }
 export interface AtlasSnapshot {
 	mindmaps?: Mindmap[];
+	mapConnections?: MapConnection[];
 	conceptReviews?: Record<string,string[]>;
 	views?: AtlasView[];
 	/** Global optimistic version for an atomic layout commit. */
@@ -179,7 +181,10 @@ export function assertSubjectParent(subjects: AtlasSubject[], id: string, parent
 }
 
 /** Membership is many-to-many; the main canvas depicts each concept once. */
-export function projectAtlas({ concepts, subjects, relations, conceptReviews }: AtlasSnapshot) {
+export function projectAtlas(atlas:AtlasSnapshot) {
+	const {concepts,subjects,relations,conceptReviews}=atlas;
+	const pairs=new Set(relations.filter(r=>r.reviewStatus==="accepted").map(r=>[r.sourceId,r.targetId].sort().join(":")));
+	const mapEdges=visibleMapConnections(atlas).flatMap(c=>{const pair=[c.sourceId,c.targetId].sort().join(":");if(pairs.has(pair))return [];pairs.add(pair);return [{from:c.sourceId,to:c.targetId}];});
 	const subjectById = new Map(subjects.map((s) => [s.id, s]));
 	const members = new Map<string, string[]>();
 	for (const c of concepts)
@@ -189,6 +194,7 @@ export function projectAtlas({ concepts, subjects, relations, conceptReviews }: 
 			members.set(c.preferredSubjectId, ids);
 		}
 	return {
+		mapEdges,
 		semanticEdges: relations
 			.filter((r) => r.reviewStatus === "accepted")
 			.map((r) => ({ id: r.id, from: r.sourceId, to: r.targetId })),

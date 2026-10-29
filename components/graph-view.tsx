@@ -982,7 +982,7 @@ export function GraphView({
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	const atlas = useAtlas();
-	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined} | null>(null);
+	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined; maps:string} | null>(null);
 	const atlasActionsRef = useRef(atlas);
 	atlasActionsRef.current = atlas;
 	const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -1457,10 +1457,10 @@ export function GraphView({
 		const positions = posRef.current ?? new Map();
 		if (!renderer || !snapshot) return;
 		// A bookmark save changes no graph data and must not interrupt a live drag.
-		const revision = atlas.snapshot.layoutRevision;
+		const revision = atlas.snapshot.layoutRevision,maps=JSON.stringify(atlas.snapshot.mindmaps?.map(m=>[m.id,m.currentRevision,m.archived]));
 		const previous = canvasFeedRef.current;
-		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision) return;
-		canvasFeedRef.current = {renderer, snapshot, revision};
+		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision && previous.maps===maps) return;
+		canvasFeedRef.current = {renderer, snapshot, revision,maps};
 		const projection = projectAtlas(atlas.snapshot);
 		renderer.setData({
 			nodes: [
@@ -1474,6 +1474,7 @@ export function GraphView({
 			],
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			semanticEdges: projection.semanticEdges,
+			mapEdges:projection.mapEdges,
 			atlas: atlas.snapshot,
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks,

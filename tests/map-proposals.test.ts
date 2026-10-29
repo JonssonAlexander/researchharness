@@ -133,7 +133,7 @@ test('restart leaves an interrupted attempt without auto retry; v7 migration and
  const row=db.prepare('SELECT record FROM map_proposals').get()!;
  db.prepare('UPDATE map_proposals SET record=?').run(JSON.stringify({...JSON.parse(String(row.record)),schemaVersion:4}));
  assert.throws(()=>f.store.proposals.latest(f.source),/newer app/);
- db.exec('DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
+ db.exec('DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
  const before=f.store.read();assert.deepEqual(createAtlasStore(f.file).read(),before);
  assert(fs.readdirSync(path.dirname(f.file)).some(n=>n.includes('.v7-')));
 });
