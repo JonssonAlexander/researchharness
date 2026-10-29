@@ -602,3 +602,9 @@ Each of these was implemented, lived in real data, and was replaced; the replace
 ## 14. Deliberately deferred
 
 Structured logging (§10); SQLite/remote storage (drop-in behind the ports, §3); multi-scale cluster hierarchy (Louvain's dendrogram idea, parked); the anchored calibration rubric; alternative extraction triggers beyond the coverage seam (session end, idle); retroactive bootstrap of the POC sessions (vision §1 consolidation). When any of these land, this doc changes with the commit that lands them — it describes the system, not an intention.
+
+Editable map reviews and approved concept/typed-association integration use SQLite
+schema v9; see [the as-built review/commit boundary](atlas-map-integration.md).
+The graph renderer now supports optional KaTeX HTML labels synchronized with its
+existing camera and a separate amber review badge. Ordinary Canvas labels and
+canonical Library graph ownership are preserved.

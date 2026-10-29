@@ -14,6 +14,7 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 	const [proposal,setProposal]=useState<ProposalView|null>(null),[model,setModel]=useState<string|null>(null),[error,setError]=useState<string|null>(null);
 	const [configError,setConfigError]=useState<string|null>(null);
 	const [attempt,setAttempt]=useState<string|null>(null);
+	const [draftDirty,setDraftDirty]=useState(false);
 	const [view,setView]=useState<"source"|"map">("source");
 	const [busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false),[page,setPage]=useState(0),[evidence,setEvidence]=useState<Evidence|null>(null);
 	const root=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),sequence=useRef(0);
@@ -37,7 +38,8 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 		const previous=document.activeElement as HTMLElement|null;root.current?.focus();
 		return()=>previous?.focus();
 	},[]);
-	const close=()=>{abort.current?.abort();onClose();};
+	const canLeave=()=>!draftDirty||window.confirm("Discard unsaved draft edits? Save draft edits first to keep them.");
+	const close=()=>{if(canLeave()){abort.current?.abort();onClose();}};
 	const backdrop=useBackdropDismiss(close);
 	async function generate(parentId?:string) {
 		if(!model||busy)return;
@@ -57,7 +59,7 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 			onKeyDown={event=>{
 				if(event.key==="Escape"){event.preventDefault();event.stopPropagation();close();}
 				if(event.key==="Tab"){
-					const nodes=root.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],select:not([disabled]),[tabindex="0"]');
+					const nodes=root.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],select:not([disabled]),input:not([disabled]),textarea:not([disabled]),summary,[tabindex="0"]');
 					const first=nodes?.[0],last=nodes?.[nodes.length-1];
 					if(event.shiftKey&&(document.activeElement===first||document.activeElement===root.current)){event.preventDefault();last?.focus();}
 					else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
@@ -70,14 +72,14 @@ export function MapProposalDialog({map,capture,snapshot,onClose}:{map:Mindmap;ca
 			</header>
 			{proposal?.refinement&&<nav aria-label="Draft review views" className="flex flex-wrap gap-2 border-b px-5 py-3">
 				<button type="button" className={button} disabled={!proposal.draft} aria-pressed={view==="map"} onClick={()=>setView("map")}>Proposed map</button>
-				<button type="button" className={button} aria-pressed={view==="source"} onClick={()=>setView("source")}>Source images</button>
-				<button type="button" className={button} disabled={busy} onClick={()=>setAttempt(proposal.refinement!.parentId)}>First-pass reading</button>
+				<button type="button" className={button} aria-pressed={view==="source"} onClick={()=>{if(canLeave())setView("source");}}>Source images</button>
+				<button type="button" className={button} disabled={busy} onClick={()=>{if(canLeave())setAttempt(proposal.refinement!.parentId);}}>First-pass reading</button>
 			</nav>}
-			{view==="map"&&proposal?.draft?<MapDraftPreview key={proposal.id} proposal={proposal} onEvidence={focus}/>:<ProposalReviewBody proposal={proposal} capture={capture} snapshot={snapshot} model={model} loaded={loaded} busy={busy} error={error??(!loaded||proposal?.status==="prepared"?null:configError)}
+			{view==="map"&&proposal?.draft?<MapDraftPreview key={proposal.id} proposal={proposal} onEvidence={e=>{if(canLeave())focus(e);}} onDirtyChange={setDraftDirty}/>:<ProposalReviewBody proposal={proposal} capture={capture} snapshot={snapshot} model={model} loaded={loaded} busy={busy} error={error??(!loaded||proposal?.status==="prepared"?null:configError)}
 				page={page} evidence={evidence} onPage={p=>{setPage(p);setEvidence(null);}} onEvidence={focus} onGenerate={()=>void generate()} onCancel={()=>abort.current?.abort()}
 				onRefine={()=>void generate(proposal?.refinement?.parentId??proposal?.id)} />}
 			{(proposal?.attempts?.length??0)>1&&<label className="flex items-center gap-3 border-t px-5 py-3 text-xs text-muted-foreground">Interpretation attempt
-				<select aria-label="Interpretation attempt" className="min-w-0 rounded border bg-background px-2 py-1" disabled={busy} value={attempt??""} onChange={e=>{setAttempt(e.target.value||null);setPage(0);setEvidence(null);}}>
+				<select aria-label="Interpretation attempt" className="min-w-0 rounded border bg-background px-2 py-1" disabled={busy} value={attempt??""} onChange={e=>{if(!canLeave())return;setAttempt(e.target.value||null);setPage(0);setEvidence(null);}}>
 					<option value="">Latest</option>{proposal!.attempts!.map((a,i)=><option key={a.id} value={a.id}>{i+1} · {a.kind??"reading"} · {a.status} · {a.model}</option>)}
 				</select></label>}
 		</div>

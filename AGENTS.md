@@ -435,8 +435,16 @@ An explicit second pass now retains source-bound refined notes and an isolated
 proposed map using the existing renderer. Source readings, reconstructions and
 added explanations stay distinct; neither pass certifies mathematics or writes
 canonical knowledge. See [second-pass draft review](docs/atlas-map-refinement.md).
-Atlas-context comparison, identity auditing, editable review, approval, watchers and semantic synchronization
-remain pending. Existing teacher extraction is unchanged by this source-only slice.
+Editable, versioned review copies, typeset node labels, amber review markers and
+explicit concept/typed-association integration are now implemented in schema v9.
+Identity choices are owner-reviewed; exact-name duplicates are blocked, accepted
+relation keys are reused, and an exact approval receipt commits atomically with
+extension metadata. Existing knowledge and source originals are preserved. See
+[editable map review and integration](docs/atlas-map-integration.md).
+The In Atlas comparison currently includes Atlas concepts/typed links, not formal
+proposition-ledger nodes. Automated mathematical identity auditing, canonical
+proposition/argument synchronization, full rewrite/depiction reconciliation,
+watchers and teacher-extraction approval remain pending. Existing teacher extraction is unchanged by this source-only slice.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.

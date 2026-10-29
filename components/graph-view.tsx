@@ -1,4 +1,5 @@
 "use client";
+import {graphMathLabel} from "./graph-math-label";
 
 /**
  * The home knowledge-graph view (W4; vision §1 "Rendering (DECIDED)").
@@ -1469,7 +1470,7 @@ export function GraphView({
 					y: positions.get(n.id)?.y ?? 0,
 					label: n.name,
 				})),
-				...projection.nodes,
+				...projection.nodes.map(n=>({...n,htmlLabel:graphMathLabel(n.label)})),
 			],
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			semanticEdges: projection.semanticEdges,
@@ -1575,7 +1576,8 @@ export function GraphView({
 			) : (
 				<div ref={containerRef} className="relative h-full w-full">
 					{/* THE single canvas: every layer (hulls, edges, nodes, both
-					    label systems, hover) draws into it, once per frame. */}
+					    label systems, hover) draws into it, once per frame. Optional
+					    TeX labels follow that same frame in a pointer-transparent DOM layer. */}
 					<canvas ref={canvasRef} className="block h-full w-full touch-none" />
 					{/* The context menu's anchor: a zero-size point at the
 					    right-click position (canvas-relative == container-relative,

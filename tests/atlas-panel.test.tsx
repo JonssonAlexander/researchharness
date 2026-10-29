@@ -645,3 +645,33 @@ test('refined draft starts with the whole-map overview and exposes provenance, n
   assert(![...ui.document.querySelectorAll('button')].some(b=>/Accept|Approve|Apply/.test(b.textContent??'')));
  }finally{await ui.close();}
 });
+
+test('graph labels render TeX without treating prose or TeX links as imported HTML',async()=>{
+ const {graphMathLabel}=await import('../components/graph-math-label.ts');
+ const ui=await mount(()=> <div/>);
+ try{
+  const label=graphMathLabel('Angle \\(\\pi\\) and $x^2$ <img src=x onerror=bad()>')!;
+  assert.equal(label.querySelectorAll('.katex').length,2);
+  assert.equal(label.querySelector('img'),null);
+  assert(label.textContent?.includes('π'));
+  const untrusted=graphMathLabel('$\\href{javascript:alert(1)}{click}$')!;
+  assert.equal(untrusted.querySelector('a'),null);
+  assert.equal(graphMathLabel('Brownian motion'),undefined);
+ }finally{await ui.close();}
+});
+
+test('integration UI sends explicit identities and exact approval, exposing failures without pretending success',async()=>{
+ const {DraftIntegration}=await import('../components/map-draft-editor.tsx');const {draftFixture}=await import('./fixtures/map-draft.ts');
+ const review={schemaVersion:1 as const,proposalId:'mp_00000000-0000-4000-8000-000000000022',revision:2,draft:draftFixture,digest:'a'.repeat(64)};
+ const plan={id:'mi_00000000-0000-4000-8000-000000000022',proposalId:review.proposalId,reviewRevision:2,digest:'b'.repeat(64),baseRevision:3,concepts:[],relations:[],reusedRelations:[],status:'prepared'};
+ const requests:Record<string,unknown>[]=[],prepared:unknown[]=[];let done=0,fail=true;const oldFetch=globalThis.fetch;
+ globalThis.fetch=async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return Response.json(body.action==='prepare'?plan:fail?{error:'Atlas changed. Prepare a new preview.'}:{...plan,status:'committed'},{status:body.action==='commit'&&fail?409:200});};
+ const ui=await mount(()=> <DraftIntegration review={review} atlas={{...snapshot,concepts:[],layoutRevision:3}} onPrepared={p=>prepared.push(p)} onCommitted={()=>done++}/>);
+ const click=async(name:string)=>{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});};
+ try{
+  assert(!ui.document.body.textContent.includes('Approve and integrate'));
+  await click('Preview integration');assert.equal(requests[0]!.baseRevision,3);assert.deepEqual(requests[0]!.choices,{identities:{draft_a:'new',draft_b:'new'},subjectId:null,connections:[]});assert.deepEqual(prepared.at(-1),plan);
+  await click('Approve and integrate');assert.deepEqual(requests[1],{action:'commit',id:plan.id,digest:plan.digest,approve:true});assert.equal(done,0);assert(ui.document.body.textContent.includes('Atlas changed.'));
+  fail=false;await click('Approve and integrate');assert.equal(done,1);
+ }finally{await ui.close();globalThis.fetch=oldFetch;}
+});

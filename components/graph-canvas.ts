@@ -87,6 +87,8 @@ export interface CanvasNode {
 	x: number;
 	y: number;
 	label: string;
+	badgeColor?: string;
+	htmlLabel?: HTMLElement;
 	/** Atlas concepts carry subject colour and explicit spatial locks. */
 	color?: string;
 	fixed?: boolean;
@@ -773,6 +775,11 @@ export class GraphCanvasRenderer {
 	// ── Public API ──
 
 	setData(data: CanvasData): void {
+		for(const n of this.data?.nodes??[])n.htmlLabel?.remove();
+		for(const n of data.nodes)if(n.htmlLabel){
+			Object.assign(n.htmlLabel.style,{position:"absolute",pointerEvents:"none",transformOrigin:"top center",textAlign:"center",width:"170px",lineHeight:"1.35",left:"0",top:"0"});
+			this.canvas.parentElement?.append(n.htmlLabel);
+		}
 		const previousAtlas = this.data?.atlas;
 		this.atlasLayout = null;
 		this.subjectDrag = null;
@@ -948,6 +955,7 @@ export class GraphCanvasRenderer {
 	}
 
 	destroy(): void {
+		for(const n of this.data?.nodes??[])n.htmlLabel?.remove();
 		if (this.frameId !== null) cancelAnimationFrame(this.frameId);
 		if (this.commitTimer) clearTimeout(this.commitTimer);
 		this.sim = null;
@@ -1892,6 +1900,15 @@ export class GraphCanvasRenderer {
 			ctx.fill(disc);
 		}
 
+		for(const n of data.nodes){
+			const shown=!this.visible||this.visible.has(n.id);
+			if(n.badgeColor&&shown){ctx.fillStyle=n.badgeColor;ctx.beginPath();ctx.arc(n.x+nodeR,n.y-nodeR,Math.max(1.5/k,nodeR*.5),0,Math.PI*2);ctx.fill();}
+			if(n.htmlLabel){const el=n.htmlLabel,alpha=this.hoverNode?.id===n.id?Math.max(nodeAlpha,this.hoverFade):nodeAlpha;
+				el.style.display=shown&&alpha>.01?"block":"none";el.style.opacity=String(alpha);el.style.color=data.colors.label;el.style.fontSize=`${this.world.labelSize}px`;
+				el.style.transform=`translate(${n.x*k+this.transform.x-85}px,${(n.y+this.world.nodeR+this.world.labelGap)*k+this.transform.y}px) scale(${k})`;
+			}
+		}
+
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).
 		if (nodeAlpha > 0.01) {
@@ -1901,7 +1918,7 @@ export class GraphCanvasRenderer {
 			for (const [id, lines] of this.labelLines) {
 				const n = this.nodeById.get(id);
 				if (!n) continue;
-				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+				if(!n.htmlLabel)drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
 			}
 			ctx.restore();
 		}
@@ -1926,7 +1943,7 @@ export class GraphCanvasRenderer {
 				ctx.save();
 				ctx.globalAlpha = this.hoverFade;
 				ctx.font = this.worldLabelFont;
-				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
+				if(!n.htmlLabel)drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
 				ctx.restore();
 			}
 		}

@@ -1,5 +1,6 @@
 import type { MapProposalStore } from "./map-proposals.ts";
 import type { Mindmap, MindmapStore } from "./mindmaps.ts";
+import type {MapReviewStore} from "./map-review.ts";
 import { z } from "zod";
 import { atlasRelationSchema, type AtlasRelation } from "./atlas-relations.ts";
 
@@ -141,6 +142,7 @@ export interface AtlasView extends Omit<z.infer<typeof atlasViewInput>, "kind" |
 }
 export interface AtlasSnapshot {
 	mindmaps?: Mindmap[];
+	conceptReviews?: Record<string,string[]>;
 	views?: AtlasView[];
 	/** Global optimistic version for an atomic layout commit. */
 	layoutRevision?: number;
@@ -150,6 +152,7 @@ export interface AtlasSnapshot {
 }
 export interface AtlasStore {
 	proposals: MapProposalStore;
+	reviews: MapReviewStore;
 	mindmaps: MindmapStore;
 	read(): AtlasSnapshot;
 	save(command: AtlasCommand): void;
@@ -176,7 +179,7 @@ export function assertSubjectParent(subjects: AtlasSubject[], id: string, parent
 }
 
 /** Membership is many-to-many; the main canvas depicts each concept once. */
-export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
+export function projectAtlas({ concepts, subjects, relations, conceptReviews }: AtlasSnapshot) {
 	const subjectById = new Map(subjects.map((s) => [s.id, s]));
 	const members = new Map<string, string[]>();
 	for (const c of concepts)
@@ -192,6 +195,7 @@ export function projectAtlas({ concepts, subjects, relations }: AtlasSnapshot) {
 		nodes: concepts.map((c) => ({
 			id: c.id,
 			label: c.title,
+			badgeColor: conceptReviews?.[c.id]?.length ? "#e6b35a" : undefined,
 			x: c.x,
 			y: c.y,
 			fixed: !!subjectById.get(c.preferredSubjectId ?? "")?.locked,

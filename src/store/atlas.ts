@@ -1,3 +1,4 @@
+import {createMapReviewStore} from "./map-review.ts";
 import { createMapProposalStore } from "./map-proposals.ts";
 import { createMindmapStore, readMindmaps } from "./mindmaps.ts";
 import fs from "node:fs";
@@ -51,7 +52,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 8)
+			if (version > 9)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -172,6 +173,15 @@ PRAGMA user_version=8;`);
 					db.exec("COMMIT");
 				} catch(error) {db.exec("ROLLBACK");throw error;}
 			}
+			if(version<9){
+				if(version===8)db.prepare("VACUUM INTO ?").run(`${file}.v8-${randomUUID()}.bak`);
+				db.exec(`BEGIN IMMEDIATE;
+CREATE TABLE map_reviews (proposalId TEXT NOT NULL REFERENCES map_proposals(id), revision INTEGER NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), PRIMARY KEY(proposalId,revision)) STRICT;
+CREATE TABLE map_integrations (id TEXT PRIMARY KEY, proposalId TEXT NOT NULL REFERENCES map_proposals(id), status TEXT NOT NULL CHECK(status IN ('prepared','committed')), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+CREATE UNIQUE INDEX one_map_commit ON map_integrations(proposalId) WHERE status='committed';
+CREATE TABLE map_concept_reviews (integrationId TEXT NOT NULL REFERENCES map_integrations(id), conceptId TEXT NOT NULL, sourceRevision TEXT NOT NULL REFERENCES mindmap_captures(id), reasons TEXT NOT NULL CHECK(json_valid(reasons)), PRIMARY KEY(integrationId,conceptId)) STRICT;
+PRAGMA user_version=9; COMMIT;`);
+			}
 			return run(db);
 		} finally {
 			db.close();
@@ -202,13 +212,16 @@ PRAGMA user_version=8;`);
 		fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 		if (fs.existsSync(target)) readNote(id, hash);
 		else {
-			const fd = fs.openSync(target, "wx", 0o600);
+			const temp=path.join(path.dirname(target), `${randomUUID()}.tmp`);
+			const fd = fs.openSync(temp, "wx", 0o600);
 			try {
 				fs.writeFileSync(fd, text);
 				fs.fsyncSync(fd);
 			} finally {
 				fs.closeSync(fd);
 			}
+			try {try{fs.linkSync(temp,target);}catch(error){if((error as NodeJS.ErrnoException).code!=="EEXIST")throw error;readNote(id,hash);}}
+			finally{fs.unlinkSync(temp);}
 			if (process.platform !== "win32") {
 				const dir = fs.openSync(path.dirname(target), "r");
 				try {
@@ -299,12 +312,17 @@ PRAGMA user_version=8;`);
 			const {kind: _kind, expectedRevision, ...fields} = parsed;
 			return {...fields, revision: expectedRevision};
 		});
-		return { subjects, concepts, relations, layoutRevision, views, mindmaps: readMindmaps(db) };
+		const conceptReviews:Record<string,string[]>={};
+		for(const row of db.prepare("SELECT conceptId,reasons FROM map_concept_reviews").all())
+			conceptReviews[String(row.conceptId)]=[...new Set([...(conceptReviews[String(row.conceptId)]??[]),...JSON.parse(String(row.reasons))])];
+		return { subjects, concepts, relations, layoutRevision, views, mindmaps: readMindmaps(db), conceptReviews };
 	}
 	const mindmaps = createMindmapStore(database, path.dirname(file));
+	const proposals=createMapProposalStore(database,mindmaps);
 	return {
 		mindmaps,
-		proposals: createMapProposalStore(database,mindmaps),
+		proposals,
+		reviews:createMapReviewStore(database,proposals,snapshot,writeNote,revision=>{mindmaps.asset(revision,"original");}),
 		read: () => database(snapshot),
 		save: (input: AtlasCommand) =>
 			database((db) => {

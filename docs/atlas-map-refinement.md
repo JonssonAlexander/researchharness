@@ -1,8 +1,9 @@
 # Refined notes and isolated proposed maps
 
 29 October 2026. R06–R09, R14–R17; a bounded resolve/preview extension of AGENTS.md
-§8.1. Atlas-context comparison, editing, approval and canonical application remain
-pending. This does not complete Phase 3 or provide theorem verification.
+§8.1. Editable review and approved concept/typed-association integration are documented
+in [the next slice](atlas-map-integration.md); formal proposition/argument application
+remains pending. This does not complete Phase 3 or provide theorem verification.
 
 ## Available workflow
 
@@ -34,8 +35,8 @@ These are model declarations, not independently certified classifications. Check
 reject missing grounding/rationales, nonexistent image indices, unknown first-pass
 keys, duplicate keys, invalid endpoints and unsupported existing identity matches.
 They do not prove that a quoted mark was read correctly or a derivation is valid.
-Only exact supplied names/aliases can suggest existing IDs; full identity auditing
-and owner conflict resolution remain pending. The overview is labelled model
+Only exact supplied names/aliases can suggest existing IDs; full mathematical identity auditing remains pending; the integration slice adds
+explicit owner identity choices. The overview is labelled model
 synthesis, and unresolved questions stay prominent.
 
 The existing single-submit runner is reused, with only a draft-submit tool. Up to
@@ -58,12 +59,14 @@ and connection lists provide another way to inspect the draft; a canvas failure
 leaves these lists usable. Source links switch to the exact captured image and
 highlight the cited region. **First-pass reading** and the attempt selector reopen
 retained earlier results. Camera/layout changes remain private to the preview:
-there is no Atlas data feed or persistence callback. Reopening a draft is read-only
+the isolated draft does not write Atlas positions. The later integration slice
+adds an explicit Atlas comparison and approved apply action. Reopening a draft is read-only
 and does not call a model.
 
 ## Storage and recovery
 
-The existing SQLite schema v8 and `map_proposals` table are retained. New refinement
+The existing `map_proposals` table is retained; the later editable-review slice
+adds separate tables in SQLite schema v9. New refinement
 records use envelope v3; v1/v2 readings and their digest behaviour remain supported.
 The envelope binds a prepared first-reading ID and digest, source revision/hash,
 current base/context, model, image layout/hashes, the draft and usage. The prepared

@@ -166,6 +166,7 @@ export function AtlasPanel({
 					</p>
 				)}
 				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
+				{selectedId&&atlas.snapshot.conceptReviews?.[selectedId]?.length&&<div className="rounded border border-amber-500/40 p-2 text-xs"><p className="font-medium text-amber-600">● Source notes need review</p>{atlas.snapshot.conceptReviews[selectedId]!.map(r=><p key={r}>{r}</p>)}<p className="mt-1 text-muted-foreground">Acceptance does not establish mathematical validity or your understanding.</p></div>}
 				<AtlasMindmaps snapshot={atlas.snapshot} selectedId={selectedId} refresh={atlas.refresh} />
 				{editing ? (
 					<form
