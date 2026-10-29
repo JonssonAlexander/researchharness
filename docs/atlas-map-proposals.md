@@ -40,7 +40,20 @@ with an optional image message, the shared LLM semaphore, injected settings-reso
 engine and existing usage folds/pricing. The model has only a schema-validated
 submit tool. It cannot retrieve arbitrary files, run tools or write any graph.
 At most two calls allow schema repair; each is capped at 8,000 output tokens (or
-the model's smaller limit). Total work is bounded by a two-minute abort signal.
+the model's smaller limit). Page export has its own 60-second bound. After pages
+are retained, model work (including the shared queue and any schema repair) has
+a separate five-minute deadline. User/request cancellation interrupts either
+stage; a model deadline is recorded as failed with an explicit timeout message,
+not as a user cancellation. No automatic retry occurs. The review screen shows
+whether source pages are being prepared or the model response is awaited.
+
+An owner six-page attempt reached the original combined 120-second deadline
+at 120.067 seconds without a completed usage record. This establishes the local
+cutoff, not successful provider completion. Deadline/cancellation regression tests
+use an injected abort signal, with no live request: export finishes before the
+model deadline begins, timeout retains pages, and the same token never retries.
+The source/proposal/UI checks pass (29 tests), along with type checking and
+targeted lint. Live provider completion remains an owner-triggered acceptance check.
 
 Every suggestion cites a real page, quote and optional normalized region. Draft
 keys must be unique, relationship endpoints distinct and resolvable, and existing

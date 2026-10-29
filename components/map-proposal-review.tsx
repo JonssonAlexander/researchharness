@@ -107,7 +107,7 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 				{busy&&<button type="button" className={`${button} ml-2`} onClick={onCancel}>Cancel</button>}
 				{proposal&&<p className="text-xs text-muted-foreground">Retry starts a new attempt and may use additional plan allowance or API credits.</p>}
 			</div>}
-			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">Reading saved pages and preparing source-backed suggestions…</p>}
+			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?"Pages captured. Waiting for the model’s suggestions (up to 5 minutes)…":"Preparing readable source pages locally…"}</p>}
 			{findings&&<>
 				<div><h3 className="font-medium">Concepts <span className="text-muted-foreground">{findings.concepts.length}</span></h3>
 					<div className="mt-2 space-y-2">{findings.concepts.map(c=><article key={c.key} className="space-y-2 rounded-xl border p-3">

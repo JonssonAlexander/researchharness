@@ -113,6 +113,18 @@ test('concurrent generation is refused, cancellation persists, and explicit retr
  assert.equal(retry.read(f.source)?.attempts?.length,2);
 });
 
+test('model deadline starts after export and is retained as a timeout without automatic retry',async()=>{
+ const f=fixture('rnote-thumbnail'),before=f.store.read(),deadline=new AbortController();let deadlines=0,calls=0;
+ const service=createMapProposalService(f.store,()=>f.engine,async(_e,pages,_c,signal)=>{
+  calls++;assert.equal(deadlines,1);assert.equal(pages.length,1);deadline.abort();assert(signal.aborted);return findings;
+ },async(_original,signal)=>{assert.equal(deadlines,0);assert(!signal?.aborted);return [png];},()=>{deadlines++;return deadline.signal;});
+ const c=command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),signal=new AbortController().signal;
+ const result=await service.generate(c,signal);
+ assert.equal(result?.status,'failed');assert.match(result!.error!,/model response timed out after 5 minutes/);
+ assert.equal(result?.images.length,1);assert.equal(result?.findings,null);assert(!signal.aborted);assert.deepEqual(f.store.read(),before);
+ assert.equal((await service.generate(c,signal))?.id,result?.id);assert.equal(calls,1);assert.equal(deadlines,1);
+});
+
 test('restart leaves an interrupted attempt without auto retry; v7 migration and future proposal versions are guarded',async()=>{
  const f=fixture(),db=new DatabaseSync(f.file),source=f.store.read().mindmaps![0]!.captures[0]!;
  const at=new Date().toISOString(),record={schemaVersion:1 as const,id:`mp_${randomUUID()}`,sourceRevision:f.source,sourceHash:source.hash,baseRevision:f.store.read().layoutRevision!,context:[],model:'fake:vision',status:'running' as const,images:[],findings:null,digest:null,createdAt:at,updatedAt:at,error:null};

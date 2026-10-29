@@ -20,7 +20,7 @@ function configuredEngine() {
 	if(!engine.model.input.includes("image"))throw new AtlasError("The selected vision model does not accept images. Choose an image-capable model.",422);
 	return engine;
 }
-export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine=configuredEngine,interpret=interpretMap,exportPages=exportRnotePages) {
+export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine=configuredEngine,interpret=interpretMap,exportPages=exportRnotePages,modelDeadline=()=>AbortSignal.timeout(300000)) {
 	const view=(p:MapProposal|null):ProposalView|null=>p?{...p,estimatedCost:jobCost({usage:p.usage as JobUsage|undefined})}:null;
 	return {
 		read:(revision:string)=>{
@@ -47,13 +47,14 @@ export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine
 				}).slice(0,40),model,status:"running",images:[],findings:null,digest:null,createdAt:at,updatedAt:at,error:null};
 			if(!store.proposals.begin(record))return view(store.proposals.read(c.id));
 			const persist=()=>{record.updatedAt=new Date().toISOString();store.proposals.update(record);emit("atlas-changed",{});};
-			const bounded=AbortSignal.any([signal,AbortSignal.timeout(120000)]);
+			let deadline:AbortSignal|undefined;
 			try {
 				const original=store.mindmaps.asset(c.sourceRevision,"original").bytes;
-				const pages=capture.previewKind==="manual-png"?[store.mindmaps.asset(c.sourceRevision,"preview").bytes]:await exportPages(original,bounded);
+				const pages=capture.previewKind==="manual-png"?[store.mindmaps.asset(c.sourceRevision,"preview").bytes]:await exportPages(original,signal);
 				if(!pages.length||pages.length>8||pages.reduce((n,p)=>n+p.length,0)>20*1024*1024)throw new AtlasError("Interpretation supports up to 8 pages and 20 MB of PNG images.",422);
 				pages.forEach(validateMindmapPng);record.images=pages.map(p=>store.proposals.retainImage(p));persist();
-				if(bounded.aborted)throw new AtlasError("Interpretation cancelled.",499);
+				signal.throwIfAborted();deadline=modelDeadline();
+				const bounded=AbortSignal.any([signal,deadline]);
 				const value=await interpret(engine,pages,record.context,bounded,usage=>{
 					record.usage=accumulateJobUsage(record.usage as JobUsage|undefined,model,piUsageToStep(usage));persist();
 				});
@@ -62,7 +63,8 @@ export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine
 				if(problem)throw new Error(problem);
 				record={...record,status:"prepared",findings};persist();
 			} catch(error) {
-				record={...record,status:bounded.aborted?"cancelled":"failed",error:bounded.aborted?"Interpretation was cancelled or timed out. Source files are unchanged; provider usage may be incomplete.":error instanceof AtlasError?error.message:
+				record={...record,status:signal.aborted?"cancelled":"failed",error:signal.aborted?"Interpretation was cancelled. Source files are unchanged; provider usage may be incomplete.":deadline?.aborted?
+					"The model response timed out after 5 minutes, after page preparation. Source files and captured pages are preserved. Provider usage may be incomplete; retry only starts a new attempt.":error instanceof AtlasError?error.message:
 					record.images.length?"The model did not return a valid proposal. Check the selected provider before retrying; usage may be incomplete.":"Readable source pages could not be prepared. Check the original or import a full PNG exported from Rnote."};persist();
 			}
 			return view(store.proposals.read(c.id));
