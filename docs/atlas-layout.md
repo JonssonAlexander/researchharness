@@ -14,8 +14,8 @@ their stored direction, type and mathematical status are unchanged.
 Dragging reheats a local concept simulation. Release unpins the dragged concept,
 lets nearby concepts settle and saves the resulting positions together. A weak
 spring toward saved placements preserves spatial memory; a weaker spring toward
-the subject anchor keeps the region recognizable. Cross-subject endpoints are
-fixed boundary conditions. Unrelated subjects and canonical proposition nodes do
+the subject anchor keeps the region recognizable. Cross-subject endpoints remain fixed and no longer exert link springs on a local
+subject: a reference to a distant topic must not stretch its shape. Unrelated subjects and canonical proposition nodes do
 not move. Successive drags/arrangements in different subjects before settling
 combine only those explicitly touched regions into the same bounded layout.
 
@@ -78,3 +78,20 @@ changing coordinates. The subject was then unlocked. Reload restored the saved l
 The final checks passed: 111 focused tests, 29 Atlas/layout tests under Electron,
 lint, typecheck, production Turbopack build and packaged Electron server smoke. These checks do not establish large-
 graph performance or complete the remaining Phase 2 workflow gates.
+
+
+## Compact subject overview (31 October)
+
+Organic arrangement now lays out each preferred subject independently, with
+stronger centring and collision spacing, then packs the subject regions with a
+180-world-unit gutter. Cross-subject links do not merge the regions. A selected
+map/subject still limits the operation; locked and unrelated nodes stay fixed.
+The existing preview/save controls and revision-checked position command remain
+in charge. No initial-load relayout, schema change or mathematical edits occur.
+
+In the main Atlas, inter-subject ordinary and typed links share a quieter dashed
+bridge pass. They brighten with zoom and their incident links brighten on hover;
+query focus restores full bridge visibility. Picking still uses all actual edges.
+Derivation counts appear with close-up labels or hover, rather than dominating
+the overview. Embedded lesson/proof maps retain their prior rendering. These are
+conceptual associations: the arrangement does not claim a curriculum or proof order.

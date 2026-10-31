@@ -1,6 +1,10 @@
+import {scratchDelivery} from "../core/scratchpad.ts";
+import {scratchMessage,scratchImages} from "./scratchpad.ts";
+import {learningInstructions} from "../core/learning-session.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	createPracticeAgent,
+ createLearningAgent,
 	createProberAgent,
 	createTeacherAgent,
 	type AgentBuildOptions,
@@ -44,7 +48,7 @@ import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
-import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
+import { hasProbeDone, danglingQuestionOf,nativeInputCause } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -80,6 +84,11 @@ import type {CallUsage} from "../core/contracts.ts";
  * for write-ahead persistence, turn liveness, and the turn services.
  */
 
+function instructionTokens(chatId:string,kind?:"teach"|"practice"):number {
+ const lesson=kind!=="practice"?stores.lessonStore.read(chatId):null;
+ return Math.ceil((lesson?learningInstructions(lesson):composeInstructions(kind==="practice"?"practice":"teacher")).length/4);
+}
+
 function settlementErrorText(error: unknown): string {
 	return error instanceof TurnPersistenceError ? error.message : "An error occurred.";
 }
@@ -111,6 +120,7 @@ const jobRunner = createJobRunner({
  *  (/api/graph/import) hit the same single-flight registry. */
 export const extraction = createExtractionPipeline({
 	...stores,
+ beforeMerge:()=>{if(stores.atlasStore.lessonReviews.list().some(r=>r.status==="applying"))throw new Error("Resume the interrupted lesson integration before changing canonical knowledge.");},
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
 	// role override → slot → NOTHING — read FRESH per stage call; an empty
 	// chain flows through as undefined and the pipeline refuses the run
@@ -177,6 +187,11 @@ export async function handleChatRequest(
  * agent turn as a background object. Also the wake pipeline's entry
  * (TurnInput's steer kind appends the marker under the same claim).
  */
+function scratchResumeAck(messages:Parameters<typeof scratchDelivery>[0],id:string):Response|null{
+ const delivery=scratchDelivery(messages,id);if(delivery==="answered")return settledTurnResponse();
+ if(delivery!=="submitted")return Response.json({error:delivery==="failed"?"Use Retry in the conversation for failed feedback.":"Send the saved attempt before resuming feedback."},{status:422});
+ const i=messages.findIndex(m=>m.id===id);if(messages.slice(i+1).some(m=>nativeInputCause(m,messages)==="learner"))return Response.json({error:"New work follows this attempt. Use the conversation to revisit it."},{status:422});return null;
+}
 export async function handleChatInput(
 	chatId: string,
 	input: TurnInput,
@@ -186,6 +201,13 @@ export async function handleChatInput(
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
 	}
+
+ if(input.type==="continue"&&input.scratchpadAttemptId){const ack=scratchResumeAck(record.messages,input.scratchpadAttemptId);if(ack)return ack;}
+
+ if(input.type==="scratchpad"){
+  if(record.messages.some(m=>m.id===input.attemptId))return settledTurnResponse();
+  try{if(!stores.lessonStore.read(chatId)||record.kind==="practice")return Response.json({error:"Open a learning session first."},{status:409});scratchMessage(chatId,input.attemptId);}catch(e){return Response.json({error:e instanceof Error?e.message:"Attempt unavailable"},{status:400});}
+ }
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
 	// turn/write effects. Revalidate after the awaited gates below too.
@@ -254,6 +276,9 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	if(input.type==="scratchpad"||record.messages.some(m=>m.role==="custom"&&m.customType==="scratchpad-attempt")){
+  try{const candidates=input.type==="scratchpad"?[...record.messages,scratchMessage(chatId,input.attemptId)]:record.messages;scratchImages(chatId,candidates,conversationEngine.model.input.includes("image"));}catch(e){return Response.json({error:e instanceof Error?e.message:"Drawing attachment unavailable"},{status:422});}
+ }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
@@ -261,12 +286,12 @@ export async function handleChatInput(
 			engine: piEngineForSpec(conversation, true),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
-			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
+			kind: record.kind === "practice" ? "practice" : stores.lessonStore.read(chatId)||hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: instructionTokens(chatId,record.kind),
 		},
 		chatId,
 	);
@@ -286,6 +311,9 @@ export async function handleChatInput(
 		}
 	}
 
+ if(input.type==="continue"&&input.scratchpadAttemptId){const ack=scratchResumeAck(record.messages,input.scratchpadAttemptId);if(ack)return ack;}
+ if(input.type==="scratchpad"&&record.messages.some(m=>m.id===input.attemptId))return settledTurnResponse();
+
 	// The input's native appends (pure; the honest 400 for an answer with no
 	// pending question call). Computed BEFORE beginTurn so a refused input
 	// leaves no liveness effects; read against the CURRENT record. Wave C:
@@ -298,7 +326,7 @@ export async function handleChatInput(
 		appends =
 			input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
-				: inputAppends(record, input);
+				: input.type==="scratchpad"?[scratchMessage(chatId,input.attemptId)]:inputAppends(record, input);
 	} catch (err) {
 		if (err instanceof ChatInputError) {
 			return Response.json({ error: err.message }, { status: 400 });
@@ -387,7 +415,8 @@ export async function handleChatInput(
 	// the session is still probing: build the PROBER (quiz/ask + probe_done).
 	// Both share this whole composition (write-ahead persist, liveness,
 	// steers, usage, extraction) — only the agent differs.
-	const teaching = hasProbeDone(agentMessages);
+	const lesson=record.kind!=="practice"?stores.lessonStore.read(chatId):null;
+ const teaching = !!lesson||hasProbeDone(agentMessages);
 	// BYOK (owner, 2026-09-22): the conversation chain was resolved by the
 	// turn gate above (chat.model override → strong slot → refused) — the
 	// engine build is pure from here; thinking levels clamp natively.
@@ -419,6 +448,8 @@ export async function handleChatInput(
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
 	const agentOpts: AgentBuildOptions = {
+ learning:lesson??undefined,
+ resolveAttachments:messages=>scratchImages(chatId,messages,engine.model.input.includes("image")),
 		engine,
 		callPurpose,
 		requestCycle,
@@ -464,7 +495,9 @@ export async function handleChatInput(
 					},
 					agentOpts,
 				)
-			: teaching
+			: lesson
+            ? createLearningAgent({chatId,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:(job,input)=>void jobRunner.runJob(job.id,input),searchAvailable},stores.lessonStore,()=>emit("lesson-changed",{chatId}),agentOpts)
+            : teaching
 			? createTeacherAgent(
 					{
 						chatId,
@@ -580,7 +613,7 @@ export async function handleChatInput(
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
 				// is the deliverable).
-				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && !stores.lessonStore.read(chatId) && !stores.atlasStore.sync.context(chatId) && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
@@ -636,12 +669,12 @@ export async function handleChatInput(
 							engine: kickEngine,
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
-							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
+							kind: freshRecord.kind === "practice" ? "practice" : stores.lessonStore.read(chatId)||hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: instructionTokens(chatId,freshRecord.kind),
 						};
 					}, chatId);
 			},

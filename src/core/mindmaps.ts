@@ -26,7 +26,7 @@ export type MindmapCapture = z.infer<typeof mindmapCapture>;
 export type MindmapPreparation = Pick<MindmapCapture, "validation" | "previewKind" | "notice">;
 export interface Mindmap {
 	id: string; title: string; revision: number; archived: boolean;
-	currentRevision: string; captures: MindmapCapture[];
+	subjectId?: string | null; currentRevision: string; captures: MindmapCapture[];
 }
 export interface MindmapStore {
 	capture(input: MindmapInput, original: Uint8Array, preview: Uint8Array | null, info: MindmapPreparation): void;

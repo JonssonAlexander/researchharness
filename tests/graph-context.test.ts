@@ -152,3 +152,32 @@ describe("POST /api/chats — graphContext becomes message[0]", () => {
 		}
 	});
 });
+
+it("Atlas session context keeps concept IDs separate from formal targets and requires reviewed extraction", async () => {
+ const {stores}=await import('../src/server/stores.ts');
+ const conceptId='ac_00000000-0000-4000-8000-000000000088';
+ stores.atlasStore.save({kind:'concept',id:conceptId,expectedRevision:0,title:'Logical reasoning',aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:['n_a','n_b'],markdown:'Retain the precise premises and reasoning.'});
+ const before=stores.atlasStore.read(),context={conceptIds:[conceptId],goal:'derive'},res=await POST(new Request('http://test/api/chats',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Derive this result',atlasContext:context})}));
+ assert.equal(res.status,200);const {id}=await res.json(),record=chatStore.getChat(id)!,marker=record.messages[0] as import('../src/core/native-messages.ts').LhMarkerMessage;
+ assert.deepEqual(stores.atlasStore.sync.context(id),context);assert(marker.content.includes(conceptId));assert(marker.content.includes('Modus ponens → Soundness'));assert(marker.content.includes('not formal proposition targets')||marker.content.includes('never formal proposition targets'));
+ const details=marker.details as {propositions:{id:string}[]};assert(details.propositions.every(p=>p.id.startsWith('n_')));assert.deepEqual(stores.atlasStore.read(),before);
+ const {POST:extract}=await import('../app/api/graph/coverage/extract/route.ts');const refused=await extract(new Request('http://test/api/graph/coverage/extract',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chatId:id})}));assert.equal(refused.status,409);assert((await refused.json()).error.includes('Review for Atlas'));
+ const count=chatStore.listChats().length;const bad=await POST(new Request('http://test/api/chats',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Invalid context',atlasContext:{conceptIds:['ac_00000000-0000-4000-8000-000000000099'],goal:'derive'}})}));assert.equal(bad.status,400);assert.equal(chatStore.listChats().length,count);
+});
+
+it('a derivation session captures the exact canonical argument and rejects unlinked or removed targets before creating a chat',async()=>{
+ const {stores}=await import('../src/server/stores.ts'),conceptId='ac_00000000-0000-4000-8000-000000000077';
+ const at='2026-10-30T00:00:00Z',provenance=[{chatId:'source-derivation',messageId:''}];
+ for(const [id,name] of [['n_da','Independent increments'],['n_db','Moment bounds'],['n_dc','Quadratic variation'],['n_du','Unrelated']])graphStore.appendNode({id:id!,name:name!,statement:`Statement for ${name}`,aliases:[],provenance,createdAt:at});
+ graphStore.appendChain({id:'arg_joint_derivation',premises:['n_da','n_db'],conclusion:'n_dc',provenance,createdAt:at});
+ stores.atlasStore.save({kind:'concept',id:conceptId,expectedRevision:0,title:'Brownian motion',aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:['n_dc']});
+ const before=stores.atlasStore.read(),context={conceptIds:[conceptId],goal:'derive',derivation:{rootId:'n_dc',targetId:'n_dc',chainId:'arg_joint_derivation'}};
+ const send=(atlasContext:unknown)=>POST(new Request('http://test/api/chats',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Learn this step',atlasContext,graphContext:{propositions:[{id:'n_du',name:'Unrelated',statement:'Must not enter the selected derivation context.'}]}})}));
+ const response=await send(context);assert.equal(response.status,200);const {id}=await response.json(),marker=chatStore.getChat(id)!.messages[0] as import('../src/core/native-messages.ts').LhMarkerMessage;
+ assert.equal(chatStore.getChat(id)!.messages.length,1);assert.deepEqual((marker.details as {propositions:{id:string}[]}).propositions.map(n=>n.id),['n_da','n_db','n_dc']);assert(marker.content.includes('Independent increments ∧ Moment bounds ⇒ Quadratic variation'));assert(marker.content.includes('arg_joint_derivation'));assert(marker.content.includes('not proof certificates'));
+ assert.deepEqual(stores.atlasStore.sync.context(id),context);assert.deepEqual(stores.atlasStore.read(),before);
+ const count=chatStore.listChats().length;
+ assert.equal((await send({...context,derivation:{...context.derivation,targetId:'n_du'}})).status,400);
+ assert.equal((await send({...context,derivation:{...context.derivation,chainId:'arg_removed'}})).status,400);
+ assert.equal(chatStore.listChats().length,count);
+});

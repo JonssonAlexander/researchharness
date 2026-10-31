@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {mapEvidence,type MapImageLayout} from "./map-images.ts";
+import {mapEvidence,mapFormulaInNotes,type MapImageLayout} from "./map-images.ts";
 import {AtlasError,atlasConceptId} from "./atlas.ts";
 import {RELATION_TYPES} from "./atlas-relations.ts";
 import {createGraphSimulation} from "./layout.ts";
@@ -36,6 +36,17 @@ export function validateMapDraft(draft:MapDraft,reading:MapFindings,context:Prop
 		if(item.evidence.some(e=>e.page>=images))return "Evidence image does not exist.";
 		if(item.origin!=="explanation"&&!item.evidence.length)return "Source readings and reconstructions need visible image evidence.";
 		if(item.origin!=="source"&&!item.rationale.trim())return "Reconstructions and explanations need a stated rationale.";
+	}
+	return null;
+}
+
+/** Generation-only coverage gate. Owners may still remove/correct material during review. */
+export function validateMapDraftCoverage(draft:MapDraft,reading:MapFindings):string|null {
+	for(const source of reading.concepts) {
+		const targets=draft.concepts.filter(n=>n.sourceKeys.includes(source.key));
+		if(!targets.length)return `Account for first-reading concept ${source.key} in sourceKeys; retain doubtful readings with uncertainty instead of silently dropping them.`;
+		const notes=targets.flatMap(n=>n.notes).map(n=>n.text).join("\n");
+		for(const formula of source.formulas??[])if(!mapFormulaInNotes(formula,notes))return `Retain the first-reading formula ${formula} from ${source.key} in a note (whitespace may differ). Label corrections separately; the retained reading may be wrong.`;
 	}
 	return null;
 }

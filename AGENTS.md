@@ -8,6 +8,15 @@ Research Atlas helps its owner develop independent, research-level mathematical 
 
 The Atlas graph is the home screen. Learning, handwriting, research, practice, and retrieval operate on one connected knowledge environment. Success means increased independent mathematical capability and useful research, not graph size, AI output volume, or card counts.
 
+Owner teaching preference: use less text throughout the learning conversation,
+not just in graph labels or review panels. Default to one key idea, useful equations
+or derivation steps, and brief intuition; add a small example when helpful. Develop
+depth through back-and-forth and expand when requested or needed to repair a real
+gap. State essential assumptions and real uncertainty once where relevant; avoid
+front-loaded qualifications, repeated setups, process narration and routine recap
+checklists. Brevity must preserve mathematical correctness.
+
+
 For every task:
 
 1. Read this file, applicable directory instructions, and relevant current code before editing. Inspect the actual checkout and diff; this audit is a dated baseline.
@@ -311,6 +320,48 @@ Current teacher-prose extraction does not capture the learner's full reasoning. 
 
 Show evidence for reconstruction, conceptual precision, transfer and research capability. Initially report demonstrated/uncertain/untested with linked attempts and dates. These are evidence categories, not four invented calibrated scores. If later adding probabilities, document calibration and validate against independent delayed outcomes. Changes to understanding records do not append learner mistakes as mathematical truths.
 
+### 11.1 Owner-approved learning-session design (30 October 2026; planned)
+
+This clarification governs future teaching and derivation workflows. It is a target
+interaction contract, not a claim that the current upstream prober/question dock
+or the newly implemented derivation navigation already provides this experience.
+See [the learning-session plan](docs/atlas-learning-session-plan.md).
+
+Teaching sessions have an explicit objective and a visible, editable lesson concept
+map throughout. Begin with conceptual orientation, then work through selected
+results/proofs in fluent conversational exchanges using text, dictation and the
+planned fullscreen zoomable scratchpad. The lesson map carries the objective,
+current area and explored branches; it is an evolving plan, not a mastery score.
+Aim for a useful 30–60-minute lesson containing a coherent mind map, a few worked
+derivations and retained deeper tangent branches chosen for importance or interest.
+Time/depth are adjustable targets, never forced completion or a fixed proof quota.
+
+A derivation within a lesson or started independently has persistent Start
+(assumptions, definitions, permitted known results) and Finish (precise target)
+panels. The learner attempts the argument first; explicit submissions combine
+handwriting and dictated/typed explanation. Continue on the same saved scene,
+providing targeted hints, corrections or explanations. Aim for 2–4 substantial
+exchanges where appropriate. Neither teaching nor derivation uses compulsory
+intermediate quizzes, prediction/checkpoint gates or repeated permission to
+advance. Ask questions to resolve genuine ambiguity or support the learner's
+chosen direction; preserve control over pace, help and tangent depth.
+
+On owner-selected lesson/derivation completion, distill the actual work into a
+proposed conceptual map plus canonical proposition/argument updates for completed
+derivations. Keep useful tangent threads linked under their concepts. Reuse stable
+identities and preserve joint premises, sources, assistance and unresolved gaps.
+Offer one coherent reviewed integration; do not require routine node-by-node
+review. Finishing a conversation does not certify proof validity or independent
+mastery. Conceptual overview and detailed argument graphs remain distinct views.
+
+These are learning workflows. Practice remains the separate design in §12:
+independent proof reconstruction, direct/combined applications, hidden techniques
+and difficult Putnam/IMC-style problems; FSRS retrieval and long problem solving
+have separate scheduling/outcomes. Implement the learning/derivation experience
+before expanding those practice features. Preserve existing practice/native-session
+behavior; use explicit compatible workflow context rather than reinterpreting old
+sessions or silently rewriting upstream phase/tool-call history.
+
 ## 12. Retrieval, difficult practice, and techniques (R12)
 
 Retain current adaptive practice tools and safeguards: a problem has a committed checked solution before presentation, an active problem cannot be silently replaced, hints diagnose the current attempt, and conclusion/reveal follows the persisted problem protocol. Recall, discrimination and composition remain useful modes; do not recreate an absent historical `PracticeStore`.
@@ -448,9 +499,30 @@ relation keys are reused, and an exact approval receipt commits atomically with
 extension metadata. Existing knowledge and source originals are preserved. See
 [editable map review and integration](docs/atlas-map-integration.md).
 The In Atlas comparison currently includes Atlas concepts/typed links, not formal
-proposition-ledger nodes. Automated mathematical identity auditing, canonical
+proposition-ledger nodes. Canonical
 proposition/argument synchronization, full rewrite/depiction reconciliation,
-watchers and teacher-extraction approval remain pending. Existing teacher extraction is unchanged by this source-only slice.
+watchers and general teacher-extraction approval remain pending. Atlas-linked
+sessions use the reviewed learning feedback path below; ordinary upstream
+sessions retain their existing extraction behavior.
+
+Owner-approved follow-up (29 October 2026): imported maps must choose an existing
+or new subject before integration; reused concepts gain membership without losing
+identity or placement. Map cards offer responsive list/grid views, map highlight
+and camera-only centering. Organic, radial and degree-centred arrangements are
+previewed before saving, with locked/unrelated regions preserved (R02–R03, R14).
+An explicit, bounded synchronization pass now proposes conservative concept
+identities and cross-map connections; these remain individually owner-selected.
+Missing arguments and AI-generated proof sketches remain distinct from personal
+study evidence. Atlas-linked learn/practice sessions carry stable context and
+return sourced notes/associations through a reviewed update, without duplicate
+identities or automatic mathematical promotion (R04–R09, R15–R16). Schema v12,
+integration envelope v3, limits, recovery and as-built/pending distinctions are in
+[subjects, discovery and learning feedback](docs/atlas-reviewed-learning.md).
+This provides a first learning-to-Atlas notes slice; canonical proposition/argument
+sync, full proof-chain workflow, independent attempt observations and Excalidraw
+remain pending. Legacy automatic extraction is bypassed for Atlas-linked sessions;
+ordinary upstream sessions retain their previous behavior until the general
+teacher-extraction approval boundary is implemented.
 
 Phase 2 follow-up (28 October 2026): subject removal now previews dependencies,
 requires their manual reassignment, confirms removal and archives the subject.
@@ -505,3 +577,208 @@ Also do not promise cloud sync, multiplayer editing, formal proof checking, OCR 
 - Run applicable checks and update relevant as-built documentation.
 - Report actual validation and any remaining real-device/provider checks; never infer capability from a diagram or mock alone.
 - Judge the change by independent reasoning, recoverable discoveries, useful original research and reduced management effort.
+
+29 October repair follow-up (R06–R09): a reviewed source-line repair can explicitly
+reuse existing identities for draft nodes excluded from the original import. It
+restores their source references, optional subject membership and incident lines
+without creating concepts, changing notes/positions or promoting mathematical
+claims. Original and earlier receipts remain immutable; cumulative repair mappings
+are reused. Potential identity matches in new imports require an explicit choice
+rather than silently defaulting to exclusion. See the integration document above.
+
+30 October formula follow-up (R06–R07, R11): source readings can retain an optional
+per-concept LaTeX formula inventory, validated against the concept notes.
+Generated refinements must account for first-pass concepts and retain inventoried
+formula readings; owner edits remain unrestricted by this generation-only gate.
+Image prompts scan small equations as well as headings. Existing attempts and
+originals remain unchanged; completeness and mathematical correctness are not
+certified. See the map-proposals document for limits and retry semantics.
+
+Map interpretation/refinement failures now retain bounded local submit diagnostics
+in the existing attempt error field. Raw provider failures and rejected payloads
+remain undisclosed. Formula retention ignores whitespace differences; previous
+generic failure reasons cannot be recovered retroactively. No automatic paid
+retry or increased call budget was added.
+
+Owner follow-up: reading and refinement now allow 20 minutes of model work each.
+Invalid or duplicated existing-ID suggestions are deferred to explicit identity
+review without discarding the source reading; this never authorizes an automatic
+merge or weakens the integration identity checks.
+
+Owner follow-up: linked-concept context for reading/refinement now allows 200
+identities, matching the source-reference cap. The UI and model deadline share
+constants (20 minutes per stage, including up to two model calls); old prepared
+attempts retain their original captured context. Draft output limits are unchanged.
+
+30 October update follow-up (R06–R09): reprocessed/current revisions of an
+integrated map support reviewed additive updates (integration envelope v4).
+Unambiguous previously approved identities are preselected, unchanged notes and
+matching lines are reused, and changed readings append without replacing owner
+notes or historical receipts. Current prepared choices resume after reload.
+Preview/approval remains digest- and revision-bound. Full omission/removal and
+rewrite reconciliation remain pending; see atlas-map-integration.md.
+
+30 October drawing follow-up (R06–R09): integration envelope v5 adds explicit
+drawing reconciliation with added/changed/missing line previews and one exact
+approval. Replaced/missing source lines are archived; omitted nodes lose only
+their current drawing reference. Notes, canonical concepts/claims, earlier
+captures and receipts survive. Updates can opt out and remain additive. The
+transaction includes archival and reference changes; older proposals cannot
+restore superseded lines. Full semantic identity/rename reconciliation and
+watchers remain pending. See the integration document for limits and evidence.
+
+30 October owner follow-up (R01–R03, R08–R09, R14, R16): keep the conceptual
+Atlas and its present layout. Saved views now carry optional Small/Normal/Prominent
+node emphasis, independent of mathematics or mastery. Clicking an Atlas line or
+Shift-dragging between concepts opens direct ordinary/typed connection editing.
+Owner drawing edits overlay immutable source records; removed ordinary lines can
+be restored. Schema v13 backs up v12 before migration and retains edit history.
+See [drawing controls and limits](docs/atlas-drawing-controls.md). Derivation-graph
+integration remains a separate design step; no automatic proposition promotion.
+
+Node emphasis shortcut: hold 1/2/3 and click an Atlas concept for
+Small/Normal/Prominent. It uses the same per-view setting, ignores typing and
+modifier shortcuts, and clears held-key state on focus loss.
+
+30 October derivation follow-up (R01, R04–R05, R08–R09, R14–R17): concepts can
+open an isolated Derivations view over their explicitly linked canonical claims.
+Backward slices preserve joint premises, alternatives and source provenance;
+existing claims can be linked through a revision-checked reference save. Learn
+this step validates/captures the exact canonical target and joint argument in the
+existing Atlas learning context. No map line is promoted to a proof, no canonical
+records are created, and no automatic mathematical/learning approval is implied.
+See [concept derivation navigation](docs/atlas-concept-derivations.md) for bounds,
+empty states, persistence, validation and remaining canonical synchronization work.
+
+30 October learning-workspace slice (R01, R04–R05, R07–R11, R15–R17): new UI
+teaching sessions explicitly opt into a persistent objective, visible lesson map,
+current topic/tangents and nested pinned Start/Finish derivations. A conversational
+agent excludes assessment/prober/plan-gate tools, retains native replay/routing and
+uses revision-checked local lesson metadata; legacy sessions and practice remain
+unchanged. Only owner actions finish work. This implements the text/dictation
+portion of §11.1, not Excalidraw or finished-session canonical integration. See
+[workspace storage, limits and validation](docs/atlas-learning-workspace.md).
+
+Lesson-map readability repair (R01–R03): embedded lesson maps reserve label space,
+frame complete label bounds and cap initial zoom rather than enlarging tightly
+clustered dots into overlapping text. Compact display handles preserve full saved
+topic names; the main Atlas layout remains unchanged. See the workspace document.
+
+### Reviewed lesson maps and proof graphs (implemented)
+
+Owner clarification: main Atlas remains conceptual. Finished learning sessions
+produce an editable lesson map and separate canonical proposition/argument graphs;
+only relevant concepts are added/reused in Atlas, possibly zero. Preserve full
+argument explanations, joint premises, source references, AI/owner origin and gaps.
+Single explicit approval integrates the reviewed bundle. Proof details open below
+concepts and through saved lesson maps; new proof steps stay collapsed in main
+Atlas. No automatic mastery or proof certification follows from integration.
+
+Schema v14 adds hashed `lesson_reviews` with a v13 backup. Use the existing Library
+merger with reserved IDs and operation tags, an applying journal, exact source/base
+hashes and a transactional metadata receipt. Resume the exact approval after an
+interruption; never turn a partial write into an unreviewed retry. See
+[implemented workflow and recovery](docs/atlas-lesson-integration.md). Legacy chat
+review and practice remain unchanged. Embedded scratchwork, FSRS, challenging
+practice and research workflows remain later work.
+
+Lesson review should prioritize understanding: readable spaced proof diagrams,
+short Start/Finish display and one selected step's explanation. Keep complete
+statements, essential conditions and provenance available on demand. Hide routine
+editing/audit detail behind disclosure controls; do not make every mathematical
+step repeat the entire setting. Concise model output must retain necessary
+assumptions and honest gaps, with properly delimited LaTeX.
+
+### Embedded learning scratchpad (implemented slice)
+
+Conversational lessons now use a pinned Excalidraw 0.18.1 editor with Small, Half
+and Fullscreen hosts, pinned Start/Finish, existing dictation, local revision-checked
+autosave, and explicit Send attempt. Keep one editor mounted across size changes.
+Store complete editable drafts and immutable submitted scene/image/text snapshots;
+keep a rolling previous draft rather than a full file archive on every pen stroke.
+Autosave never invokes the model or changes canonical knowledge.
+
+Use native attempt IDs and the existing chat write-ahead/turn machinery for
+idempotent local delivery. Resolve checked images from source references only at
+the model boundary; never silently downgrade handwriting to text. Refuse unsupported
+vision or missing/corrupt sources while retaining work. Explicit retry/resume must
+preserve the attempt, target and source image; external provider execution after an
+ambiguous crash cannot be guaranteed exactly once. See
+[storage, transport, limits and validation](docs/atlas-scratchpad.md).
+
+This completes the conversational-learning scratchpad slice, not the legacy
+question/Practice adapter, image-transcription editing, FSRS or real pen acceptance.
+The owner still needs to evaluate handwriting comfort, palm rejection, detailed
+mathematical image reading and microphone use on their own hardware.
+
+Math display repair (R01, R11): message and reasoning renderers disable Remend's
+incomplete-HTML trimming, which swallowed complete replies after TeX comparisons
+such as `L<Y_t`. Keep HTML sanitization and stored/model text unchanged.
+
+
+Lesson navigation follow-up (R04–R05, R08, R14): clicks inspect topics without
+changing saved focus. One contextual Continue here saves focus and requests
+teaching through the existing turn path. Keep Now/Next and optional topic coverage
+(upcoming/explored/revisit) aligned through update_lesson; coverage never means
+mastery. Leaving an exercise retains its owner-controlled finish state but clears
+unrelated active targets. Keep editing controls disclosed, not a new button row.
+See docs/atlas-learning-workspace.md for compatible storage and remaining limits.
+
+Focused Atlas maps (R01–R04, R08–R09, R14, R16): concept clicks now open a
+local map; subject buttons open membership/descendant views with direct foundation
+references. Reuse the current renderer, stable identities and actual links. Local
+inspection/drilling must not write positions or create mathematical connections.
+Keep source lessons and canonical derivations accessible beneath the concepts,
+including through shared claim IDs. Collapsed notes/details keep the overview
+quiet. See docs/atlas-neighbourhoods.md for bounds and as-built behavior.
+
+Compact overview follow-up (R01–R03, R09, R14): Organic arrangement packs
+preferred subjects independently; cross-topic references must not stretch local
+settling. Keep the existing preview/save boundary and explicit locks. Main-Atlas
+bridges are subdued at overview scale and brighten with zoom, hover or query
+focus; no links are deleted or promoted. Proof counts remain quiet until close-up
+or hover. See docs/atlas-layout.md. Placement alone never asserts proof order.
+
+Shared derivation map (R01, R04–R05, R08–R09, R14, R16): concept Derivations
+now opens one bounded canonical claim/argument space, with the entry concept’s
+proofs highlighted. Shared IDs join once; never merge similar wording or turn a
+technique association into implication. Preserve joint premises, source access,
+server-validated learning targets and the unchanged Atlas layout. Lesson review
+shows proposed proofs together while preserving explicit approval and gap handling.
+Selection is local navigation only. See docs/atlas-concept-derivations.md.
+
+Derivation readability repair (R01–R03, R08–R09): shared proof maps use the
+existing D3 engine, label collision spacing, compact family packing and quiet
+component colours. Start with all families visible; selecting a result subtly
+highlights its argument without changing geometry. Never paint implication
+junctions as empty claim discs, including during highlighting. Preserve their
+joint-premise edges and canonical identities. See atlas-concept-derivations.md.
+
+Owner correction: derivation structure must remain legible. The shared map now
+uses a result-centred flower: final conclusions near the centre, prerequisites
+outward by reverse inference depth, one shared claim between its petals, and
+unconnected claims on the rim. This supersedes the free-force/shelf arrangement.
+Keep junctions invisible as discs and preserve all joint inference semantics.
+
+Derivation slice follow-up: give each proof a bounded angular sector sized by its
+visible claim count, with gutters and layer ordering. Shared claims have one
+assigned sector; cross-sector references stay quiet until focus/full-link view.
+Compact diagrams may explicitly fold carried-premise chords for readability,
+but complete joint premises remain in the ledger, learning targets and inspector.
+This is presentation compression, never theorem simplification or premise deletion.
+All premise links restores the full drawing. See atlas-concept-derivations.md.
+
+Scratchpad focus follow-up (R01, R05, R10–R11): Small/Half reserve a right-hand
+pane beside the complete chat instead of overlaying it; the lesson sidebar yields
+space while drawing. Narrow screens stack chat and pad. Fullscreen fills the
+viewport with minimal controls and an optional Details disclosure for targets,
+feedback and history. Keep one editor mounted, explicit submission and autosave.
+
+Lesson scratchwork attachments (R07–R11, R16): new lesson reviews capture nonempty
+saved drafts and immutable submitted attempts as local, content-addressed copies.
+Approval links previews/editable Excalidraw scenes to their original lesson topics,
+existing/included Atlas concepts and included derivation results; exact message
+evidence may additionally link a specific claim. Topic context is not proof evidence.
+Keep galleries collapsed, preserve false starts and unsent drafts, and never add
+scratchwork as graph claims. Copies survive source chat deletion. No extra image
+upload/model call or automatic knowledge integration occurs. See atlas-scratchpad.md.

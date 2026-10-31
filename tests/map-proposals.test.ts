@@ -9,7 +9,7 @@ import {DatabaseSync,backup} from "node:sqlite";
 import {createFauxCore,fauxAssistantMessage,fauxToolCall} from "@earendil-works/pi-ai";
 import {createAtlasStore} from "../src/store/atlas.ts";
 import {AtlasError} from "../src/core/atlas.ts";
-import {validateMapFindings,type MapFindings} from "../src/core/map-proposals.ts";
+import {validateMapFindings,deferMapIdentityMatches,type MapFindings} from "../src/core/map-proposals.ts";
 import {interpretMap} from "../src/agent/subagents/map-interpretation.ts";
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'atlas-proposals-'));
@@ -77,9 +77,64 @@ test('strict matching, evidence pages and relation endpoints block hallucinated 
  ])assert(validateMapFindings(value,context,1));
 });
 
+test('formula inventories require visible concept notes rather than transcription-only readings',()=>{
+ const value=structuredClone(findings),formula="\\mathbb E[X_t\\mid\\mathcal F_s]=X_s";
+ value.concepts[0]!.formulas=[formula];value.transcription=formula;
+ assert.match(validateMapFindings(value,[],1)!,/concept notes/);
+ value.concepts[0]!.notes=`Unverified source reading: \\[${formula}\\]`;
+ assert.equal(validateMapFindings(value,[],1),null);
+ value.concepts[0]!.notes=`\\[\\mathbb E[X_t \\mid \\mathcal F_s] = X_s\\]`;
+ assert.equal(validateMapFindings(value,[],1),null);
+ value.concepts[0]!.notes=value.concepts[0]!.notes.replace('= X_s','= X_t');
+ assert.match(validateMapFindings(value,[],1)!,/symbols must match/);
+});
+
+test('identity suggestions defer unknown, mismatched and duplicate IDs without losing readings',async()=>{
+ const f=fixture(),context=[{id:f.id,title:'Brownian motion',aliases:['Wiener process'],revision:1}];
+ const node=findings.concepts[0]!;
+ for(const concepts of [
+  [{...node,existingId:`ac_${randomUUID()}`}],
+  [{...node,title:'Different concept',existingId:f.id}],
+  [{...node,existingId:f.id},{...node,key:'draft_b',existingId:f.id}],
+ ]){
+  const value={...findings,concepts},before=structuredClone(value),deferred=deferMapIdentityMatches(value,context);
+  assert(deferred.concepts.every(n=>n.existingId===null));
+  assert.deepEqual(deferred.concepts.map(n=>n.notes),value.concepts.map(n=>n.notes));assert.deepEqual(value,before);
+ }
+ const alias={...findings,concepts:[{...node,title:'Wiener process',existingId:f.id}]};
+ assert.equal(deferMapIdentityMatches(alias,context).concepts[0]!.existingId,f.id);
+ f.faux.setResponses([fauxAssistantMessage(fauxToolCall('submit_map_proposal',{...findings,concepts:[{...node,existingId:`ac_${randomUUID()}`}]}),{stopReason:'toolUse'})]);
+ const result=await createMapProposalService(f.store,()=>f.engine).generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+ assert.equal(result?.status,'prepared');assert.equal(result?.findings?.concepts[0]!.existingId,null);assert.equal(result?.usage?.steps,1);
+});
+
+test('failed map submissions retain safe semantic, format and missing-submission diagnostics',async()=>{
+ const invalid={...findings,concepts:[{...findings.concepts[0]!,formulas:['x=y']}]};
+ const cases=[
+  {value:invalid,reason:/Proposal validation failed:.*concept notes/},
+  {value:{...findings,concepts:'not an array'},reason:/failed its format checks/},
+ ];
+ for(const {value,reason} of cases){
+  const f=fixture();f.faux.setResponses([0,1].map(()=>fauxAssistantMessage(fauxToolCall('submit_map_proposal',value),{stopReason:'toolUse'})));
+  const service=createMapProposalService(f.store,()=>f.engine),before=f.store.read();
+  const result=await service.generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+  assert.equal(result?.status,'failed');assert.match(result!.error!,reason);assert.equal(result?.usage?.steps,2);
+  assert.equal(service.read(f.source)?.error,result?.error);assert.deepEqual(f.store.read(),before);
+ }
+ const f=fixture();f.faux.setResponses([fauxAssistantMessage('PRIVATE MODEL TEXT'),fauxAssistantMessage('PRIVATE MODEL TEXT')]);
+ const result=await createMapProposalService(f.store,()=>f.engine).generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+ assert.match(result!.error!,/without submitting/);assert(!result!.error!.includes('PRIVATE MODEL TEXT'));
+});
+
+test('output exhaustion is distinguished from schema rejection',async()=>{
+ const f=fixture();f.faux.setResponses([0,1].map(()=>fauxAssistantMessage('unfinished private output',{stopReason:'length'})));
+ const result=await createMapProposalService(f.store,()=>f.engine).generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+ assert.equal(result?.status,'failed');assert.match(result!.error!,/output limit/);assert(!result!.error!.includes('private'));
+});
+
 test('schema repair is bounded, records both calls, and invalid findings cannot become a prepared proposal',async()=>{
  const f=fixture(),service=createMapProposalService(f.store,()=>f.engine);let calls=0;
- f.faux.setResponses([()=>{calls++;return fauxAssistantMessage(fauxToolCall('submit_map_proposal',{...findings,concepts:[{...findings.concepts[0]!,existingId:`ac_${randomUUID()}`}]}),{stopReason:'toolUse'});},()=>{calls++;return fauxAssistantMessage(fauxToolCall('submit_map_proposal',findings),{stopReason:'toolUse'});}]);
+ f.faux.setResponses([()=>{calls++;return fauxAssistantMessage(fauxToolCall('submit_map_proposal',{...findings,concepts:[{...findings.concepts[0]!,evidence:{...evidence,page:7}}]}),{stopReason:'toolUse'});},()=>{calls++;return fauxAssistantMessage(fauxToolCall('submit_map_proposal',findings),{stopReason:'toolUse'});}]);
  const p=await service.generate(command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
  assert.equal(calls,2);assert.equal(p?.status,'prepared');assert.equal(p?.usage?.steps,2);
  const bad=fixture();bad.faux.setResponses([fauxAssistantMessage('no submission'),fauxAssistantMessage('still no submission')]);
@@ -120,9 +175,24 @@ test('model deadline starts after export and is retained as a timeout without au
  },async(_original,signal)=>{assert.equal(deadlines,0);assert(!signal?.aborted);return {pages:[png],layout:[{kind:"overview",region:{x:0,y:0,w:1,h:1},width:1,height:1}]};},()=>{deadlines++;return deadline.signal;});
  const c=command(f.source,`${f.engine.model.provider}:${f.engine.model.id}`),signal=new AbortController().signal;
  const result=await service.generate(c,signal);
- assert.equal(result?.status,'failed');assert.match(result!.error!,/model response timed out after 5 minutes/);
+ assert.equal(result?.status,'failed');assert.match(result!.error!,/model response timed out after 20 minutes/);
  assert.equal(result?.images.length,1);assert.equal(result?.findings,null);assert(!signal.aborted);assert.deepEqual(f.store.read(),before);
  assert.equal((await service.generate(c,signal))?.id,result?.id);assert.equal(calls,1);assert.equal(deadlines,1);
+});
+
+test('linked-concept context beyond forty reaches the model and survives proposal reopening',async()=>{
+ const f=fixture(),ids=[f.id];
+ for(let i=0;i<40;i++){
+  const id=`ac_${randomUUID()}`;ids.push(id);
+  f.store.save({kind:'concept',id,expectedRevision:0,title:`Context ${i}`,aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[]});
+ }
+ const source=`mr_${randomUUID()}`;
+ f.store.mindmaps.capture({id:`mm_${randomUUID()}`,captureId:source,expectedRevision:0,title:'Larger context',filename:'source.rnote',conceptIds:ids,manualPreviewAcknowledged:true},gzipSync('opaque fixture'),png,{validation:'unverified',previewKind:'manual-png',notice:null});
+ const service=createMapProposalService(f.store,()=>f.engine,async(_engine,_pages,context)=>{
+  assert.equal(context.length,41);assert.equal(context[40]!.id,ids[40]);return findings;
+ });
+ const result=await service.generate(command(source,`${f.engine.model.provider}:${f.engine.model.id}`),new AbortController().signal);
+ assert.equal(result?.status,'prepared');assert.equal(f.store.proposals.read(result!.id)?.context.length,41);
 });
 
 test('restart leaves an interrupted attempt without auto retry; v7 migration and future proposal versions are guarded',async()=>{
@@ -133,7 +203,7 @@ test('restart leaves an interrupted attempt without auto retry; v7 migration and
  const row=db.prepare('SELECT record FROM map_proposals').get()!;
  db.prepare('UPDATE map_proposals SET record=?').run(JSON.stringify({...JSON.parse(String(row.record)),schemaVersion:4}));
  assert.throws(()=>f.store.proposals.latest(f.source),/newer app/);
- db.exec('DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
+ db.exec('ALTER TABLE atlas_views DROP COLUMN emphasis; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
  const before=f.store.read();assert.deepEqual(createAtlasStore(f.file).read(),before);
  assert(fs.readdirSync(path.dirname(f.file)).some(n=>n.includes('.v7-')));
 });

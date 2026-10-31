@@ -9,7 +9,7 @@ remains pending. This does not complete Phase 3 or provide theorem verification.
 
 Open a prepared first reading and choose **Refine into proposed map**. The explicit
 disclosure names the configured vision model and additional usage: the saved
-reading, source images and up to 40 linked concept names/aliases are sent. No other
+reading, source images and up to 200 linked concept names/aliases are sent. No other
 vault content, concept Markdown or chat history is added. Destination checking,
 foreground subscription routing, shared queue and usage accumulation are reused.
 There is no provider fallback, automatic refinement or silent retry.
@@ -41,7 +41,7 @@ synthesis, and unresolved questions stay prominent.
 
 The existing single-submit runner is reused, with only a draft-submit tool. Up to
 two calls permit schema repair, capped at 10,000 output tokens each or the model's
-smaller limit, and a five-minute model deadline after image preparation. No file,
+smaller limit, and a 20-minute model deadline after image preparation. No file,
 web, arbitrary tool or graph-writing capabilities are provided.
 
 ## Preview

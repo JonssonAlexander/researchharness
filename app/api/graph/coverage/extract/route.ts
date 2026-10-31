@@ -10,7 +10,7 @@
  * flight (the dock is the source of truth for that); failures are logged
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
-import { extraction, extractionStatuses } from "@/src/server";
+import { extraction, extractionStatuses, stores } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
 	if (typeof chatId !== "string" || chatId === "") {
 		return Response.json({ error: 'Body must be {chatId: string}' }, { status: 400 });
 	}
+	if(stores.lessonStore.read(chatId))return Response.json({error:"Lesson knowledge requires reviewed integration; automatic extraction is unavailable for this workflow."},{status:409});
+ if(stores.atlasStore.sync.context(chatId))return Response.json({error:"Use Review for Atlas in this session to approve knowledge changes."},{status:409});
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {
 		return Response.json({ error: "An extraction run is already in flight for this session" }, { status: 409 });
 	}

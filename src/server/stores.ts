@@ -6,6 +6,8 @@
  * file (and the adapter implementations in src/store/).
  */
 
+import {createScratchpadStore} from "../store/scratchpad.ts";
+import {createLearningSessionStore} from "../store/learning-session.ts";
 import { chatStore } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { jobStore } from "../store/jobs.ts";
@@ -16,6 +18,8 @@ import { createAtlasStore } from "../store/atlas.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
+ scratchpadStore:createScratchpadStore(path.join(PATHS.data,"scratchpads")),
+ lessonStore:createLearningSessionStore(path.join(PATHS.data,"lessons")),
 	chatStore,
 	graphStore,
 	jobStore,

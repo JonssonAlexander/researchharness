@@ -95,3 +95,17 @@ export * from "./map-review.ts";
 export {readContentSpans} from "./content-reader.ts";
 
 export * from "./map-connections.ts";
+export * from "./atlas-sync.ts";
+
+export * from "./atlas-drawing.ts";
+
+export * from "./concept-derivations.ts";
+
+export * from "./learning-session.ts";
+
+export * from "./lesson-map-layout.ts";
+
+export * from "./lesson-integration.ts";
+
+export * from "./scratchpad.ts";
+export * from "./atlas-neighbourhood.ts";

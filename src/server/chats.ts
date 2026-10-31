@@ -35,7 +35,7 @@ const WIND_DOWN_POLL_MS = 50;
 /** What deleteChatSession did — the route maps it straight to HTTP. */
 export type ChatDeleteOutcome =
 	| { ok: false; status: 404; code: "not_found"; error: string }
-	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running"; error: string; jobIds: string[] }
+	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running" | "lesson_integration_pending"; error: string; jobIds: string[] }
 	| { ok: false; status: 503; code: "extraction_winding_down"; error: string }
 	| {
 			ok: true;
@@ -96,6 +96,7 @@ function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status
 }
 
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
+ if(stores.atlasStore.lessonReviews.list().some(r=>r.status==="applying"))return {ok:false,status:409,code:"lesson_integration_pending",jobIds:[],error:"Resume the interrupted lesson integration before deleting sessions."};
 	if (!stores.chatStore.getChat(chatId)) {
 		return { ok: false, status: 404, code: "not_found", error: "No such session" };
 	}
@@ -127,6 +128,8 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 	const stats = deleteChatTraces(stores.graphStore, chatId, mode);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
+		stores.lessonStore.remove(chatId);
+        stores.scratchpadStore.remove(chatId);
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
 	}

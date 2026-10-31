@@ -45,6 +45,9 @@ export function healStringifiedArrays(raw: unknown): unknown {
 	return out;
 }
 
+/** Safe local diagnostics; never includes provider errors or rejected payloads. */
+export class SubmitProposalError extends Error {}
+
 export async function runSubmitAgent<T>(opts: {
 	role: ModelRole;
 	toolName: string;
@@ -60,6 +63,8 @@ export async function runSubmitAgent<T>(opts: {
 	signal: AbortSignal | undefined;
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void;
 	neverSubmitted: string;
+	/** Surface bounded local validation diagnostics, without raw model/provider output. */
+	diagnoseFailure?: boolean;
 	/** Extra tools beside the submit call (the auditor's graph-exploration
 	 *  set, 2026-09-27): a small agentic loop instead of a bare retry. */
 	extraTools?: Record<string, AgentTool<any>>;
@@ -79,6 +84,7 @@ export async function runSubmitAgent<T>(opts: {
 	validate?: (value: T) => string | null;
 }): Promise<T> {
 	let submitted: T | undefined;
+	let problem: string | null = null, limited=false;
 	const result = await runSubagent(
 		[
 			// healToolRecord (owner, 2026-10-09): the standard argument heal
@@ -100,7 +106,7 @@ export async function runSubmitAgent<T>(opts: {
 					) as never,
 				execute: async (_toolCallId, input) => {
 					const value = opts.fill(input);
-					const problem = opts.validate?.(value) ?? null;
+					problem = opts.validate?.(value) ?? null;
 					if (problem) return invalidInputResult(opts.toolName, [problem]);
 					submitted = value;
 					return toToolResult(submitted);
@@ -116,7 +122,8 @@ export async function runSubmitAgent<T>(opts: {
 			maxTurns: opts.maxTurns ?? 4,
 			abortSignal: opts.signal,
 			chatId: opts.chatId,
-			onAssistantMessage: (message, step) =>
+			onAssistantMessage: (message, step) => {
+				problem=null;limited=message.stopReason==="length";
 				opts.onStep(
 					message.usage,
 					// Provider-qualified stamp (model slots wave, 2026-09-20):
@@ -126,11 +133,20 @@ export async function runSubmitAgent<T>(opts: {
 					step,
 					message.stopReason,
 					message.content.filter((c) => c.type === "toolCall").map((c) => (c as { name: string }).name).join(", ") || "(none)",
-				),
+				);
+			},
 			shouldStop: (_message, toolResults) => toolResults.some((r) => r.toolName === opts.toolName && !r.isError),
 		},
 	);
-	void result;
-	if (!submitted) throw new Error(opts.neverSubmitted);
+	if (!submitted) {
+		if(opts.diagnoseFailure) {
+			const rejected=result.newMessages.some(m=>m.role==="toolResult"&&m.toolName===opts.toolName&&m.isError);
+			throw new SubmitProposalError(limited?"The model reached its output limit before completing the proposal.":
+				problem?`Proposal validation failed: ${String(problem).slice(0,1000)}`:
+				rejected?"The submitted proposal failed its format checks (required fields, field types or size limits). No valid replacement was submitted.":
+				"The model finished without submitting a structured proposal.");
+		}
+		throw new Error(opts.neverSubmitted);
+	}
 	return submitted;
 }

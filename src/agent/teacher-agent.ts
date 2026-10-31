@@ -1,3 +1,5 @@
+import {learningInstructions,type LearningSession,type LearningSessionStore} from "../core/learning-session.ts";
+import {lessonTools} from "./tools/lesson.ts";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
@@ -100,6 +102,9 @@ export type StepUsageCollector = (usage: Usage) => void;
 export interface AgentBuildOptions {
 	/** Model + stream function — tests inject a scripted faux engine. */
 	engine?: PiEngine;
+ learning?:LearningSession;
+ resolveAttachments?:(messages:readonly AgentMessage[])=>AgentMessage[];
+ systemPrompt?:string;
 	callPurpose?: { background: boolean };
 	requestCycle?: ChatGPTRequestCycle;
 	/** The initial transcript, as pi messages (the record IS agent state). */
@@ -181,9 +186,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
+	const systemPrompt = opts.systemPrompt ?? (opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+		: composedInstructions[kind]!);
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -230,7 +235,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
+		convertToLlm: messages=>toLlmMessages(opts.resolveAttachments?opts.resolveAttachments(messages):messages),
 		prepareRequest: (request) => {
 			if (opts.callPurpose) {
 				let learner = false, automatic = false;
@@ -290,6 +295,13 @@ export function createTeacherAgent(
 ) {
 	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
 	return baseAgentOptions("teacher", opts, Object.values(tools));
+}
+
+/** Owner-selected conversational workflow. No question/probe/plan-init tools. */
+export function createLearningAgent(ctx:TeacherToolContext,lessonStore:LearningSessionStore,notify:()=>void,opts:AgentBuildOptions){
+ const tools=Object.fromEntries(Object.entries(createTeacherTools(ctx,opts.toolToggles)).filter(([name])=>![...QUESTION_TOOLS,"plan_init","probe_done"].includes(name)));
+ Object.assign(tools,lessonTools(ctx.chatId,lessonStore,notify));
+ return baseAgentOptions("teacher",{...opts,systemPrompt:learningInstructions(opts.learning!)},Object.values(tools));
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared

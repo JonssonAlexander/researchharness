@@ -104,6 +104,8 @@ function chainKey(premises: ReadonlyArray<string>, conclusion: string): string {
  *  exactly this merge happened). The notes path passes neither and keeps
  *  the whole-file checkpoint. */
 export interface MergeSource {
+ /** Exact owner-approved IDs; caller journals intent and validates the whole plan. */
+ reviewed?:{operationId:string;nodes:Record<string,string>;chains:Record<string,string>;createdAt:string};
 	foldedAt: string;
 	/** The batch being merged (chat path): one entry per message in the
 	 *  extracted batch — undefined (notes path / coverage-less callers) →
@@ -164,7 +166,7 @@ export function mergeFindings(
 	//    equivalence links (re-encountered knowledge merges in).
 	const existingIds = new Set(ledgers.readNodes().map((n) => n.id));
 	const mapping = new Map<string, string>();
-	const now = new Date().toISOString();
+	const now = source.reviewed?.createdAt??new Date().toISOString();
 	const linkOf = new Map(verdicts.links.map((l) => [l.id, l.linkTo]));
 
 	// VERDICTS-ONLY (owner, 2026-09-28): the propositions come from the
@@ -176,7 +178,8 @@ export function mergeFindings(
 		// line (each re-encounter anchors to ITS passage); absent (notes,
 		// legacy/core callers) → "", chat-level as before.
 		const points = pointOf(chatId, p.messageId);
-		const linkTo = linkOf.get(p.id);
+		const linkTo = linkOf.get(p.id)??source.reviewed?.nodes[p.id];
+ if(source.reviewed&&!linkTo)throw new Error("Missing approved proposition identity.");
 		let graphNodeId: string;
 		if (linkTo !== undefined && existingIds.has(linkTo)) {
 			// Identity verdict: this proposition IS that node. Append a link
@@ -185,7 +188,8 @@ export function mergeFindings(
 			graphNodeId = linkTo;
 			// Link-append: phrasings + provenance join at read time (the
 			// first line's name/statement/createdAt stand).
-			ledgers.appendNode({
+			if(!source.reviewed||!ledgers.readNodes().some(n=>n.id===graphNodeId&&n.statement===p.statement&&n.provenance.some(pt=>pt.chatId===chatId&&pt.messageId===(p.messageId??""))))ledgers.appendNode({
+ ...(source.reviewed?{integrationId:source.reviewed.operationId}:{}),
 				id: graphNodeId,
 				name: p.name,
 				statement: p.statement,
@@ -195,7 +199,8 @@ export function mergeFindings(
 			});
 		} else {
 			const node: GraphNode = {
-				id: newGraphNodeId(),
+ ...(source.reviewed?{integrationId:source.reviewed.operationId}:{}),
+				id: source.reviewed?.nodes[p.id]??newGraphNodeId(),
 				name: p.name,
 				statement: p.statement,
 				aliases: [...p.aliases],
@@ -246,8 +251,9 @@ export function mergeFindings(
 		if (premises.length === 0) return; // a chain IS an argument — bare propositions ride the node ledger alone
 		const key = chainKey(premises, conclusion);
 		if (assertedByChat.has(key)) return; // this chat already asserted this argument
-		const id = idOfKey.get(key) ?? newGraphChainId();
-		ledgers.appendChain({ id, premises, conclusion, createdAt: now, provenance: pointOf(chatId) });
+		if(source.reviewed&&!idOfKey.has(key)&&!source.reviewed.chains[key])throw new Error("Missing approved argument identity.");
+		const id = idOfKey.get(key) ?? source.reviewed?.chains[key] ?? newGraphChainId();
+		ledgers.appendChain({ id, premises, conclusion, createdAt: now, provenance: pointOf(chatId),...(source.reviewed?{integrationId:source.reviewed.operationId}:{}) });
 		idOfKey.set(key, id);
 		assertedByChat.add(key);
 		stats.chains!++;
@@ -267,6 +273,7 @@ export function mergeFindings(
 	//       plus [X,C]⟹Y makes [A,B,C]⟹Y redundant.
 	//     Dropped keys take every provenance line with them (the rewrite is
 	//     atomic); stats count APPENDS only — simplification is maintenance.
+	if(!source.reviewed){
 	const allChains = ledgers.readChains();
 	const keptChains = simplifyChains(allChains);
 	if (keptChains.length !== allChains.length) {
@@ -284,6 +291,7 @@ export function mergeFindings(
 		for (const entry of source.coverage) ledgers.appendCoverage(entry);
 	} else {
 		ledgers.appendCheckpoint({ chatId, foldedAt: source.foldedAt });
+	}
 	}
 	return stats;
 }

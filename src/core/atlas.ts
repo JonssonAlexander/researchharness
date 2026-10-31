@@ -1,4 +1,7 @@
-import {visibleMapConnections,type MapConnection} from "./map-connections.ts";
+import type {LessonReviewStore,LessonArtifact} from "./lesson-integration.ts";
+import {drawingLinkCommand,nodeEmphasis,drawingConnections,type DrawingLink} from "./atlas-drawing.ts";
+import type {AtlasSyncStore,SyncAssociation} from "./atlas-sync.ts";
+import {type MapConnection} from "./map-connections.ts";
 import type { MapProposalStore } from "./map-proposals.ts";
 import type { Mindmap, MindmapStore } from "./mindmaps.ts";
 import type {MapReviewStore} from "./map-review.ts";
@@ -88,6 +91,7 @@ export const atlasViewInput = z.object({
 	title, query: z.string().max(200),
 	/** World point at viewport centre, plus zoom; portable across window sizes. */
 	camera: z.object({x: coordinate, y: coordinate, k: z.number().finite().min(0.02).max(40)}).strict(),
+ emphasis:nodeEmphasis.optional(),
 }).strict();
 const viewDelete = z.object({
 	kind: z.literal("view-delete"), id: id("av"), expectedRevision: revision.min(1),
@@ -109,7 +113,10 @@ const subjectDelete = z
 		expectedRevision: revision.min(1),
 	})
 	.strict();
+const associationDelete=z.object({kind:z.literal("association-delete"),id:id("ar"),expectedRevision:revision}).strict();
+const mapSubject=z.object({kind:z.literal("map-subject"),id:id("mm"),expectedRevision:revision,subjectId:atlasSubjectId.nullable(),newSubject:z.object({title,color:z.string().regex(/^#[0-9a-fA-F]{6}$/)}).strict().optional()}).strict();
 export const atlasCommandSchema = z.union([
+	drawingLinkCommand,mapSubject,associationDelete,
 	concept,
 	subject,
 	subjectDelete,
@@ -142,8 +149,13 @@ export interface AtlasView extends Omit<z.infer<typeof atlasViewInput>, "kind" |
 	revision: number;
 }
 export interface AtlasSnapshot {
+ lessonMaps?:LessonArtifact[];
+ hiddenPropositionIds?:string[];
+ drawingLinks?:DrawingLink[];
 	mindmaps?: Mindmap[];
 	mapConnections?: MapConnection[];
+	associations?:SyncAssociation[];
+	learningEvidence?:{chatId:string;conceptId:string;outcome:string;evidence:string;assistance:string;at:string}[];
 	conceptReviews?: Record<string,string[]>;
 	views?: AtlasView[];
 	/** Global optimistic version for an atomic layout commit. */
@@ -153,6 +165,8 @@ export interface AtlasSnapshot {
 	subjects: AtlasSubject[];
 }
 export interface AtlasStore {
+ lessonReviews:LessonReviewStore;
+	sync:AtlasSyncStore;
 	proposals: MapProposalStore;
 	reviews: MapReviewStore;
 	mindmaps: MindmapStore;
@@ -184,7 +198,7 @@ export function assertSubjectParent(subjects: AtlasSubject[], id: string, parent
 export function projectAtlas(atlas:AtlasSnapshot) {
 	const {concepts,subjects,relations,conceptReviews}=atlas;
 	const pairs=new Set(relations.filter(r=>r.reviewStatus==="accepted").map(r=>[r.sourceId,r.targetId].sort().join(":")));
-	const mapEdges=visibleMapConnections(atlas).flatMap(c=>{const pair=[c.sourceId,c.targetId].sort().join(":");if(pairs.has(pair))return [];pairs.add(pair);return [{from:c.sourceId,to:c.targetId}];});
+	const mapEdges=drawingConnections(atlas).flatMap(c=>{const pair=[c.sourceId,c.targetId].sort().join(":");if(pairs.has(pair))return [];pairs.add(pair);return [{from:c.sourceId,to:c.targetId}];});
 	const subjectById = new Map(subjects.map((s) => [s.id, s]));
 	const members = new Map<string, string[]>();
 	for (const c of concepts)
@@ -201,7 +215,9 @@ export function projectAtlas(atlas:AtlasSnapshot) {
 		nodes: concepts.map((c) => ({
 			id: c.id,
 			label: c.title,
-			badgeColor: conceptReviews?.[c.id]?.length ? "#e6b35a" : undefined,
+			studyBadgeColor: atlas.learningEvidence?.filter(e=>e.conceptId===c.id).at(-1)?.outcome==="independent"?"#69b88a":atlas.learningEvidence?.some(e=>e.conceptId===c.id)?"#65a3dc":undefined,
+			derivationCount: atlas.lessonMaps?.reduce((count,map)=>count+map.derivations.filter(d=>d.conceptIds.includes(c.id)).length,0),
+			badgeColor: atlas.lessonMaps?.some(m=>m.derivations.some(d=>d.conceptIds.includes(c.id)&&(d.gaps.length||d.reviewFlags?.length))) || conceptReviews?.[c.id]?.length || atlas.relations.some(r=>(r.sourceId===c.id||r.targetId===c.id)&&r.evidence.some(e=>e.citation.startsWith("AI suggestion"))) || atlas.associations?.some(a=>a.sourceId===c.id||a.targetId===c.id) ? "#e6b35a" : undefined,
 			x: c.x,
 			y: c.y,
 			fixed: !!subjectById.get(c.preferredSubjectId ?? "")?.locked,

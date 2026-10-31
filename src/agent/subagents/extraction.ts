@@ -729,6 +729,7 @@ export interface ExtractionModels {
 }
 
 export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
+ beforeMerge?:()=>void;
 	/** The chunk budget — the transcript-token share of the extractor's
 	 *  context; batches fill to it (the trigger fires on the same number,
 	 *  read fresh per turn by the composition root). OPTIONAL with the
@@ -1190,6 +1191,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								// merges in), the stored fingerprint won't match its new
 								// one and it re-opens: honest by construction.
 								const foldedAt = new Date().toISOString();
+								deps.beforeMerge?.();
 								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore }, {
 									foldedAt,
 									coverage: batch
@@ -1354,6 +1356,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								setPhase(jobKey, "auditing", "notes", input.filePath, part);
 								const auditResult = await audit(jobKey, input.id, findings);
 								setPhase(jobKey, "merging", "notes", input.filePath, part);
+								deps.beforeMerge?.();
 								const merged = mergeFindings(
 									id,
 									findings,

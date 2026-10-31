@@ -57,7 +57,7 @@ export async function startDraftSession(
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			: { title: t, learning:true },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -174,7 +174,7 @@ export function DraftShell({
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
-											: "The teacher will open by probing what you already know."
+											: "Explore a visible lesson map, start conceptually, and work through selected derivations."
 									}
 								/>
 							</ConversationContent>

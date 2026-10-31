@@ -100,6 +100,7 @@ export function estimateMessageTokens(message: LhMessage | AgentMessage): number
 		}
 	} else {
 		chars += textCharsOfContent(content);
+        if(message.role==="custom"&&message.customType==="scratchpad-attempt"&&(message.details as {hasImage?:boolean}).hasImage)chars+=ESTIMATED_IMAGE_CHARS;
 		if (message.role === "system") {
 			const system = message as SystemMessage;
 			for (const section of Object.values(system.sections ?? {})) chars += section?.length ?? 0;
@@ -335,7 +336,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
 			if (marker.customType === "plan-block") continue; // UI-only
-			lines.push(`[SYSTEM NOTE] ${marker.content}`);
+			lines.push(marker.customType==="scratchpad-attempt"?`[LEARNER ATTEMPT; submitted drawing retained separately, pixels are not present in this text summary] ${marker.content}`:`[SYSTEM NOTE] ${marker.content}`);
 		}
 	}
 	return lines.join("\n\n");

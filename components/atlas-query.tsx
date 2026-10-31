@@ -9,12 +9,12 @@ export function AtlasQuery({
 	snapshot,
 	selectedId,
 	onSelect,
-	onFocus,
+	onFocus,mapId,
 }: {
 	snapshot: AtlasSnapshot;
 	selectedId: string | null;
 	onSelect: (id: string) => void;
-	onFocus?: (focus: AtlasPathFocus | null) => void;
+	onFocus?: (focus: AtlasPathFocus | null) => void;mapId?:string|null;
 }) {
 	const [sourceId, setSourceId] = useState<string | null>(null);
 	const [targetId, setTargetId] = useState("");
@@ -24,6 +24,7 @@ export function AtlasQuery({
 		() => (query ? findAtlasPath(snapshot, query.sourceId, query.targetId) : null),
 		[query, snapshot],
 	);
+	useEffect(()=>{if(mapId){setFocused(false);setQuery(null);}},[mapId]);
 	const source = sourceId ?? selectedId ?? "";
 	const name = (id: string) => snapshot.concepts.find((c) => c.id === id)?.title ?? "Unavailable concept";
 	useEffect(() => {

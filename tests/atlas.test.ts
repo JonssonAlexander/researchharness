@@ -149,7 +149,7 @@ test("unknown or deleted canonical propositions are refused on save and never si
 });
 
 test("future and unrecognized databases are refused without rewriting their contents", () => {
-	for (const version of [0, 11]) {
+	for (const version of [0, 15]) {
 		const { file, store } = fixture();
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const db = new DatabaseSync(file);
@@ -290,7 +290,7 @@ test("v1 migration keeps rows, creates a restorable baseline and refuses unsafe 
 	service.save(c);
 	const db = new DatabaseSync(file);
 	db.exec(
-		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=1",
+		"ALTER TABLE concepts DROP COLUMN markdownPath; DROP TABLE subject_archive; DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=1",
 	);
 	db.close();
 	const saved = createAtlasStore(file).read();
@@ -318,7 +318,7 @@ test("failed v1 migration rolls back schema and full-root restore keeps Markdown
 	fs.cpSync(path.join(path.dirname(file), "concepts"), path.join(restored, "concepts"), { recursive: true });
 	assert.deepEqual(createAtlasStore(path.join(restored, "atlas.sqlite")).read(), service.read());
 	const db = new DatabaseSync(file);
-	db.exec("ALTER TABLE concepts DROP COLUMN markdownPath; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=1");
+	db.exec("ALTER TABLE concepts DROP COLUMN markdownPath; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=1");
 	db.close();
 	assert.throws(() => createAtlasStore(file).read(), /already exists/);
 	const unchanged = new DatabaseSync(file);
@@ -432,7 +432,7 @@ test("v2 upgrade preserves notes and placements, backs up data and rolls back a 
 	const before = service.read();
 	const db = new DatabaseSync(file);
 	db.exec(
-		"DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=2",
+		"DROP TABLE relation_revisions; DROP TABLE relations; DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=2",
 	);
 	db.close();
 	assert.deepEqual(createAtlasStore(file).read(), {...before, layoutRevision: 0});
@@ -554,7 +554,7 @@ test("v3 archive migration backs up existing data and preserves rows", () => {
 	service.save(concept());
 	const before = service.read();
 	const db = new DatabaseSync(file);
-	db.exec("DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=3");
+	db.exec("DROP TABLE atlas_archive; ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=3");
 	db.close();
 	assert.deepEqual(createAtlasStore(file).read(), {...before, layoutRevision: 0});
 	const saved = fs.readdirSync(path.dirname(file)).find((f) => f.includes(".v3-") && f.endsWith(".bak"))!;
@@ -628,7 +628,7 @@ test("v4 upgrade preserves positions, defaults to unlocked and leaves a recovera
  const {service,file} = fixture(); const a=subject(); service.save(a); service.save(concept([a.id]));
  const before=service.read();
  const db=new DatabaseSync(file);
- db.exec("ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=4"); db.close();
+ db.exec("ALTER TABLE subjects DROP COLUMN locked; DROP TABLE atlas_layout_version; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=4"); db.close();
  const restored=createAtlasStore(file).read();
  assert.deepEqual(restored,{...before,layoutRevision:0});
  const backup=fs.readdirSync(path.dirname(file)).find(f=>f.includes('.v4-'))!;
@@ -684,9 +684,39 @@ test("named views persist independently of layout, reject stale/duplicate/invali
 test("v5 view migration backs up and preserves the entire prior Atlas", () => {
  const {service,file}=fixture();const a=subject();service.save(a);service.save(concept([a.id]));
  const before=service.read(),db=new DatabaseSync(file);
- db.exec("DROP TABLE atlas_views; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=5");db.close();
+ db.exec("DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_views; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=5");db.close();
  assert.deepEqual(createAtlasStore(file).read(),before);
  const old=fs.readdirSync(path.dirname(file)).find(f=>f.includes('.v5-'))!;
  const backup=new DatabaseSync(path.join(path.dirname(file),old));
  assert.equal(backup.prepare('PRAGMA user_version').get()!.user_version,5);backup.close();
+});
+
+test("view-specific emphasis survives restart and cannot alter concepts or leak into another view",()=>{
+ const {service,file}=fixture(),c=concept();service.save(c);const before=service.read();
+ const view={kind:"view" as const,id:`av_${randomUUID()}`,expectedRevision:0,title:"Derivations",query:"",camera:{x:0,y:0,k:1},emphasis:{[c.id]:"prominent" as const}};
+ service.save(view);service.save({...view,id:`av_${randomUUID()}`,title:"Overview",emphasis:{[c.id]:"small"}});
+ const saved=createAtlasStore(file).read();assert.equal(saved.views![0]!.emphasis![c.id],"prominent");assert.equal(saved.views![1]!.emphasis![c.id],"small");
+ assert.deepEqual(saved.concepts,before.concepts);assert.equal(saved.layoutRevision,before.layoutRevision);
+ assert.throws(()=>service.save({...view,expectedRevision:1,emphasis:{[concept().id]:"prominent"}}),/no longer exists/);
+ service.save({...view,expectedRevision:1,emphasis:{}});assert.deepEqual(service.read().views![0]!.emphasis,{});
+});
+
+test("manual drawing links edit, remove and restore independently of mathematical relations and retain history",()=>{
+ const {service,file}=fixture(),a=concept(),b=concept();service.save(a);service.save(b);
+ const before=service.read(),link={kind:"drawing-link" as const,id:`dl_${randomUUID()}`,sourceId:a.id,targetId:b.id,label:"Related ideas",direction:"forward" as const,notes:"To investigate",replaces:null,removed:false,expectedRevision:before.layoutRevision!};
+ service.save(link);const saved=service.read();assert.equal(projectAtlas(saved).mapEdges.length,1);assert.deepEqual(saved.concepts,before.concepts);assert.deepEqual(saved.relations,[]);
+ assert.throws(()=>service.save({...link,label:"Stale"}),/changed/);
+ assert.throws(()=>service.save({...link,id:`dl_${randomUUID()}`,expectedRevision:saved.layoutRevision!}),/already exists/);
+ service.save({...link,label:"Next step",expectedRevision:saved.layoutRevision!});
+ service.save({...link,removed:true,expectedRevision:service.read().layoutRevision!});assert.equal(projectAtlas(service.read()).mapEdges.length,0);
+ service.save({...link,expectedRevision:service.read().layoutRevision!});assert.equal(projectAtlas(createAtlasStore(file).read()).mapEdges.length,1);
+ const db=new DatabaseSync(file);assert.equal(db.prepare("SELECT count(*) AS n FROM atlas_archive WHERE kind='drawing-link-revision'").get()!.n,3);db.close();
+});
+
+test("v12 emphasis/drawing migration retains a restorable baseline and rolls back failed DDL",()=>{
+ const {file,store}=fixture();const before=store.read();let db=new DatabaseSync(file);
+ db.exec("ALTER TABLE atlas_views DROP COLUMN emphasis; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; PRAGMA user_version=12");db.close();
+ assert.deepEqual(createAtlasStore(file).read(),before);assert(fs.readdirSync(path.dirname(file)).some(n=>n.includes('.v12-')));
+ const broken=fixture();broken.store.read();db=new DatabaseSync(broken.file);db.exec("ALTER TABLE atlas_views DROP COLUMN emphasis; PRAGMA user_version=12");db.close();
+ assert.throws(()=>createAtlasStore(broken.file).read(),/already exists/);db=new DatabaseSync(broken.file);assert.equal(db.prepare("PRAGMA user_version").get()!.user_version,12);assert(!db.prepare("PRAGMA table_info(atlas_views)").all().some(r=>r.name==='emphasis'));db.close();
 });

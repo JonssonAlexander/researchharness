@@ -355,6 +355,11 @@ export const streamdownPlugins = {
   math: createMathPlugin({ singleDollarTextMath: true }),
 } as unknown as PluginConfig;
 
+// Remend's incomplete-HTML heuristic mistakes TeX comparisons such as
+// L<Y_t for an unfinished tag and discards the rest of a complete reply.
+// This only disables stream repair; HTML sanitization remains unchanged.
+export const streamdownRemend = { htmlTags: false };
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
     // Legacy backslash delimiters are converted in a single linear scan;
@@ -376,6 +381,7 @@ export const MessageResponse = memo(
         components={mdComponents}
         plugins={streamdownPlugins}
         {...props}
+        remend={{ ...streamdownRemend, ...props.remend }}
       >
         {content}
       </Streamdown>

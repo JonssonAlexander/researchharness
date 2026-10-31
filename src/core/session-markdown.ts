@@ -169,7 +169,9 @@ export function messageMarkdown(
 		for (const text of userFacingTextOf((message as { content: unknown }).content)) {
 			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
 		}
-	} else if (role === "assistant") {
+	} else if(role==="custom"&&(message as {customType?:string}).customType==="scratchpad-attempt"){
+  parts.push(`### Learner drawing attempt${anchor}\n\n${(message as {content:string}).content}\n\nDrawing retained in scratchpad source; this text export does not include its pixels.`);
+ } else if (role === "assistant") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content, ctx?.failedOutputCalls ?? failedOutputCallIds([message]))) {
 			parts.push(`### Teacher${anchor}\n\n${text.trim()}`);
 		}

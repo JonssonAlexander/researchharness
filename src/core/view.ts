@@ -369,6 +369,7 @@ function applyResultTo(part: LhViewPart | undefined, result: ToolResultMessage):
 
 /** A marker's projected message (handoff/steers) or splice (plan block). */
 function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
+ if(marker.customType==="scratchpad-attempt"){out.push({id:marker.id,role:"user",parts:[textPart(`Attempt ${(marker.details as {number:number}).number} · ${(marker.details as {title:string}).title}\n${(marker.details as {text:string}).text}`),{type:"data-scratchpad",data:marker.details}]});return;}
 	switch (marker.customType) {
 		case "graph-context": {
 			// The session's map context (owner, 2026-10-04): user-side —

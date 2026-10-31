@@ -40,3 +40,8 @@ after view operations. The temporary test view was archived and the test movemen
 reversed. Passed: 115 focused tests, 32 Atlas/layout tests under Electron, lint,
 typecheck, production build and packaged Electron server smoke. Hierarchical group movement/locking and further subject
 hierarchy visualization remain pending.
+
+30 October extension: saved views also retain explicit node emphasis, with an
+Update current view action. This supersedes the earlier statement that all node
+rendering preferences are shared. Position/physics/learning state remain shared;
+see [drawing controls](atlas-drawing-controls.md) for schema v13 and limits.

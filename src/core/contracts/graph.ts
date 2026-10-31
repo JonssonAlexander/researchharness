@@ -40,6 +40,8 @@ export interface GraphEdge {
  *  conclusion. A chain referencing a dead node dies with it (full death
  *  cascades through every referencing chain). */
 export interface GraphChain {
+ /** Reviewed synchronization operation; used only for crash recovery. */
+ integrationId?:string;
 	/** "arg_" + nanoid-like (store-assigned, the node-minting pattern). */
 	id: string;
 	/** Node ids of the argument's premises — at least one, jointly
@@ -124,6 +126,8 @@ export const CURRENT_GRAPH_FORMAT_VERSION = 1;
 
 
 export interface GraphNode {
+ /** Reviewed synchronization operation; used only for crash recovery. */
+ integrationId?:string;
 	/** Opaque stable id, store-assigned: "n_" + nanoid-like. */
 	id: string;
 	/** A very short label for the node — a compact handle like a glossary

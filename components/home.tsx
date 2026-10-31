@@ -14,6 +14,7 @@ import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import type {LearningContext} from "@/src/core";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -90,6 +91,7 @@ export function Home({
 	 *  may carry proposition picks from the chain table (the chip above
 	 *  the composer opens the picker; the picks seed the opening prompt).
 	 *  Not enforcing any input format — the picks are a convenience. */
+	const [atlasContext,setAtlasContext]=useState<LearningContext|undefined>();
 	const [mode, setMode] = useState<"teach" | "practice">("teach");
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
@@ -144,6 +146,8 @@ export function Home({
 			// chains among them); the prompt stays the learner's own words.
 			const target = await starterRef.current.start({
 				title: t,
+				atlasContext,
+				learning:mode!=="practice",
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
@@ -178,6 +182,7 @@ export function Home({
 			<main className="absolute inset-0">
 				{rendering ? (
 					<GraphView
+						onAtlasLearn={(context,prompt)=>{if(context.derivation)setPracticeProps([]);setAtlasContext(context);setMode(context.goal==="practice"?"practice":"teach");topicRef.current=prompt;setTopic(prompt);topicInputRef.current?.focus();}}
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
@@ -217,6 +222,7 @@ export function Home({
 					    send consumes it). Practice mode with nothing picked
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
+					{atlasContext&&<div className="mb-2 flex items-center gap-2 rounded border bg-card px-3 py-2 text-xs"><span>Atlas learning target · {atlasContext.goal} · reviewed updates</span><button type="button" className="underline" onClick={()=>setAtlasContext(undefined)}>Clear target</button></div>}
 					<ComposerActions
 						picker={(practiceProps.length > 0 || mode === "practice") && (
 							<NodePickerControl

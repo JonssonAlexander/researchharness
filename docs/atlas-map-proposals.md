@@ -15,7 +15,7 @@ Existing identity suggestions are labelled possible matches; other identities
 remain for review. No Accept, Approve or Apply action exists in this slice.
 
 Opening the dialog only reads local state and model configuration. **Interpret
-revision** explicitly sends saved images and the names/aliases of up to 40
+revision** explicitly sends saved images and the names/aliases of up to 200
 linked concepts (10 aliases each) to the configured **vision** slot. It does not
 send concept Markdown, chat histories or the rest of the vault. The destination
 is shown before dispatch and rechecked on POST. Missing configuration, a changed
@@ -52,7 +52,7 @@ submit tool. It cannot retrieve arbitrary files, run tools or write any graph.
 At most two calls allow schema repair; each is capped at 8,000 output tokens (or
 the model's smaller limit). Source preparation is bounded as above. After images
 are retained, model work (including the shared queue and any schema repair) has
-a separate five-minute deadline. User/request cancellation interrupts either
+a separate 20-minute deadline. User/request cancellation interrupts either
 stage; a model deadline is recorded as failed with an explicit timeout message,
 not as a user cancellation. No automatic retry occurs. The review screen shows
 whether source pages are being prepared or the model response is awaited.
@@ -152,3 +152,35 @@ owner-triggered model comparison. The preceding successful owner interpretation
 used the older paper-page input; it does not establish the new pipeline’s accuracy. Identity
 auditing, editable proposals, approval, canonical writes and cross-store commit
 recovery remain pending. Source preservation is already independent of those steps.
+# Formula coverage follow-up — 30 October 2026
+
+New interpretation prompts scan each overlapping view for small equations as well
+as headings. Concept records may include an optional `formulas` inventory of raw
+LaTeX readings; every inventoried expression must also occur verbatim in that
+concept's notes. Partial readings retain uncertainty rather than being replaced
+by familiar textbook equations. The optional field preserves legacy proposal
+digests and requires no database migration. Existing saved attempts are unchanged.
+
+Generated refinements must account for each first-reading concept through
+`sourceKeys` and retain inventoried formulas verbatim in notes, with corrections
+separately labelled. The submit runner can repair an omission within its existing
+two-turn limit; this is not an additional automatic model pass. Deliberate owner
+edits remain allowed. This gate cannot prove that the initial image reading is
+complete or mathematically correct; real handwriting coverage still needs review.
+Select a proposed-map concept to inspect its typeset equations in the side panel;
+graph labels remain compact titles. Note content appears before its provenance.
+
+Map submit failures now distinguish local semantic validation, rejected format,
+output exhaustion and absent structured submission. These bounded diagnostics
+are retained in the attempt's existing error field; raw provider errors and
+rejected payloads are not exposed. Legacy failures cannot be reconstructed from
+their generic messages. Formula comparison ignores whitespace but still checks
+symbols; it does not establish mathematical equivalence. The two-call budget
+and explicit retry policy are unchanged.
+
+The owner-requested model deadline is now 20 minutes for both reading and
+refinement, after image preparation. Cancellation and the two-call budget still
+apply. Unknown, non-exact and multiply used existing-ID suggestions are cleared
+to unresolved before validating either model result. All extracted content is
+retained for explicit identity review; no replacement ID is inferred. Strict
+identity guards remain in place for approved integration.

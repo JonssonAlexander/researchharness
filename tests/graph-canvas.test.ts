@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, it, it as test } from "node:test";
 import {
+	GraphCanvasRenderer,
 	applyClusterLabels,
 	arrowGeometry,
 	isImpNodeId,
@@ -413,4 +414,31 @@ describe("applyClusterLabels (the label-only rename channel)", () => {
 		);
 		assert.equal(changed, false);
 	});
+});
+
+test("connection picking follows camera coordinates, chooses the nearest segment and ignores filtered nodes",async()=>{
+ const {pickConnection}=await import('../components/graph-canvas.ts');
+ const nodes=new Map([['a',{x:0,y:0}],['b',{x:100,y:0}],['c',{x:0,y:10}],['d',{x:100,y:10}]]),edges=[{from:'a',to:'b'},{from:'c',to:'d'}],camera={x:20,y:30,k:2};
+ assert.equal(pickConnection(edges,nodes,{x:100,y:32},camera),edges[0]);
+ assert.equal(pickConnection(edges,nodes,{x:100,y:49},camera),edges[1]);
+ assert.equal(pickConnection(edges,nodes,{x:100,y:42},camera),null);
+ assert.equal(pickConnection(edges,nodes,{x:100,y:32},camera,new Set(['a'])),null);
+});
+
+
+test("proof highlighting never paints an implication junction as an empty claim node",()=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,"window");
+ Object.defineProperty(globalThis,"window",{configurable:true,value:{devicePixelRatio:1}});
+ try{
+  for(const subtleHighlight of [false,true]){
+   const arcs:number[][]=[],strokes:number[]=[],context:Record<string,unknown>={arc:(...args:number[])=>arcs.push(args)};
+   const ctx=new Proxy(context,{get:(target,key)=>key in target?target[String(key)]:()=>{}});
+   context.stroke=()=>strokes.push(context.lineWidth as number);
+   const nodes=[{id:"n_claim",x:10,y:20},{id:"arg_joint",x:30,y:40}];
+   const view={data:{nodes,edges:[{from:"n_claim",to:"arg_joint"}],colors:{node:"#fff",label:"#aaa",edge:"#888"}},settings:{edgeWidth:.5,labelZoom:8},canvas:{clientWidth:600,clientHeight:400},ctx,transform:{x:0,y:0,k:1},kFit:1,world:{nodeR:2,glowOuter:10},regionBuiltVersion:0,geoVersion:0,builtVersion:0,frameCount:0,nodesPath:{},coloredNodes:new Map(),nodeById:new Map(nodes.map(n=>[n.id,n])),labelLines:new Map(),highlighted:new Set(nodes.map(n=>n.id)),subtleHighlight,nodeWorld:()=>({nodeR:2,labelSize:12,labelGap:3})};
+   (GraphCanvasRenderer.prototype as unknown as {draw:(this:unknown)=>void}).draw.call(view);
+   assert.deepEqual(arcs.map(a=>a.slice(0,2)),[[10,20]]);
+   if(subtleHighlight)assert(strokes.every(width=>width===.5),"focus preserves the thin edge width");
+  }
+ }finally{if(previous)Object.defineProperty(globalThis,"window",previous);else Reflect.deleteProperty(globalThis,"window");}
 });

@@ -84,3 +84,8 @@ Passed locally: 125 focused tests, 19 Atlas tests under Electron, lint, typechec
 production build and packaged Electron smoke. A disposable production HTTP check
 verified relation save, stale-write refusal and restoration after process restart.
 The live app served home and Atlas successfully. The full suite was not rerun.
+
+30 October extension: clicking a canvas link or Shift-dragging between concepts
+opens a pair inspector with the existing typed-link editor and a new ordinary-line
+editor. See [drawing controls](atlas-drawing-controls.md). Ordinary edits preserve
+source records and never promote a mathematical relationship.

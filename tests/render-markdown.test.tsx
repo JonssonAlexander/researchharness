@@ -22,6 +22,17 @@ function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
 
+describe("streaming math comparisons", () => {
+	it("preserves corridor inequalities and the following message text", () => {
+		const md = "Before\n\\[\nI_i=\\mathbf1_{\\{L<Y_{t_{i-1}}\\le U\\}}.\n\\]\nThen define the payoff.";
+		const html = renderToStaticMarkup(<MessageResponse>{md}</MessageResponse>);
+		assert.ok(html.includes("katex-display"));
+		assert.ok(!html.includes("katex-error"));
+		assert.ok(html.includes("Then define the payoff."));
+		assert.ok(!html.includes("streamdown:incomplete-link"));
+	});
+});
+
 describe("math delimiter transform (pure unit)", () => {
 	it("converts inline \\(...\\) to the two-dollar inline form", () => {
 		assert.equal(

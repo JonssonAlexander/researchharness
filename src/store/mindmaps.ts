@@ -29,7 +29,7 @@ export function readMindmaps(db: DatabaseSync): Mindmap[] {
 		if (!captures.some(c => c.id === row.currentRevision) || captures.some(c => c.mapId !== row.id))
 			throw new AtlasError("Broken mind map revision references.", 500);
 		return {id: String(row.id), title: row.title, revision: Number(row.revision), archived: row.archived === 1,
-			currentRevision: String(row.currentRevision), captures};
+			subjectId: row.subjectId ? String(row.subjectId) : null, currentRevision: String(row.currentRevision), captures};
 	});
 }
 
@@ -104,7 +104,7 @@ export function createMindmapStore(database: Database, dataRoot: string): Mindma
 						if (!db.prepare("SELECT id FROM concepts WHERE id=?").get(id)) throw new AtlasError("A linked concept was removed. Choose its replacement before importing.", 409);
 					writeBlob("original", original);
 					if (preview) writeBlob("preview", preview);
-					db.prepare(`INSERT INTO mindmaps VALUES (?, ?, ?, ?, 0)
+					db.prepare(`INSERT INTO mindmaps(id,title,revision,currentRevision,archived) VALUES (?, ?, ?, ?, 0)
 ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, currentRevision=excluded.currentRevision`)
 						.run(input.id, input.title, input.expectedRevision+1, input.captureId);
 					db.prepare("INSERT INTO mindmap_captures VALUES (?, ?, ?, ?)").run(input.captureId, input.id, JSON.stringify(record), receipt);

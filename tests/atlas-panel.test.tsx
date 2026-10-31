@@ -665,14 +665,16 @@ test('integration UI sends explicit identities and exact approval, exposing fail
  const review={schemaVersion:1 as const,proposalId:'mp_00000000-0000-4000-8000-000000000022',revision:2,draft:draftFixture,digest:'a'.repeat(64)};
  const plan={id:'mi_00000000-0000-4000-8000-000000000022',proposalId:review.proposalId,reviewRevision:2,digest:'b'.repeat(64),baseRevision:3,concepts:[],relations:[],reusedRelations:[],status:'prepared'};
  const requests:Record<string,unknown>[]=[],prepared:unknown[]=[];let done=0,fail=true;const oldFetch=globalThis.fetch;
- globalThis.fetch=async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return Response.json(body.action==='prepare'?plan:fail?{error:'Atlas changed. Prepare a new preview.'}:{...plan,status:'committed'},{status:body.action==='commit'&&fail?409:200});};
+ globalThis.fetch=async(_input,init)=>{if(!init?.body)return Response.json(String(_input).includes("config")?{model:"fake:auditor"}:{reviews:[]});const body=JSON.parse(String(init.body));requests.push(body);return Response.json(body.action==='prepare'?plan:fail?{error:'Atlas changed. Prepare a new preview.'}:{...plan,status:'committed'},{status:body.action==='commit'&&fail?409:200});};
  const ui=await mount(()=> <DraftIntegration review={review} atlas={{...snapshot,concepts:[],layoutRevision:3}} onPrepared={p=>prepared.push(p)} onCommitted={()=>done++}/>);
  const click=async(name:string)=>{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});};
  try{
   assert(!ui.document.body.textContent.includes('Approve and integrate'));
-  await click('Preview integration');assert.equal(requests[0]!.baseRevision,3);assert.deepEqual(requests[0]!.choices,{identities:{draft_a:'new',draft_b:'new'},subjectId:null,connections:[],mapConnections:['edge_qv']});assert.deepEqual(prepared.at(-1),plan);
+  await act(async()=>{const subjectSelect=[...ui.document.querySelectorAll('select')].find(s=>s.textContent?.includes('Choose a subject'))!;Object.defineProperty(subjectSelect,"value",{configurable:true,value:a});subjectSelect.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  await click('Preview integration');assert.equal(requests[0]!.baseRevision,3);assert.deepEqual(requests[0]!.choices,{identities:{draft_a:'new',draft_b:'new'},subjectId:a,connections:[],mapConnections:['edge_qv']});assert.deepEqual(prepared.at(-1),plan);
   await click('Approve and integrate');assert.deepEqual(requests[1],{action:'commit',id:plan.id,digest:plan.digest,approve:true});assert.equal(done,0);assert(ui.document.body.textContent.includes('Atlas changed.'));
-  fail=false;await click('Approve and integrate');assert.equal(done,1);
+  assert(!ui.document.body.textContent.includes('Approve and integrate'));
+  fail=false;await click('Preview integration');await click('Approve and integrate');assert.equal(done,1);
  }finally{await ui.close();globalThis.fetch=oldFetch;}
 });
 
@@ -685,4 +687,194 @@ test('connection repair previews saved identities and requires exact approval wi
  const ui=await mount(()=> <MapConnectionRepair review={review} atlas={{...snapshot,layoutRevision:5}} onPrepared={p=>prepared.push(p)} onCommitted={()=>done++} onCancel={()=>{}}/>);
  const click=async(name:string)=>{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});};
  try{assert(!ui.document.body.textContent.includes('Approve and restore connections'));await click('Preview missing connections');assert.deepEqual(requests[0],{action:'prepare-connections',proposalId:review.proposalId,baseRevision:5});assert.deepEqual(prepared.at(-1),plan);assert(ui.document.body.textContent.includes('0 new nodes'));assert(ui.document.body.textContent.includes('Meaning unclear'));assert.equal(done,0);await click('Approve and restore connections');assert.deepEqual(requests[1],{action:'commit',id:plan.id,digest:plan.digest,approve:true});assert.equal(done,1);}finally{await ui.close();globalThis.fetch=oldFetch;}
+});
+
+test('map grid toggle, map highlighting, centering and subject assignment stay explicit',async()=>{
+ const {AtlasMindmaps}=await import('../components/atlas-mindmaps.tsx'),mapId='mm_00000000-0000-4000-8000-000000000011',revisionId='mr_00000000-0000-4000-8000-000000000011';
+ const map={id:mapId,title:'Study map',revision:1,archived:false,currentRevision:revisionId,captures:[{schemaVersion:1 as const,id:revisionId,mapId,hash:'a'.repeat(64),previewHash:null,filename:'map.rnote',capturedAt:'2026-10-29T12:00:00Z',conceptIds:[id],validation:'unverified' as const,previewKind:'none' as const,notice:null}]},focus:unknown[]=[],grid:boolean[]=[],saved:AtlasCommand[]=[];
+ const ui=await mount(()=> <AtlasMindmaps snapshot={{...snapshot,mindmaps:[map]}} selectedId={null} refresh={async()=>{}} save={async c=>{saved.push(c);}} onMapFocus={(...args)=>focus.push(args)} onGridChange={v=>grid.push(v)}/>);
+ const click=async(name:string)=>act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+ try{
+  await click('Grid');assert.deepEqual(grid,[true]);assert(ui.document.querySelector('.xl\\:grid-cols-3'));
+  await click('Study map');await click('Center map');assert.deepEqual(focus,[[mapId,undefined],[mapId,true]]);assert.equal(saved.length,0);
+  await click('Assign subject');await act(async()=>{const select=[...ui.document.querySelectorAll('select')].find(s=>s.textContent?.includes('Choose a subject'))!;Object.defineProperty(select,'value',{configurable:true,value:a});select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  assert.equal(saved.length,0);await click('Approve subject assignment');assert.deepEqual(saved,[{kind:'map-subject',id:mapId,expectedRevision:1,subjectId:a}]);
+ }finally{await ui.close();}
+});
+
+test('arrangement previews do not save positions until approved and cancel restores the view',async()=>{
+ const {AtlasArrange}=await import('../components/atlas-arrange.tsx'),proposals:unknown[]=[],saved:AtlasCommand[]=[];
+ const ui=await mount(()=> <AtlasArrange atlas={{...snapshot,layoutRevision:8}} mapId={null} conceptId={id} save={async c=>{saved.push(c);}} onPreview={p=>proposals.push(p)}/>);
+ const click=async(name:string)=>act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===name)!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+ try{await click('Preview arrangement');assert.equal(saved.length,0);assert(Array.isArray(proposals.at(-1)));await click('Cancel');assert.equal(proposals.at(-1),null);assert.equal(saved.length,0);await click('Preview arrangement');await click('Save arrangement');assert.equal(saved[0]!.kind,'layout');assert.equal(saved[0]!.expectedRevision,8);}finally{await ui.close();}
+});
+
+test('saved AI review remains readable when its configured model is unavailable',async()=>{
+ const {SyncRunner}=await import('../components/atlas-sync-review.tsx'),old=globalThis.fetch,seen:unknown[]=[];
+ const review={schemaVersion:1,id:'sr_00000000-0000-4000-8000-000000000022',kind:'map',sourceId:'mp_00000000-0000-4000-8000-000000000022',subjectId:null,status:'prepared',model:'fake:auditor',findings:{identities:[],concepts:[],connections:[],observations:[]}};
+ globalThis.fetch=async input=>String(input).includes('config=1')?Response.json({error:'Configure a model first.'},{status:503}):Response.json({reviews:[review]});
+ const ui=await mount(()=> <SyncRunner kind='map' sourceId={review.sourceId} subjectId={null} onReview={r=>seen.push(r)}/>);
+ try{assert.deepEqual(seen,[review]);assert(ui.document.body.textContent.includes('prepared'));assert(ui.document.body.textContent.includes('Configure a model first.'));assert([...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Refresh AI review')!.disabled);}finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('possible existing identities require a real choice rather than silently excluding their lines',async()=>{
+ const {DraftIntegration}=await import('../components/map-draft-editor.tsx'),{draftFixture}=await import('./fixtures/map-draft.ts'),old=globalThis.fetch;
+ globalThis.fetch=async input=>Response.json(String(input).includes('config')?{model:'fake:auditor'}:{reviews:[]});
+ const ui=await mount(()=> <DraftIntegration review={{schemaVersion:1,proposalId:'mp_00000000-0000-4000-8000-000000000022',revision:0,draft:draftFixture,digest:'a'.repeat(64)}} atlas={snapshot} onPrepared={()=>{}} onCommitted={()=>{}}/>);
+ try{assert(ui.document.body.textContent.includes('must not silently drop their connections'));assert([...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Preview integration')!.disabled);assert(ui.document.querySelector('option[value="pending"]'));}finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('ordinary connection editor preserves drafts on stale save and requires confirmed removal',async()=>{
+ const {AtlasLinkEditor}=await import('../components/atlas-link-editor.tsx');
+ const other={...snapshot.concepts[0]!,id:'ac_00000000-0000-4000-8000-000000000009',title:'Generator'};
+ const link={id:'dl_00000000-0000-4000-8000-000000000001',sourceId:id,targetId:other.id,label:'Explore',direction:'unclear' as const,notes:'',replaces:null,removed:false};
+ const commands:AtlasCommand[]=[];let stale=true;
+ const ui=await mount(()=> <AtlasLinkEditor snapshot={{...snapshot,concepts:[...snapshot.concepts,other],drawingLinks:[link],layoutRevision:7}} sourceId={id} targetId={other.id} save={async c=>{commands.push(c);if(stale)throw new Error('Atlas changed. Reload before editing this line.');}} onClose={()=>{}}/>);
+ const click=async(text:string)=>act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===text)!.click();});
+ try{
+  await click('Edit ordinary line');await act(async()=>{ui.document.querySelector('form')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));});
+  assert(ui.document.body.textContent.includes('Atlas changed.'));assert(ui.document.querySelector('form'));
+  stale=false;await click('Remove line');assert.equal(commands.length,1);await click('Confirm removal');
+  assert.equal(commands.length,2);assert.equal(commands[1]!.kind,'drawing-link');assert.equal((commands[1] as {removed:boolean}).removed,true);assert.equal(commands[1]!.expectedRevision,7);
+ }finally{await ui.close();}
+});
+
+test('saved view updates include emphasis and use the current view revision',async()=>{
+ const {AtlasViews}=await import('../components/atlas-views.tsx');
+ const view={id:'av_00000000-0000-4000-8000-000000000001',title:'Stochastic calculus',query:'',camera:{x:0,y:0,k:1},revision:3};const commands:AtlasCommand[]=[];
+ const ui=await mount(()=> <AtlasViews views={[view]} save={async c=>{commands.push(c);}} actions={{canSave:true,activeId:view.id,capture:()=>({camera:view.camera,query:'',emphasis:{[id]:'prominent'}}),restore:()=>{}}}/>);
+ try{await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Update current view')!.click();});assert.deepEqual(commands,[{kind:'view',id:view.id,title:view.title,expectedRevision:3,camera:view.camera,query:'',emphasis:{[id]:'prominent'}}]);}finally{await ui.close();}
+});
+
+test('held node-size shortcuts map 1/2/3, preserve typing, and clear on release or focus loss',async()=>{
+ const {useNodeSizeShortcut}=await import('../components/use-node-size-shortcut.ts');
+ let held!:ReturnType<typeof useNodeSizeShortcut>;
+ function Harness(){held=useNodeSizeShortcut();return <input/>;}
+ const ui=await mount(()=> <Harness/>);
+ const key=async(type:string,value:string,target:EventTarget=ui.document,extra:Record<string,unknown>={})=>act(async()=>{const event=new window.Event(type,{bubbles:true});Object.assign(event,{key:value,code:`Digit${value}`,...extra});target.dispatchEvent(event);});
+ try{
+  for(const [number,size] of [['1','small'],['2','normal'],['3','prominent']]){await key('keydown',number!);assert.equal(held.current,size);await key('keyup',number!);assert.equal(held.current,null);}
+  await key('keydown','3',ui.document.querySelector('input')!);assert.equal(held.current,null);
+  await key('keydown','3',ui.document,{metaKey:true});assert.equal(held.current,null);
+  await key('keydown','1');await key('keydown','3');await key('keyup','3');assert.equal(held.current,'small');
+  await act(async()=>{window.dispatchEvent(new window.Event('blur'));});assert.equal(held.current,null);
+ }finally{await ui.close();}
+});
+
+test('concept derivations show precise joint premises and pass the chosen canonical step to learning',async()=>{
+ const {ConceptDerivations}=await import('../components/concept-derivations.tsx');
+ const nodes=[['n_a','Independent increments'],['n_b','Moment bounds'],['n_c','Quadratic variation']].map(([id,name])=>({id:id!,name:name!,statement:`Precise ${name}`,aliases:[],provenance:[],createdAt:'2026-10-30T00:00:00Z'}));
+ const graph={nodes,propositions:nodes,chains:[{id:'arg_joint',premises:['n_a','n_b'],conclusion:'n_c',provenance:[],createdAt:'2026-10-30T00:00:00Z'}],edges:[],logicalEdges:[],impLinks:[],sessions:{},fileSources:{},nodeSessions:{},clusters:[]};
+ const concept={...snapshot.concepts[0]!,propositionIds:['n_c']};const calls:{context:unknown;prompt:string}[]=[];
+ const ui=await mount(()=> <ConceptDerivations concept={concept} graph={graph} save={async()=>{throw new Error('No writes expected');}} onClose={()=>{}} onLearn={(context,prompt)=>calls.push({context,prompt})}/>);
+ try{assert(ui.document.body.textContent.includes('Precise Independent increments'));assert(ui.document.body.textContent.includes('Precise Moment bounds'));await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Learn this step')!.click();});assert.deepEqual(calls[0]!.context,{conceptIds:[id],goal:'derive',derivation:{rootId:'n_c',targetId:'n_c',chainId:'arg_joint'}});assert(calls[0]!.prompt.includes('all its premises jointly'));}finally{await ui.close();}
+});
+
+test('empty derivations do not fabricate claims and linking preserves notes and uses the concept revision',async()=>{
+ const {ConceptDerivations}=await import('../components/concept-derivations.tsx');
+ const node={id:'n_claim',name:'Precise result',statement:'A self-contained statement.',aliases:[],provenance:[],createdAt:'2026-10-30T00:00:00Z'},graph={nodes:[node],propositions:[node],chains:[],edges:[],logicalEdges:[],impLinks:[],sessions:{},fileSources:{},nodeSessions:{},clusters:[]};
+ const concept={...snapshot.concepts[0]!,propositionIds:[],markdown:'Owner notes'};const commands:AtlasCommand[]=[];
+ const ui=await mount(()=> <ConceptDerivations concept={concept} graph={graph} save={async c=>{commands.push(c);throw new Error('This item changed. Reload it before saving.');}} onClose={()=>{}}/>);
+ try{assert(ui.document.body.textContent.includes('No canonical claims are linked'));await act(async()=>{const select=ui.document.querySelector('[aria-label="Existing claim"]')!;Object.defineProperty(select,'value',{configurable:true,value:'n_claim'});select.dispatchEvent(new window.Event('change',{bubbles:true}));});await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Link claim to concept')!.click();});assert.equal(commands[0]!.kind,'concept');assert.equal(commands[0]!.expectedRevision,concept.revision);assert(!('markdown' in commands[0]!));assert.deepEqual((commands[0] as {propositionIds:string[]}).propositionIds,['n_claim']);assert(ui.document.querySelector('[role="alert"]')!.textContent.includes('changed'));assert.equal((ui.document.querySelector('[aria-label="Existing claim"]') as HTMLSelectElement).value,'n_claim');}finally{await ui.close();}
+});
+
+test('lesson workspace pins Start/Finish and returns to the same retained lesson map',async()=>{
+ const {LessonWorkspace}=await import('../components/lesson-workspace.tsx'),{initialLesson}=await import('../src/core/learning-session.ts');
+ const originalFetch=globalThis.fetch,plan=initialLesson('Understand stochastic calculus');plan.derivations=[{id:'proof',nodeId:'topic_0',title:'Quadratic variation',start:'Standard Brownian motion.',finish:'Quadratic sums converge in L².',status:'working'}];plan.activeDerivationId='proof';
+ let value:import('../src/core/learning-session.ts').LearningSession={schemaVersion:1,revision:1,status:'active',plan};const requests:unknown[]=[];
+ globalThis.fetch=async(_url,init)=>{if(init?.body){const body=JSON.parse(String(init.body));requests.push(body);value={schemaVersion:1,revision:value.revision+1,status:body.status,plan:body.plan};}return Response.json({lesson:value});};
+ function Harness(){const [lesson,setLesson]=React.useState(value);return <ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><LessonWorkspace chatId="chat_fixture" lesson={lesson} onChange={setLesson} busy={false}/></ServerEventsProvider>;}
+ const ui=await mount(()=> <Harness/>);
+ try{assert(ui.document.body.textContent.includes('Standard Brownian motion.'));assert(ui.document.body.textContent.includes('Quadratic sums converge in L².'));await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Return to lesson')!.click();});assert.equal(value.plan.activeDerivationId,null);assert.equal(value.plan.derivations.length,1);assert.equal(value.plan.objective,plan.objective);assert.equal((requests[0] as {expectedRevision:number}).expectedRevision,1);await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Finish lesson')!.click();});assert.equal(value.status,'finished');assert.equal(value.plan.derivations[0]!.status,'working');}finally{await ui.close();globalThis.fetch=originalFetch;}
+});
+
+test('lesson review shows full arguments and gaps separately from the conceptual map',async()=>{
+ const {LessonProposal}=await import('../components/lesson-integration.tsx'),{initialLesson}=await import('../src/core/learning-session.ts');
+ const {lessonSummary}=await import('../src/core/lesson-integration.ts');
+ const {projectAtlas}=await import('../src/core/atlas.ts');
+ const draft=lessonSummary.parse({overview:'Conceptual picture',map:initialLesson('Learn a result'),concepts:[],propositions:[{key:'a',name:'Assumption',statement:'A precise assumption.',existingId:null,identityRationale:'',origin:'session',evidence:['message_a'],uncertainty:''},{key:'b',name:'Conclusion',statement:'A precise conclusion.',existingId:null,identityRationale:'',origin:'ai-explanation',evidence:[],uncertainty:'Conditions need checking'}],arguments:[{key:'step',premises:['a'],conclusion:'b',rationale:'Full mathematical explanation retained here.',origin:'ai-explanation',evidence:[],status:'gap',uncertainty:'Missing step'}],derivations:[{key:'proof',title:'Result',topicId:'topic_0',start:'Start with the hypothesis.',finish:'Prove the conclusion.',root:'b',propositions:['a','b'],arguments:['step'],concepts:[],include:true,gaps:['An unresolved implication'],assistance:'AI hint'}]});
+ const review={id:'lr_00000000-0000-4000-8000-000000000001',createdAt:'2026-10-30',draft,decisions:{},context:{propositions:[],concepts:[]}} as unknown as import('../src/core/lesson-integration.ts').LessonReview;
+ const ui=await mount(()=> <LessonProposal review={review} atlas={snapshot} graph={null} initialProofKey="proof"/>);
+ try{const text=ui.document.body.textContent!;assert(text.includes('Lesson map'));assert(text.includes('In Atlas'));assert(text.includes('Start with the hypothesis.'));assert(text.includes('Prove the conclusion.'));assert(text.includes('Full mathematical explanation retained here.'));assert(text.includes('GAP'));assert(text.includes('AI hint'));assert(ui.document.querySelector('select[aria-label="Choose step"]'));assert([...ui.document.querySelectorAll('details')].some(el=>el.querySelector('summary')?.textContent?.includes('Sources & assistance')&&!el.hasAttribute('open')));assert(!text.includes('Resolve identity'));assert(!text.includes('Include this derivation'));}finally{await ui.close();}
+ const withProof={...snapshot,lessonMaps:[{id:review.id,chatId:'chat_fixture',title:'Lesson',conceptIds:[id],newPropositionIds:['n_hidden'],map:draft.map,derivations:[{key:'proof',title:'Result',rootId:'n_hidden',conceptIds:[id],propositionIds:['n_hidden'],argumentIds:[],gaps:['Unproved'],assistance:'AI hint',reviewFlags:['AI explanation']}]}]};
+ const projected=projectAtlas(withProof);assert.equal(projected.nodes.find(n=>n.id===id)!.derivationCount,1);assert.equal(projected.nodes.find(n=>n.id===id)!.badgeColor,'#e6b35a');assert(!projected.nodes.some(n=>n.id==='n_hidden'));
+});
+
+
+test('inspecting a lesson topic is read-only; Continue here changes focus once and requests teaching',async()=>{
+ const {LessonWorkspace}=await import('../components/lesson-workspace.tsx'),{initialLesson}=await import('../src/core/learning-session.ts');
+ const originalFetch=globalThis.fetch,plan=initialLesson('Our objective');
+ plan.nodes.push({id:'next',title:'Next topic',conceptId:null,tangent:false});
+ plan.derivations=[{id:'proof',nodeId:'topic_0',title:'Retained proof',start:'Premise',finish:'Result',status:'working'}];plan.activeDerivationId='proof';
+ let value:import('../src/core/learning-session.ts').LearningSession={schemaVersion:1,revision:1,status:'active',plan};
+ const writes:unknown[]=[],continued:string[]=[];let refuse=true;
+ globalThis.fetch=async(_url,init)=>{if(init?.body){if(refuse)return Response.json({error:'Lesson changed. Reload before saving.'},{status:409});const body=JSON.parse(String(init.body));writes.push(body);value={...value,revision:value.revision+1,status:body.status,plan:body.plan};}return Response.json({lesson:value});};
+ function Harness(){const [lesson,setLesson]=React.useState(value);return <ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><LessonWorkspace chatId="chat_inspect" lesson={lesson} onChange={setLesson} busy={false} onContinue={title=>continued.push(title)}/></ServerEventsProvider>;}
+ const ui=await mount(()=> <Harness/>);
+ try{
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Next topic')!.click();});
+  assert.equal(writes.length,0);assert.equal(value.plan.currentNodeId,'topic_0');assert.equal(value.plan.activeDerivationId,'proof');
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Continue here')!.click();});
+  assert.equal(writes.length,0);assert.deepEqual(continued,[]);assert.equal(value.plan.currentNodeId,'topic_0');
+  refuse=false;await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Continue here')!.click();});
+  assert.equal(writes.length,1);assert.equal(value.plan.currentNodeId,'next');assert.equal(value.plan.activeDerivationId,null);
+  assert.equal(value.plan.derivations[0]!.status,'working');assert.deepEqual(continued,['Next topic']);
+  assert(ui.document.body.textContent.includes('awaiting your finish'));
+ }finally{await ui.close();globalThis.fetch=originalFetch;}
+});
+
+
+test('focused maps inspect existing concepts, drill into neighbours and return without writing',async()=>{
+ const {AtlasNeighbourhood}=await import('../components/atlas-neighbourhood.tsx');
+ const first=snapshot.concepts[0]!,other={...first,id:'ac_00000000-0000-4000-8000-000000000099',title:'Neighbour topic',propositionIds:[]};
+ const atlas={...snapshot,concepts:[first,other],relations:[],drawingLinks:[{id:'dl_00000000-0000-4000-8000-000000000099',sourceId:first.id,targetId:other.id,label:'Association',direction:'unclear' as const,notes:'',replaces:null,removed:false}]};
+ const inspected:string[]=[];let closed=false;
+ const ui=await mount(()=> <AtlasNeighbourhood atlas={atlas} scope={{kind:'concept',id:first.id}} onClose={()=>{closed=true;}} onInspect={id=>inspected.push(id)} onDerivations={()=>{}} onLesson={()=>{}}/>);
+ try{
+  const click=async(label:string)=>act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent===label)!.click();});
+  await click('Neighbour topic');await click('Open map');
+  assert(ui.document.querySelector('section[role="dialog"]')!.getAttribute('aria-label')!.includes('Neighbour topic'));
+  await click('Notes & edit');assert.deepEqual(inspected,[other.id]);await click('← Back');
+  assert(ui.document.querySelector('section[role="dialog"]')!.getAttribute('aria-label')!.includes(first.title));
+  await click('Back to Atlas');assert.equal(closed,true);
+ }finally{await ui.close();}
+});
+
+
+test('shared derivation navigation explores another result without writing or dispatching an invalid learning target',async()=>{
+ const {ConceptDerivations}=await import('../components/concept-derivations.tsx');
+ const nodes=['foundation','first','second'].map(id=>({id:`n_${id}`,name:id,statement:`Precise ${id}`,aliases:[],provenance:[],createdAt:'2026-10-31'}));
+ const graph={nodes,propositions:nodes,chains:['first','second'].map(id=>({id:`arg_${id}`,premises:['n_foundation'],conclusion:`n_${id}`,provenance:[],createdAt:'2026-10-31'})),edges:[],logicalEdges:[],impLinks:[],sessions:{},fileSources:{},nodeSessions:{},clusters:[]};
+ let writes=0,calls=0;const concept={...snapshot.concepts[0]!,propositionIds:['n_first']};
+ const ui=await mount(()=> <ConceptDerivations concept={concept} graph={graph} save={async()=>{writes++;}} onClose={()=>{}} onLearn={()=>{calls++;}}/>);
+ try{
+  assert(!ui.document.body.textContent.includes('Linked claim'));
+  assert(ui.document.body.textContent.includes('3 shared claims'));
+  assert(![...ui.document.querySelectorAll('button')].some(b=>b.textContent==='Show all'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='first')!.click();});
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Show all')!.click();});
+  assert(![...ui.document.querySelectorAll('button')].some(b=>b.textContent==='Show all'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='second')!.click();});
+  assert(ui.document.querySelector('article')!.textContent.includes('Precise second'));
+  assert(![...ui.document.querySelectorAll('button')].some(b=>b.textContent==='Learn this step'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='first')!.click();});
+  assert([...ui.document.querySelectorAll('button')].some(b=>b.textContent==='Learn this step'));
+  assert.equal(writes,0);assert.equal(calls,0);
+ }finally{await ui.close();}
+});
+
+test('lesson review keeps two proposed proofs in one map and selects results without a derivation dropdown',async()=>{
+ const {LessonProposal}=await import('../components/lesson-integration.tsx'),{initialLesson}=await import('../src/core/learning-session.ts');
+ const {lessonSummary}=await import('../src/core/lesson-integration.ts');
+ const draft=lessonSummary.parse({overview:'Two results',map:initialLesson('Shared foundations'),concepts:[],propositions:['a','b','c'].map(key=>({key,name:key,statement:`Statement ${key}`,existingId:null,identityRationale:'',origin:'session',evidence:[],uncertainty:''})),arguments:['b','c'].map(key=>({key:`step_${key}`,premises:['a'],conclusion:key,rationale:`Why ${key} follows`,origin:'session',evidence:[],status:key==='c'?'gap':'inference',uncertainty:''})),derivations:['b','c'].map(key=>({key:`proof_${key}`,title:`Result ${key}`,topicId:'topic_0',start:`Start ${key}`,finish:`Finish ${key}`,root:key,propositions:['a',key],arguments:[`step_${key}`],concepts:[],include:true,gaps:key==='c'?['Needs an argument']:[],assistance:''}))});
+ const review={id:'lr_00000000-0000-4000-8000-000000000001',createdAt:'2026-10-31',draft,decisions:{},context:{propositions:[],concepts:[]}} as unknown as import('../src/core/lesson-integration.ts').LessonReview;
+ const ui=await mount(()=> <LessonProposal review={review} atlas={snapshot} graph={null} initialProofKey="proof_b"/>);
+ try{
+  assert(!ui.document.querySelector('select[aria-label="Choose derivation"]'));
+  assert(ui.document.body.textContent.includes('3 claims · 1 arguments'));
+  await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Result c')!.click();});
+  assert(ui.document.body.textContent.includes('Start c'));assert(ui.document.body.textContent.includes('Finish c'));
+  assert(ui.document.body.textContent.includes('Why c follows'));assert(ui.document.body.textContent.includes('GAP'));
+  assert(ui.document.body.textContent.includes('3 claims · 1 arguments'));
+ }finally{await ui.close();}
 });

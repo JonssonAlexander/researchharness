@@ -8,7 +8,7 @@ import {gzipSync,crc32,deflateSync} from "node:zlib";
 import {DatabaseSync,backup} from "node:sqlite";
 import {createFauxCore,fauxAssistantMessage,fauxToolCall} from "@earendil-works/pi-ai";
 import {createAtlasStore} from "../src/store/atlas.ts";
-import {mapDraft,validateMapDraft,projectMapDraft} from "../src/core/map-draft.ts";
+import {mapDraft,validateMapDraft,validateMapDraftCoverage,projectMapDraft} from "../src/core/map-draft.ts";
 import {draftFixture,draftEvidence} from "./fixtures/map-draft.ts";
 import type {MapFindings} from "../src/core/map-proposals.ts";
 
@@ -69,6 +69,34 @@ test("private projection is deterministic, preserves origin/direction and does n
 	assert.deepEqual(a,b);assert.equal(JSON.stringify(draft),before);assert(a.nodes.every(n=>Number.isFinite(n.x+n.y)&&n.id.startsWith("draft_")));
 	assert.equal(a.edges.length,1);draft.connections[0]!.direction="unclear";assert.equal(projectMapDraft(draft).semanticEdges.length,1);
 	draft.connections[0]!.direction="both";assert.equal(projectMapDraft(draft).edges.length,2);assert.equal(projectMapDraft(draft).nodes[1]!.color,"#e6b35a");
+});
+
+test("generation accounts for every reading and formula, while owner edits remain possible",()=>{
+	const source=structuredClone(reading),draft=structuredClone(draftFixture),formula="dX_t=\\theta(\\mu-X_t)dt+\\sigma dB_t";
+	source.concepts[0]!.formulas=[formula];
+	assert.match(validateMapDraftCoverage(draft,source)!,/Retain the first-reading formula/);
+	draft.concepts[0]!.notes[0]!.text=`Earlier, possibly incorrect reading: \\[${formula}\\]`;
+	assert.equal(validateMapDraftCoverage(draft,source),null);
+	draft.concepts[1]!.sourceKeys=[];
+	assert.match(validateMapDraftCoverage(draft,source)!,/Account for first-reading concept/);
+	// The strict coverage gate applies to model generation, not deliberate owner edits.
+	assert.equal(validateMapDraft(draft,source,[],1),null);
+});
+
+test("refinement retries omitted formulas, preserves the inventory and leaves prior records unchanged",async()=>{
+	const f=fixture(),source=structuredClone(reading),formula="dX_t=aX_tdt+bX_tdB_t";
+	source.concepts[0]!.formulas=[formula];source.concepts[0]!.notes=`\\[${formula}\\]`;
+	const service=createMapProposalService(f.store,()=>f.engine,async()=>source);
+	const parent=await service.generate(command(f),signal()),before=f.store.proposals.read(parent!.id),draft=structuredClone(draftFixture);
+	draft.concepts[0]!.notes[0]!.text=`Earlier reading: \\[${formula}\\]`;
+	f.faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("submit_map_draft",draftFixture),{stopReason:"toolUse"}),
+		fauxAssistantMessage(fauxToolCall("submit_map_draft",draft),{stopReason:"toolUse"}),
+	]);
+	const result=await service.generate(command(f,parent!.id),signal());
+	assert.equal(result?.status,"prepared");assert.equal(result?.usage?.steps,2);
+	assert(result?.draft?.concepts[0]!.notes[0]!.text.includes(formula));
+	assert.deepEqual(f.store.proposals.read(parent!.id),before);
 });
 
 test("failed and cancelled refinement preserve the reading; explicit retry retains separate attempts",async()=>{

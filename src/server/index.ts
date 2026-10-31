@@ -49,3 +49,10 @@ export * from "./model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
 export {mapReviewResponse} from "./map-review.ts";
+export {atlasSyncResponse,validateAtlasLearningContext,attachAtlasLearningContext} from "./atlas-sync.ts";
+
+export {getLesson,startLesson,lessonResponse} from "./learning-session.ts";
+
+export {lessonIntegrationResponse} from "./lesson-integration.ts";
+
+export {scratchpadResponse,scratchworkResponse} from "./scratchpad.ts";

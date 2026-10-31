@@ -1,3 +1,7 @@
+import {createLessonReviewStore,readLessonReviews} from "./lesson-integration.ts";
+import {drawingLink,drawingConnections} from "../core/atlas-drawing.ts";
+import {syncAssociation} from "../core/atlas-sync.ts";
+import {createAtlasSyncStore,readSyncRecord,syncHash} from "./atlas-sync.ts";
 import {mapConnection} from "../core/map-connections.ts";
 import {createMapReviewStore} from "./map-review.ts";
 import { createMapProposalStore } from "./map-proposals.ts";
@@ -53,7 +57,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 10)
+			if (version > 14)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -196,6 +200,34 @@ CREATE TABLE map_connections (
 ) STRICT;
 PRAGMA user_version=10; COMMIT;`);
 			}
+			if(version<11){
+				if(version===10)db.prepare("VACUUM INTO ?").run(`${file}.v10-${randomUUID()}.bak`);
+				db.exec(`BEGIN IMMEDIATE;
+ALTER TABLE mindmaps ADD COLUMN subjectId TEXT REFERENCES subjects(id) ON DELETE SET NULL;
+CREATE TABLE atlas_sync_reviews (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record)), contentHash TEXT NOT NULL) STRICT;
+CREATE TABLE atlas_learning_sessions (chatId TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record)), contentHash TEXT NOT NULL) STRICT;
+PRAGMA user_version=11; COMMIT;`);
+			}
+			if(version<12){
+				// v11 was observed by the live development owner during this change.
+				// Keep that upgrade recoverable rather than editing a consumed migration.
+				if(version===11)db.prepare("VACUUM INTO ?").run(`${file}.v11-${randomUUID()}.bak`);
+				db.exec(`BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS atlas_associations (id TEXT PRIMARY KEY, sourceId TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE, targetId TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE, record TEXT NOT NULL CHECK(json_valid(record)), contentHash TEXT NOT NULL) STRICT;
+CREATE UNIQUE INDEX IF NOT EXISTS one_lesson_source ON atlas_sync_reviews(json_extract(record,'$.sourceId'),json_extract(record,'$.sourceHash')) WHERE json_extract(record,'$.kind')='lesson' AND json_extract(record,'$.status')='committed';
+PRAGMA user_version=12; COMMIT;`);
+			}
+            if(version<13){
+                if(version===12)db.prepare("VACUUM INTO ?").run(`${file}.v12-${randomUUID()}.bak`);
+                db.exec("BEGIN IMMEDIATE");
+                try {db.exec(`ALTER TABLE atlas_views ADD COLUMN emphasis TEXT CHECK(emphasis IS NULL OR json_valid(emphasis));
+CREATE TABLE atlas_drawing_links (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record)), contentHash TEXT NOT NULL) STRICT;
+PRAGMA user_version=13; COMMIT;`);}catch(error){db.exec("ROLLBACK");throw error;}
+            }
+            if(version<14){
+                if(version===13)db.prepare("VACUUM INTO ?").run(`${file}.v13-${randomUUID()}.bak`);
+                db.exec("BEGIN IMMEDIATE");try{db.exec(`CREATE TABLE lesson_reviews (id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),contentHash TEXT NOT NULL) STRICT; PRAGMA user_version=14; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
+            }
 			return run(db);
 		} finally {
 			db.close();
@@ -319,10 +351,10 @@ PRAGMA user_version=10; COMMIT;`);
 		if (versions.length !== 1 || !Number.isSafeInteger(layoutRevision) || layoutRevision < 0)
 			throw new AtlasError("Invalid Atlas layout version.", 500);
 		const views = db.prepare("SELECT * FROM atlas_views ORDER BY rowid").all().map(row => {
-			const {revision: savedRevision, ...input} = row;
+			const {revision: savedRevision, emphasis, ...input} = row;
 			if (!Number.isSafeInteger(savedRevision) || Number(savedRevision) < 1)
 				throw new AtlasError("Invalid saved view revision.", 500);
-			const parsed = atlasViewInput.parse({...input, camera: JSON.parse(String(row.camera)), kind: "view", expectedRevision: savedRevision});
+			const parsed = atlasViewInput.parse({...input, camera: JSON.parse(String(row.camera)), ...(emphasis===null?{}:{emphasis:JSON.parse(String(emphasis))}), kind: "view", expectedRevision: savedRevision});
 			const {kind: _kind, expectedRevision, ...fields} = parsed;
 			return {...fields, revision: expectedRevision};
 		});
@@ -335,11 +367,21 @@ PRAGMA user_version=10; COMMIT;`);
 			if(c.id!==row.id||c.proposalId!==row.proposalId||c.connectionKey!==row.connectionKey||c.sourceRevision!==row.sourceRevision||c.sourceId!==row.sourceId||c.targetId!==row.targetId||digest(JSON.stringify(c))!==row.contentHash||!mindmaps.some(m=>m.captures.some(r=>r.id===c.sourceRevision&&r.hash===c.sourceHash)))throw new AtlasError("Broken mind-map connection provenance.",409);
 			return c;
 		});
-		return { subjects, concepts, relations, layoutRevision, views, mindmaps, conceptReviews,mapConnections };
+		const associations=db.prepare("SELECT * FROM atlas_associations ORDER BY rowid").all().map(row=>{const r=syncAssociation.parse(JSON.parse(String(row.record)));if(r.id!==row.id||r.sourceId!==row.sourceId||r.targetId!==row.targetId||syncHash(r)!==row.contentHash)throw new AtlasError("Association changed outside Atlas.",409);return r;});
+		const learningEvidence=db.prepare("SELECT id FROM atlas_sync_reviews WHERE json_extract(record,'$.kind')='lesson' AND json_extract(record,'$.status')='committed'").all().flatMap(row=>{const r=readSyncRecord(db,String(row.id))!;return r.findings!.observations.filter((_,i)=>!r.approval!.choices.observations||r.approval!.choices.observations.includes(i)).map(o=>({...o,chatId:r.sourceId,outcome:r.approval!.choices.outcome,at:r.approval!.committedAt}));});
+		const drawingLinks=db.prepare("SELECT * FROM atlas_drawing_links ORDER BY rowid").all().map(row=>{
+            const link=drawingLink.parse(JSON.parse(String(row.record)));
+            if(link.id!==row.id||digest(JSON.stringify(link))!==row.contentHash)throw new AtlasError("Drawing link changed outside Atlas.",409);
+            return link;
+        });
+        const lessonReviews=readLessonReviews(db),lessonMaps=lessonReviews.filter((r,i,list)=>r.status==="committed"&&!list.slice(0,i).some(p=>p.chatId===r.chatId&&p.status==="committed")).map(r=>r.plan!.artifact),hiddenPropositionIds=[...new Set(lessonReviews.filter(r=>r.status==="applying"||r.status==="committed").flatMap(r=>r.plan?.artifact.newPropositionIds??[]))];
+        return { subjects, concepts, relations, layoutRevision, views, mindmaps, conceptReviews,mapConnections,associations,learningEvidence,drawingLinks,lessonMaps,hiddenPropositionIds };
 	}
 	const mindmaps = createMindmapStore(database, path.dirname(file));
 	const proposals=createMapProposalStore(database,mindmaps);
 	return {
+		lessonReviews:createLessonReviewStore(database,snapshot,writeNote),
+		sync:createAtlasSyncStore(database,snapshot,writeNote),
 		mindmaps,
 		proposals,
 		reviews:createMapReviewStore(database,proposals,snapshot,writeNote,revision=>{mindmaps.asset(revision,"original");}),
@@ -350,6 +392,36 @@ PRAGMA user_version=10; COMMIT;`);
 				db.exec("BEGIN IMMEDIATE");
 				try {
 					const current = snapshot(db);
+					if(command.kind==="drawing-link"){
+                        if(command.expectedRevision!==current.layoutRevision)throw new AtlasError("Atlas changed. Reload before editing this line.",409);
+                        const {kind:_kind,expectedRevision:_version,...link}=command;
+                        if(![link.sourceId,link.targetId].every(id=>current.concepts.some(c=>c.id===id)))throw new AtlasError("A linked concept no longer exists.",409);
+                        const previous=current.drawingLinks?.find(c=>c.id===link.id);
+                        if(previous&&previous.replaces!==link.replaces)throw new AtlasError("A source reference cannot be replaced.",409);
+                        if(link.replaces){
+                            if(![...current.mapConnections??[],...current.associations??[]].some(c=>c.id===link.replaces))throw new AtlasError("Source line no longer exists. Reopen its current drawing.",409);
+                            if(current.drawingLinks?.some(c=>c.replaces===link.replaces&&c.id!==link.id))throw new AtlasError("This source line already has an edit. Reload it.",409);
+                        }
+                        const candidate={...current,drawingLinks:[...(current.drawingLinks??[]).filter(c=>c.id!==link.id),link]};
+                        if(!link.removed&&drawingConnections(candidate).some(c=>c.id!==link.id&&c.sourceId===link.sourceId&&c.targetId===link.targetId&&c.label===link.label&&c.direction===link.direction))throw new AtlasError("That line already exists. Edit the existing line.",409);
+                        if(previous)db.prepare("INSERT INTO atlas_archive VALUES ('drawing-link-revision',?,?,?)").run(randomUUID(),JSON.stringify(previous),new Date().toISOString());
+                        const record=JSON.stringify(link);
+                        db.prepare("INSERT INTO atlas_drawing_links VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record,contentHash=excluded.contentHash").run(link.id,record,digest(record));
+                        db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");return;
+                    }
+                    if(command.kind==="association-delete"){
+						const row=current.associations?.find(a=>a.id===command.id);if(!row||command.expectedRevision!==current.layoutRevision)throw new AtlasError("Association changed. Reload before removing it.",409);
+						db.prepare("INSERT INTO atlas_archive VALUES ('association',?,?,?)").run(row.id,JSON.stringify(row),new Date().toISOString());db.prepare("DELETE FROM atlas_associations WHERE id=?").run(row.id);db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");return;
+					}
+					if(command.kind==="map-subject"){
+						const map=current.mindmaps?.find(m=>m.id===command.id);if(!map||map.archived||map.revision!==command.expectedRevision)throw new AtlasError("Map changed. Reload before assigning its subject.",409);
+						if(!!command.subjectId===!!command.newSubject)throw new AtlasError("Choose an existing or new subject.");
+						let subjectId=command.subjectId;
+						if(command.newSubject){if(current.subjects.some(s=>s.title.toLowerCase()===command.newSubject!.title.toLowerCase()))throw new AtlasError("That subject exists. Select it instead.",409);subjectId=`as_${randomUUID()}`;db.prepare("INSERT INTO subjects(id,title,color,parentId,revision,x,y,locked) VALUES (?,?,?,NULL,1,?,0,0)").run(subjectId,command.newSubject.title,command.newSubject.color,current.subjects.length*520);}
+						else if(!current.subjects.some(s=>s.id===subjectId))throw new AtlasError("Subject no longer exists.",409);
+						for(const id of map.captures.find(c=>c.id===map.currentRevision)!.conceptIds){const concept=current.concepts.find(c=>c.id===id);if(!concept)continue;if(!concept.subjectIds.includes(subjectId!)){db.prepare("INSERT INTO concept_subjects VALUES (?,?)").run(id,subjectId);db.prepare("UPDATE concepts SET preferredSubjectId=COALESCE(preferredSubjectId,?),revision=revision+1 WHERE id=?").run(subjectId,id);}}
+						db.prepare("UPDATE mindmaps SET subjectId=?,revision=revision+1 WHERE id=?").run(subjectId,map.id);db.exec("UPDATE atlas_layout_version SET revision=revision+1; COMMIT");return;
+					}
 					if (command.kind === "view" || command.kind === "view-delete") {
 						const previous = current.views?.find(v => v.id === command.id);
 						if ((previous?.revision ?? 0) !== command.expectedRevision)
@@ -364,9 +436,10 @@ PRAGMA user_version=10; COMMIT;`);
 								throw new AtlasError("Keep at most 100 saved views. Remove one before saving another.");
 							if (current.views?.some(v => v.id !== command.id && v.title.toLowerCase() === command.title.toLowerCase()))
 								throw new AtlasError("A view with this name already exists.", 409);
-							db.prepare(`INSERT INTO atlas_views VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, camera=excluded.camera, query=excluded.query`)
-								.run(command.id, command.title, command.expectedRevision+1, JSON.stringify(command.camera), command.query);
+							if(command.emphasis&&Object.keys(command.emphasis).some(id=>!current.concepts.some(c=>c.id===id)))throw new AtlasError("An emphasised concept no longer exists.",409);
+                            db.prepare(`INSERT INTO atlas_views VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, camera=excluded.camera, query=excluded.query, emphasis=excluded.emphasis`)
+								.run(command.id, command.title, command.expectedRevision+1, JSON.stringify(command.camera), command.query,command.emphasis?JSON.stringify(command.emphasis):null);
 						}
 						db.exec("COMMIT");
 						return;
@@ -430,7 +503,7 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, 
 										.prepare("SELECT record FROM relation_revisions WHERE id=? ORDER BY revision")
 										.all(command.id)
 										.map((r) => JSON.parse(String(r.record)))
-								: (current.mapConnections??[]).filter(c=>c.sourceId===command.id||c.targetId===command.id);
+								: [...(current.mapConnections??[]),...(current.associations??[]),...(current.drawingLinks??[])].filter(c=>c.sourceId===command.id||c.targetId===command.id);
 						db.prepare("INSERT INTO atlas_archive VALUES (?, ?, ?, ?)").run(
 							kind,
 							command.id,
@@ -443,7 +516,9 @@ ON CONFLICT(id) DO UPDATE SET title=excluded.title, revision=excluded.revision, 
 						} else {
 							db.prepare("DELETE FROM concept_subjects WHERE conceptId=?").run(command.id);
 							db.prepare("DELETE FROM concept_propositions WHERE conceptId=?").run(command.id);
-							db.prepare("DELETE FROM concepts WHERE id=?").run(command.id);
+							db.prepare("DELETE FROM atlas_drawing_links WHERE json_extract(record,'$.sourceId')=? OR json_extract(record,'$.targetId')=?").run(command.id,command.id);
+                            for(const view of current.views??[])if(view.emphasis?.[command.id]){const emphasis={...view.emphasis};delete emphasis[command.id];db.prepare("UPDATE atlas_views SET emphasis=?,revision=revision+1 WHERE id=?").run(JSON.stringify(emphasis),view.id);}
+                            db.prepare("DELETE FROM concepts WHERE id=?").run(command.id);
 						}
 					} else if (command.kind === "relation") {
 						if (db.prepare("SELECT id FROM atlas_archive WHERE kind='relation' AND id=?").get(command.id))

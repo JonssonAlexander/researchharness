@@ -1,15 +1,21 @@
 "use client";
+import {LessonScratchwork} from "./lesson-scratchwork";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-	visibleMapConnections,
+	drawingConnections,
 	type AtlasCommand,
+ type AtlasMapScope,
 	type AtlasPathFocus,
 	type AtlasConcept,
 	type AtlasSnapshot,
 	type AtlasSubject,
 	type GraphNode,
 } from "@/src/core";
+import {LessonMaps} from "./lesson-integration";
+import {AtlasAssociations} from "./atlas-associations";
+import {AtlasArrange,type ArrangementPosition} from "./atlas-arrange";
+import type {LearningContext} from "@/src/core";
 import { AtlasMindmaps } from "./atlas-mindmaps";
 import { AtlasViews, type AtlasViewActions } from "./atlas-views";
 import { AtlasDemo } from "./atlas-demo";
@@ -73,7 +79,7 @@ export function AtlasPanel({
 	propositions,
 	onFocus,
 	onRelax,
-	viewActions,
+	onDerivations,onEditLinks,viewActions,onMapFocus,focusedMapId,onArrangePreview,onLearn,onOpenMap,
 }: {
 	atlas: ReturnType<typeof useAtlas>;
 	selectedId: string | null;
@@ -82,8 +88,9 @@ export function AtlasPanel({
 	propositions: GraphNode[];
 	onFocus?: (focus: AtlasPathFocus | null) => void;
 	onRelax?: (subjectId: string | null) => void;
-	viewActions?: AtlasViewActions;
+	onOpenMap?:(scope:AtlasMapScope)=>void;onDerivations?:(id:string)=>void;onEditLinks?:(source:string,target:string)=>void;viewActions?: AtlasViewActions;onMapFocus?:(id:string|null,center?:boolean)=>void;focusedMapId?:string|null;onArrangePreview?:(p:ArrangementPosition[]|null)=>void;onLearn?:(context:LearningContext,title:string)=>void;
 }) {
+	const [mapsGrid,setMapsGrid]=useState(false);
 	const [editing, setEditing] = useState<Extract<AtlasCommand, { kind: "concept" | "subject" }> | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -152,7 +159,7 @@ export function AtlasPanel({
 	return (
 		<aside
 			aria-label="Atlas concepts"
-			className="lh-no-drag absolute bottom-36 right-3 top-14 z-20 flex w-80 max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-card/95 p-3 shadow-xl backdrop-blur"
+			className={`lh-no-drag absolute bottom-36 right-3 top-14 z-20 flex ${mapsGrid?"w-[64rem]":"w-80"} max-w-[calc(100%-1.5rem)] flex-col rounded-xl border bg-card/95 p-3 shadow-xl backdrop-blur`}
 		>
 			<div className="mb-3 flex items-center justify-between text-sm font-medium">
 				<span>Atlas</span>
@@ -166,9 +173,11 @@ export function AtlasPanel({
 						{atlas.error}
 					</p>
 				)}
+				<LessonMaps atlas={atlas.snapshot}/>
 				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
-				{selectedId&&atlas.snapshot.conceptReviews?.[selectedId]?.length&&<div className="rounded border border-amber-500/40 p-2 text-xs"><p className="font-medium text-amber-600">● Source notes need review</p>{atlas.snapshot.conceptReviews[selectedId]!.map(r=><p key={r}>{r}</p>)}<p className="mt-1 text-muted-foreground">Acceptance does not establish mathematical validity or your understanding.</p></div>}
-				<AtlasMindmaps snapshot={atlas.snapshot} selectedId={selectedId} refresh={atlas.refresh} />
+				{selectedId&&atlas.snapshot.conceptReviews?.[selectedId]?.length&&<div className="rounded border border-amber-500/40 p-2 text-xs"><p className="font-medium text-amber-600">● Source notes need review</p>{atlas.snapshot.conceptReviews[selectedId]!.map(r=><p key={r}>{r}</p>)}<p className="mt-1 text-muted-foreground">Upper amber dot: source or mathematical review needed. Lower blue/green dot: self-reported learning evidence, not verified mastery.</p></div>}
+				<AtlasMindmaps snapshot={atlas.snapshot} selectedId={selectedId} refresh={atlas.refresh} save={atlas.save} focusedMapId={focusedMapId} onMapFocus={onMapFocus} onGridChange={setMapsGrid}/>
+				{onArrangePreview&&<AtlasArrange atlas={atlas.snapshot} mapId={focusedMapId??null} conceptId={selectedId} save={atlas.save} onPreview={onArrangePreview}/>}
 				{editing ? (
 					<form
 						className="space-y-3"
@@ -458,8 +467,9 @@ export function AtlasPanel({
 								New subject
 							</button>
 						</div>
-						<AtlasDemo snapshot={atlas.snapshot} save={atlas.save} />
-						<AtlasQuery
+						{onOpenMap&&atlas.snapshot.subjects.length>0&&<div className="flex flex-wrap gap-2" aria-label="Subject maps">{atlas.snapshot.subjects.map(s=><button type="button" key={s.id} className={button} style={{borderColor:s.color}} onClick={()=>onOpenMap({kind:"subject",id:s.id})}>{s.title} ↗</button>)}</div>}
+                        <AtlasDemo snapshot={atlas.snapshot} save={atlas.save} />
+						<AtlasQuery mapId={focusedMapId}
 							snapshot={atlas.snapshot}
 							selectedId={selectedId}
 							onSelect={onSelect}
@@ -469,14 +479,23 @@ export function AtlasPanel({
 							<section className="space-y-2 border-b pb-3 text-xs">
 								<div className="text-muted-foreground">Concept</div>
 								<h2 className="text-sm font-medium">{selected.title}</h2>
+ {onOpenMap&&<button type="button" className={button} onClick={()=>onOpenMap({kind:"concept",id:selected.id})}>Open map</button>}
+ {onDerivations&&<button type="button" className={button} onClick={()=>onDerivations(selected.id)}>Derivations{(()=>{const count=atlas.snapshot.lessonMaps?.flatMap(m=>m.derivations).filter(d=>d.conceptIds.includes(selected.id)).length;return count?` · ${count}`:"";})()}</button>}
+                                {viewActions?.setEmphasis&&<label className="my-2 block text-xs">Node size · current view<select className={field} value={viewActions.emphasis?.[selected.id]??"normal"} onChange={e=>viewActions.setEmphasis?.(selected.id,e.target.value as "small"|"normal"|"prominent")}><option value="small">Small · 1</option><option value="normal">Normal · 2</option><option value="prominent">Prominent · 3</option></select><span className="text-muted-foreground">Hold 1, 2 or 3 and click a node. Save or update a view to keep this emphasis.</span></label>}
+                                {onEditLinks&&<label className="my-2 block text-xs">Edit / add a connection<select className={field} value="" onChange={e=>{if(e.target.value)onEditLinks(selected.id,e.target.value);}}><option value="">Choose another concept…</option>{atlas.snapshot.concepts.filter(c=>c.id!==selected.id).map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select><span className="text-muted-foreground">You can also click a line or Shift-drag between nodes.</span></label>}
 								{selected.aliases.length > 0 && (
 									<p className="text-muted-foreground">{selected.aliases.join(", ")}</p>
 								)}
-								{visibleMapConnections(atlas.snapshot).some(c=>c.sourceId===selected.id||c.targetId===selected.id)&&<details><summary>Mind-map associations · dotted lines</summary><p className="text-muted-foreground">Source connections, not mathematical implications.</p>{visibleMapConnections(atlas.snapshot).filter(c=>c.sourceId===selected.id||c.targetId===selected.id).map(c=><div key={c.id} className="mt-2 rounded border p-2"><button type="button" className="underline" onClick={()=>onSelect(c.sourceId===selected.id?c.targetId:c.sourceId)}>{atlas.snapshot.concepts.find(n=>n.id===(c.sourceId===selected.id?c.targetId:c.sourceId))?.title}</button>{c.label&&<MessageResponse mode="static">{c.label}</MessageResponse>}<p className="text-muted-foreground">{atlas.snapshot.mindmaps?.find(m=>m.captures.some(r=>r.id===c.sourceRevision))?.title} · {c.direction==="unclear"?"Direction unclear":"Direction recorded in source"}</p>{c.uncertainty&&<p className="text-amber-600">{c.uncertainty}</p>}</div>)}</details>}
+								{onLearn&&<div className="my-3 flex flex-wrap gap-1">{(["explain","derive","proof","practice"] as const).map(goal=><button type="button" className={button} key={goal} onClick={()=>onLearn({conceptIds:[selected.id],goal},`${goal==="proof"?"Help me identify a precise result and reconstruct its proof about":goal==="derive"?"Help me derive the main results about":goal==="practice"?"Test my independent reasoning about":"Help me understand"} ${selected.title}. Start with what I can explain myself; retain assumptions, hints and open questions.`)}>{goal==="proof"?"Complete a proof":goal[0]!.toUpperCase()+goal.slice(1)}</button>)}</div>}
+							{atlas.snapshot.learningEvidence?.some(e=>e.conceptId===selected.id)&&<details className="my-2 rounded border p-2 text-xs"><summary>Learning evidence · blue/green lower dot · self-reported</summary>{atlas.snapshot.learningEvidence?.filter(e=>e.conceptId===selected.id).map((e,i)=><div key={i} className="mt-2"><a className="underline" href={`/chat/${e.chatId}`}>{new Date(e.at).toLocaleDateString()} · Self-reported: {e.outcome.replaceAll("-"," ")}</a><MessageResponse mode="static">{e.evidence}</MessageResponse><p>Assistance: {e.assistance||"Not established"}</p></div>)}</details>}
+							<AtlasAssociations snapshot={atlas.snapshot} conceptId={selected.id} save={atlas.save} onSelect={onSelect} onLearn={onLearn}/>
+                            {drawingConnections(atlas.snapshot).some(c=>c.sourceId===selected.id||c.targetId===selected.id)&&<details><summary>Ordinary connections · dotted lines</summary><p className="text-muted-foreground">Drawing associations, not mathematical implications.</p>{drawingConnections(atlas.snapshot).filter(c=>c.sourceId===selected.id||c.targetId===selected.id).map(c=><div key={c.id} className="mt-2 rounded border p-2"><button type="button" className="underline" onClick={()=>onSelect(c.sourceId===selected.id?c.targetId:c.sourceId)}>{atlas.snapshot.concepts.find(n=>n.id===(c.sourceId===selected.id?c.targetId:c.sourceId))?.title}</button>{c.label&&<MessageResponse mode="static">{c.label}</MessageResponse>}<p className="text-muted-foreground">{c.direction==="unclear"?"Undirected / unclear":c.direction==="both"?"Both ways":"From → To"}</p>{onEditLinks&&<button type="button" className={button} onClick={()=>onEditLinks(c.sourceId,c.targetId)}>Edit connection</button>}</div>)}</details>}
 								{selected.markdown && <MessageResponse mode="static">{selected.markdown}</MessageResponse>}
+ <LessonScratchwork maps={atlas.snapshot.lessonMaps??[]} conceptId={selected.id}/>
 								<AtlasRelations
 									key={selected.id}
 									conceptId={selected.id}
+									onLearn={onLearn}
 									snapshot={atlas.snapshot}
 									save={atlas.save}
 									onSelect={onSelect}

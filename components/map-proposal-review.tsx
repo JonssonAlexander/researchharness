@@ -2,7 +2,7 @@
 
 import {useCallback,useEffect,useRef,useState} from "react";
 import {createPortal} from "react-dom";
-import {isSubscriptionModel,mapImageLabel,type AtlasSnapshot,type Mindmap,type MindmapCapture,type MapFindings,type ProposalView} from "@/src/core";
+import {isSubscriptionModel,mapImageLabel,MAP_CONTEXT_LIMIT,MAP_MODEL_TIMEOUT_MS,type AtlasSnapshot,type Mindmap,type MindmapCapture,type MapFindings,type ProposalView} from "@/src/core";
 import {MessageResponse} from "./ai-elements/message";
 import {useBackdropDismiss} from "./backdrop-dismiss";
 import {useServerEvent,useServerResync} from "./server-events";
@@ -117,7 +117,7 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 		<section aria-label="Interpretation proposal" className="space-y-4 overflow-y-auto p-5 text-sm">
 			{proposal?.status==="prepared"&&proposal.findings&&onRefine&&<div className="space-y-3 rounded-xl border border-blue-500/30 p-4">
 				<h3 className="font-medium">Build a proposed mind map</h3>
-				<p className="text-xs leading-relaxed text-muted-foreground">A second pass sends this saved reading, source images and linked concept names to {model??"your vision model"}. It proposes coherent notes and connections, separating source readings, reconstructions and added explanations. Up to two model calls; nothing is added to Atlas.</p>
+				<p className="text-xs leading-relaxed text-muted-foreground">A second pass sends this saved reading, source images and up to {MAP_CONTEXT_LIMIT} linked concept names to {model??"your vision model"}. It proposes coherent notes and connections, separating source readings, reconstructions and added explanations. Up to two model calls within {MAP_MODEL_TIMEOUT_MS/60000} minutes; nothing is added to Atlas.</p>
 				<button type="button" className={button} disabled={!model||busy} onClick={onRefine}>Refine into proposed map</button>
 			</div>}
 			{error&&<p role="alert" className="rounded-lg border border-destructive/40 p-3 text-xs text-destructive">{error}</p>}
@@ -128,14 +128,14 @@ export function ProposalReviewBody({proposal,capture,snapshot,model,loaded,busy,
 			{proposal?.error&&<p className="rounded-lg border p-3 text-xs">{proposal.error}</p>}
 			{(!proposal||!proposal.refinement&&proposal.status!=="running") && <div className="space-y-3 rounded-xl border p-4">
 				<h3 className="font-medium">Interpret this saved revision</h3>
-				<p className="text-xs leading-relaxed text-muted-foreground">A whole-map overview and overlapping detail images (or your supplied PNG), plus names/aliases of up to 40 linked concepts will be sent to {model??"your configured vision model"}. Uses up to two model calls. Original files stay unchanged.</p>
+				<p className="text-xs leading-relaxed text-muted-foreground">A whole-map overview and overlapping detail images (or your supplied PNG), plus names/aliases of up to {MAP_CONTEXT_LIMIT} linked concepts will be sent to {model??"your configured vision model"}. Uses up to two model calls within {MAP_MODEL_TIMEOUT_MS/60000} minutes. Original files stay unchanged.</p>
 				<button type="button" className={button} disabled={!loaded||!model||busy} onClick={onGenerate}>{busy?"Interpreting…":proposal?.status==="prepared"?"Reinterpret with map layout":proposal?"Try interpretation again":"Interpret revision"}</button>
 
 				{proposal&&<p className="text-xs text-muted-foreground">A new attempt preserves earlier results and may use additional plan allowance or API credits.</p>}
 			</div>}
 			{proposal?.refinement&&(proposal.status==="failed"||proposal.status==="cancelled")&&onRefine&&<div className="space-y-2 rounded-xl border p-4"><p className="text-xs text-muted-foreground">Retry refinement with {model??"your vision model"} using the retained first reading and source images. This starts a new attempt and may use additional plan allowance or API credits.</p><button type="button" className={button} disabled={!model||busy} onClick={onRefine}>Retry refinement</button></div>}
 			{busy&&<button type="button" className={button} onClick={onCancel}>Cancel current attempt</button>}
-			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?"Source views captured. Waiting for the model’s suggestions (up to 5 minutes)…":"Preparing whole-map and detail views locally…"}</p>}
+			{(busy||proposal?.status==="running")&&<p role="status" className="animate-pulse text-xs text-muted-foreground">{proposal?.images.length?`Source views captured. Waiting for the model’s suggestions (up to ${MAP_MODEL_TIMEOUT_MS/60000} minutes)…`:"Preparing whole-map and detail views locally…"}</p>}
 			{findings&&<>
 				<div><h3 className="font-medium">Labels and concepts <span className="text-muted-foreground">{findings.concepts.length}</span></h3>
 					<div className="mt-2 space-y-2">{findings.concepts.map(c=><article key={c.key} className="space-y-2 rounded-xl border p-3">

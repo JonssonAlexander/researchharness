@@ -1,4 +1,10 @@
 "use client";
+import {LessonScratchpad} from "./lesson-scratchpad";
+import Image from "next/image";
+import {LessonIntegrationReview} from "./lesson-integration";
+import {LessonWorkspace} from "./lesson-workspace";
+import {lessonScratchTarget,type LearningSession} from "@/src/core";
+import {LessonAtlasReview} from "./atlas-sync-review";
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
@@ -216,9 +222,11 @@ export function Chat({
 	initiallyInFlight,
 	initiallyCompacting = false,
 	initialConfigured = false,
+ initialLearning=null,
 	kind = "teach",
 }: {
 	chatId: string;
+ initialLearning?:LearningSession|null;
 	title: string;
 	initialMessages: LhMessage[];
 	/** Memory-only settlement notice supplied on reopening. */
@@ -244,6 +252,9 @@ export function Chat({
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
+ const [lesson,setLesson]=useState<LearningSession|null>(initialLearning);
+ const [lessonReviewOpen,setLessonReviewOpen]=useState(false);
+ const [scratchpadOpen,setScratchpadOpen]=useState(false);
 	const reattachSettledRef = useRef<() => void>(() => {});
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
@@ -711,9 +722,9 @@ export function Chat({
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
-			composerInputRef.current?.focus();
+			if(!scratchpadOpen)composerInputRef.current?.focus();
 		}
-	}, [dictation.active]);
+	}, [dictation.active,scratchpadOpen]);
 
 	// Jobs never gate the composer (contracts.ts "THE ASYNC PROTOCOL" §4): job
 	// tools resolve with an ack mid-turn, so the learner can interject while
@@ -1266,8 +1277,9 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-		<div className="flex h-dvh">
-			<div className="flex min-w-0 flex-1 flex-col">
+        <div className={lesson&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
+ {lesson&&!scratchpadOpen&&<LessonWorkspace chatId={chatId} lesson={lesson} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
 				    bottom outline (border-b border-border) matches the one that
@@ -1342,6 +1354,8 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					{lesson&&<button type="button" className="lh-no-drag shrink-0 rounded border px-3 py-1.5 text-xs hover:bg-accent" onClick={()=>setScratchpadOpen(true)}>Scratchpad</button>}
+					{lesson?<LessonIntegrationReview chatId={chatId} open={lessonReviewOpen} onOpenChange={setLessonReviewOpen}/>:<LessonAtlasReview chatId={chatId}/>}
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1368,7 +1382,7 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
-					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{kind !== "practice" && !lesson && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (
@@ -1382,7 +1396,7 @@ export function Chat({
 							Practice
 						</span>
 					) : (
-						<PhaseChip phase={phases.at(-1) ?? "probe"} />
+						lesson?<span className="text-xs uppercase text-muted-foreground">Learning</span>:<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
 				</TopBar>
 
@@ -1395,7 +1409,7 @@ export function Chat({
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
 									title="New session"
-									description="The teacher will open by probing what you already know."
+									description={lesson?"Start conceptually, explore the lesson map, and work through selected derivations.":"The teacher will open by probing what you already know."}
 								/>
 							)}
 
@@ -1508,6 +1522,7 @@ export function Chat({
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
+{m.parts.filter(p=>p.type==="data-scratchpad").map(p=>{const a=p.data as {attemptId:string;hasImage:boolean};return a.hasImage?<a key={a.attemptId} href={`/api/chats/${chatId}/scratchpad?image=${a.attemptId}`} target="_blank" rel="noreferrer"><Image alt="Submitted scratchpad attempt" src={`/api/chats/${chatId}/scratchpad?image=${a.attemptId}`} width={1200} height={700} unoptimized className="mt-2 max-h-80 w-full rounded border object-contain bg-white"/></a>:null;})}
 												</div>
 											</div>
 									) : (
@@ -1687,7 +1702,7 @@ export function Chat({
 					requiresReveal={requiresReveal}
 					readingThinking={readingThinking}
 					onReadingThinking={applyReadingThinking}
-					phase={phases.at(-1) ?? "probe"}
+					phase={lesson?"teach":phases.at(-1) ?? "probe"}
 					turns={turns}
 					contextTokens={contextTokens}
 					pricing={pricing}
@@ -1772,6 +1787,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+		{lesson&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${lessonScratchTarget(lesson).id}`} chatId={chatId} lesson={lesson} busy={busy} onClose={()=>setScratchpadOpen(false)} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>

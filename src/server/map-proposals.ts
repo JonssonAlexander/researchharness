@@ -1,8 +1,8 @@
 import {z} from "zod";
 import {AtlasError,type AtlasStore} from "../core/atlas.ts";
 import {mindmapRevisionId} from "../core/mindmaps.ts";
-import {mapReadingFindings,validateMapFindings,type MapProposal,type ProposalView} from "../core/map-proposals.ts";
-import {mapDraft,validateMapDraft} from "../core/map-draft.ts";
+import {mapReadingFindings,validateMapFindings,deferMapIdentityMatches,MAP_CONTEXT_LIMIT,MAP_MODEL_TIMEOUT_MS,type MapProposal,type ProposalView} from "../core/map-proposals.ts";
+import {mapDraft,validateMapDraft,validateMapDraftCoverage} from "../core/map-draft.ts";
 import {refineMap} from "../agent/subagents/map-refinement.ts";
 import {wholeMapRegion,mapImageLayout} from "../core/map-images.ts";
 import {accumulateJobUsage,piUsageToStep,type JobUsage} from "../core/contracts.ts";
@@ -10,6 +10,7 @@ import {resolveSlot} from "../core/settings-resolution.ts";
 import {emit} from "../core/events.ts";
 import {piEngineForSpec,type PiEngine} from "../agent/models.ts";
 import {interpretMap} from "../agent/subagents/map-interpretation.ts";
+import {SubmitProposalError} from "../agent/subagents/submit-agent.ts";
 import {stores} from "./stores.ts";
 import {exportRnoteImages,validateMindmapPng} from "./rnote.ts";
 import {readSourceBody} from "./mindmaps.ts";
@@ -23,7 +24,7 @@ function configuredEngine() {
 	if(!engine.model.input.includes("image"))throw new AtlasError("The selected vision model does not accept images. Choose an image-capable model.",422);
 	return engine;
 }
-export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine=configuredEngine,interpret=interpretMap,exportImages=exportRnoteImages,modelDeadline=()=>AbortSignal.timeout(300000),refine=refineMap) {
+export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine=configuredEngine,interpret=interpretMap,exportImages=exportRnoteImages,modelDeadline=()=>AbortSignal.timeout(MAP_MODEL_TIMEOUT_MS),refine=refineMap) {
 	const view=(p:MapProposal|null):ProposalView|null=>p?{...p,estimatedCost:jobCost({usage:p.usage as JobUsage|undefined})}:null;
 	return {
 		read:(revision:string,id?:string)=>{
@@ -53,7 +54,7 @@ export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine
 			let record:MapProposal={schemaVersion:parent?3:2,...(parent?{refinement:{parentId:parent.id,parentDigest:parent.digest!},draft:null}:{}),id:c.id,sourceRevision:c.sourceRevision,sourceHash:capture.hash,
 				baseRevision:saved.layoutRevision??0,context:capture.conceptIds.flatMap(id=>{
 					const n=saved.concepts.find(n=>n.id===id);return n?[{id:n.id,title:n.title,aliases:n.aliases.slice(0,10),revision:n.revision}]:[];
-				}).slice(0,40),model,status:"running",images:[],imageLayout:[],findings:null,digest:null,createdAt:at,updatedAt:at,error:null};
+				}).slice(0,MAP_CONTEXT_LIMIT),model,status:"running",images:[],imageLayout:[],findings:null,digest:null,createdAt:at,updatedAt:at,error:null};
 			if(!store.proposals.begin(record))return view(store.proposals.read(c.id));
 			const persist=()=>{record.updatedAt=new Date().toISOString();store.proposals.update(record);emit("atlas-changed",{});};
 			let deadline:AbortSignal|undefined;
@@ -75,17 +76,17 @@ export function createMapProposalService(store:AtlasStore,engineFor:()=>PiEngine
 					record.usage=accumulateJobUsage(record.usage as JobUsage|undefined,model,piUsageToStep(usage));persist();
 				};
 				if(parent){
-					const draft=mapDraft.parse(await refine(engine,pages,record.context,parent,bounded,onUsage,layout));
-					bounded.throwIfAborted();const problem=validateMapDraft(draft,parent.findings!,record.context,pages.length);if(problem)throw new Error(problem);
+					const draft=deferMapIdentityMatches(mapDraft.parse(await refine(engine,pages,record.context,parent,bounded,onUsage,layout)),record.context);
+					bounded.throwIfAborted();const problem=validateMapDraft(draft,parent.findings!,record.context,pages.length)??validateMapDraftCoverage(draft,parent.findings!);if(problem)throw new SubmitProposalError(`Proposal validation failed: ${problem.slice(0,1000)}`);
 					record={...record,status:"prepared",draft};
 				}else{
-					const findings=mapReadingFindings.parse(await interpret(engine,pages,record.context,bounded,onUsage,layout));
-					bounded.throwIfAborted();const problem=validateMapFindings(findings,record.context,pages.length);if(problem)throw new Error(problem);
+					const findings=deferMapIdentityMatches(mapReadingFindings.parse(await interpret(engine,pages,record.context,bounded,onUsage,layout)),record.context);
+					bounded.throwIfAborted();const problem=validateMapFindings(findings,record.context,pages.length);if(problem)throw new SubmitProposalError(`Proposal validation failed: ${problem.slice(0,1000)}`);
 					record={...record,status:"prepared",findings};
 				}persist();
 			} catch(error) {
 				record={...record,status:signal.aborted?"cancelled":"failed",error:signal.aborted?"Interpretation was cancelled. Source files are unchanged; provider usage may be incomplete.":deadline?.aborted?
-					"The model response timed out after 5 minutes, after page preparation. Source files and captured pages are preserved. Provider usage may be incomplete; retry only starts a new attempt.":error instanceof AtlasError?error.message:
+					`The model response timed out after ${MAP_MODEL_TIMEOUT_MS/60000} minutes, after page preparation. Source files and captured pages are preserved. Provider usage may be incomplete; retry only starts a new attempt.`:error instanceof AtlasError||error instanceof SubmitProposalError?error.message:
 					record.images.length?"The model did not return a valid proposal. Check the selected provider before retrying; usage may be incomplete.":"Readable source pages could not be prepared. Check the original or import a full PNG exported from Rnote."};persist();
 			}
 			return view(store.proposals.read(c.id));

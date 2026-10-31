@@ -66,6 +66,7 @@ export interface LhMarkerMessage {
 	id: string;
 	role: "custom";
 	customType:
+		| "scratchpad-attempt"
 		| "graph-context"
 		| "probe-handoff"
 		| "subagent-steer"
@@ -754,7 +755,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "system" || message.role === "assistant") return "neutral";
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
-		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
+		if (["practice-thinking", "practice-next", "scratchpad-attempt"].includes(message.customType)) return "learner";
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {

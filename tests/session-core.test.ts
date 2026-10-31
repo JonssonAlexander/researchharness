@@ -1665,3 +1665,9 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
 	});
 });
+
+
+describe("scratchpad delivery refusals",()=>{it("surfaces unsupported vision once without retrying it as a busy turn",async()=>{
+ const calls=installFetch({chatPOST:()=>Response.json({error:"Choose an image-capable model. Your drawing is saved."},{status:422})}),session=model();
+ assert.equal(await session.send({type:"scratchpad",attemptId:"sa_00000000-0000-4000-8000-000000000001"}),false);assert.equal(calls.filter(c=>c.url==="/api/chat").length,1);assert.match(session.getState().error!.message,/image-capable/);
+ });});

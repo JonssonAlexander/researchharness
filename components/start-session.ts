@@ -2,7 +2,9 @@ import { clearOpeningPrompt, OPENING_PROMPT_FAILURE, stashOpeningPrompt } from "
 
 interface SessionCreation {
 	title: string;
+ learning?:boolean;
 	kind?: "practice";
+	atlasContext?:import("@/src/core").LearningContext;
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
 }
 

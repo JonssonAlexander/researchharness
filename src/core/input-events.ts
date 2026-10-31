@@ -45,9 +45,10 @@ import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
+	| { type: "scratchpad"; attemptId:string }
 	| { type: "text"; text: string }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
-	| { type: "continue" }
+	| { type: "continue";scratchpadAttemptId?:string }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
 	| { type: "retry" }
 	/** The practice dock's two buttons (owner, 2026-10-04): the learner's
@@ -160,6 +161,9 @@ export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
+        case "scratchpad":
+            if(typeof i.attemptId!=="string"||!/^sa_[0-9a-f-]{36}$/.test(i.attemptId))throw new ChatInputError("A saved attempt ID is required.");
+            return {type:"scratchpad",attemptId:i.attemptId};
 		case "text":
 			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
 				throw new ChatInputError("text input requires non-empty text");
@@ -174,7 +178,8 @@ export function parseChatInput(input: unknown): ChatInput {
 			}
 			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
 		case "continue":
-			return { type: "continue" };
+            if(i.scratchpadAttemptId!==undefined&&(typeof i.scratchpadAttemptId!=="string"||!/^sa_[0-9a-f-]{36}$/.test(i.scratchpadAttemptId)))throw new ChatInputError("A saved attempt ID is required.");
+			return { type: "continue",...(i.scratchpadAttemptId?{scratchpadAttemptId:i.scratchpadAttemptId as string}:{}) };
 		case "retry":
 			return { type: "retry" };
 		case "thinking":
@@ -206,6 +211,7 @@ export function inputAppends(
 	input: ChatInput,
 ): LhMessage[] {
 	switch (input.type) {
+        case "scratchpad": throw new ChatInputError("Scratchpad attempts must be resolved from the local store.");
 		case "text":
 			return [...dismissalConclusion(record), newUserMessage(input.text)];
 		case "answer": {

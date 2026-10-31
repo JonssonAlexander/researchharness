@@ -1,4 +1,5 @@
 "use client";
+import type {LearningContext} from "@/src/core";
 import {graphMathLabel} from "./graph-math-label";
 
 /**
@@ -78,6 +79,13 @@ import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { Hint } from "@/components/ui/hint";
+import {useNodeSizeShortcut} from "./use-node-size-shortcut";
+import {LessonIntegrationReview} from "./lesson-integration";
+import {ConceptDerivations} from "./concept-derivations";
+import {AtlasLinkEditor} from "./atlas-link-editor";
+import {type NodeEmphasis} from "@/src/core";
+import {AtlasNeighbourhood} from "./atlas-neighbourhood";
+import type {AtlasMapScope} from "@/src/core";
 import { AtlasPanel, useAtlas } from "./atlas-panel";
 import {
 	ARROW_LENGTH_LADDER,
@@ -963,7 +971,7 @@ export function GraphChromeRow({
 export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
-	onPracticeSelectionChange,
+	onPracticeSelectionChange,onAtlasLearn,
 	onChainSelectClose,
 }: {
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the LIFTED, persistent
@@ -972,7 +980,7 @@ export function GraphView({
 	 *  reflects it live. chainSelectOpen still drives the picker mode
 	 *  (Done instead of Delete). */
 	chainSelectOpen?: boolean;
-	practiceSelection?: ReadonlySet<string>;
+	practiceSelection?: ReadonlySet<string>;onAtlasLearn?:(context:LearningContext,title:string)=>void;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
 }) {
@@ -989,7 +997,17 @@ export function GraphView({
 	const atlasRef = useRef(atlas.snapshot);
 	atlasRef.current = atlas.snapshot;
 	const [atlasOpen, setAtlasOpen] = useState(false);
+ const [savedProof,setSavedProof]=useState<{id:string;chatId:string;key?:string}|null>(null);
+ const [mapScope,setMapScope]=useState<AtlasMapScope|null>(null);
+ const [derivationId,setDerivationId]=useState<string|null>(null);
+    const [emphasis,setEmphasis]=useState<NodeEmphasis>({});
+ const heldNodeSize=useNodeSizeShortcut();
+    const [activeViewId,setActiveViewId]=useState<string|null>(null);
+    const [linkPair,setLinkPair]=useState<{sourceId:string;targetId:string}|null>(null);
+	const [mapFocus,setMapFocus]=useState<string|null>(null);
+	const previewArrangement=useCallback((p:{id:string;x:number;y:number}[]|null)=>rendererRef.current?.previewAtlasPositions(p),[]);
 	const [atlasFocus, setAtlasFocus] = useState<AtlasPathFocus | null>(null);
+	const focusPath=useCallback((focus:AtlasPathFocus|null)=>{if(focus)setMapFocus(null);setAtlasFocus(focus);},[]);
 	const [conceptId, setConceptId] = useState<string | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
 	// constructed once, so they read through this ref, never a closure).
@@ -1362,10 +1380,16 @@ export function GraphView({
 		const renderer = new GraphCanvasRenderer(
 			canvas,
 			{
-				onSelect: (nodeId, pos) => {
+				onSelectConnection:(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);},
+                onToggleConnection:(sourceId,targetId)=>{if([sourceId,targetId].every(id=>atlasRef.current.concepts.some(c=>c.id===id))){setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);}},
+                onSelect: (nodeId, pos) => {
+                    setLinkPair(null);
 					if (atlasRef.current.concepts.some((c) => c.id === nodeId)) {
+                        const size=heldNodeSize.current;
+                        if(size){setEmphasis(previous=>{const next={...previous};if(size==="normal")delete next[nodeId];else next[nodeId]=size;return next;});return;}
 						setConceptId(nodeId);
-						setAtlasOpen(true);
+                        setMapScope({kind:"concept",id:nodeId});
+						setAtlasOpen(false);
 						setSelected(null);
 						return;
 					}
@@ -1462,9 +1486,12 @@ export function GraphView({
 		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision && previous.maps===maps) return;
 		canvasFeedRef.current = {renderer, snapshot, revision,maps};
 		const projection = projectAtlas(atlas.snapshot);
+        const hidden=new Set(atlas.snapshot.hiddenPropositionIds??[]);
+        for(const link of snapshot.impLinks)if(hidden.has(link.conclusion)||link.premises.some(id=>hidden.has(id)))hidden.add(link.id);
+        const visible=(e:{from:string;to:string})=>!hidden.has(e.from)&&!hidden.has(e.to);
 		renderer.setData({
 			nodes: [
-				...snapshot.nodes.map((n) => ({
+				...snapshot.nodes.filter(n=>!hidden.has(n.id)).map((n) => ({
 					id: n.id,
 					x: positions.get(n.id)?.x ?? 0,
 					y: positions.get(n.id)?.y ?? 0,
@@ -1472,14 +1499,14 @@ export function GraphView({
 				})),
 				...projection.nodes.map(n=>({...n,htmlLabel:graphMathLabel(n.label)})),
 			],
-			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
+			edges: snapshot.edges.filter(visible).map((e) => ({ from: e.from, to: e.to })),
 			semanticEdges: projection.semanticEdges,
 			mapEdges:projection.mapEdges,
 			atlas: atlas.snapshot,
-			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
-			impLinks: snapshot.impLinks,
+			logicalEdges: snapshot.logicalEdges.filter(visible).map((e) => ({ from: e.from, to: e.to })),
+			impLinks: snapshot.impLinks.filter(l=>!hidden.has(l.id)),
 			clusters: [
-				...snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
+				...snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members.filter(id=>!hidden.has(id)) })),
 				...projection.clusters,
 			],
 			colors: {
@@ -1492,6 +1519,8 @@ export function GraphView({
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
 	}, [snapshot, atlas.snapshot, isEmpty]);
+
+	useEffect(()=>{rendererRef.current?.setNodeEmphasis(emphasis);},[emphasis,isEmpty]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1508,6 +1537,8 @@ export function GraphView({
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
 	}, [visibleIds, query, atlasFocus]);
+
+	useEffect(()=>{const m=atlas.snapshot.mindmaps?.find(m=>m.id===mapFocus&&!m.archived),ids=m?.captures.find(c=>c.id===m.currentRevision)?.conceptIds.filter(id=>atlas.snapshot.concepts.some(c=>c.id===id));rendererRef.current?.setHighlighted(ids?.length?new Set(ids):null);},[mapFocus,atlas.snapshot,isEmpty]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1551,18 +1582,27 @@ export function GraphView({
 	return (
 		<div className="relative h-full w-full">
 			{atlasOpen && (
-				<AtlasPanel atlas={atlas} selectedId={conceptId} onSelect={setConceptId}
+				<AtlasPanel onOpenMap={scope=>{setMapScope(scope);setAtlasOpen(false);}} onDerivations={id=>{setDerivationId(id);setLinkPair(null);}} onEditLinks={(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});}} atlas={atlas} selectedId={conceptId} onSelect={setConceptId} focusedMapId={mapFocus} onArrangePreview={previewArrangement} onLearn={onAtlasLearn}
+					onMapFocus={(id,center)=>{setMapFocus(id);setAtlasFocus(null);setQuery("");if(center&&id){setAtlasOpen(false);const map=atlas.snapshot.mindmaps?.find(m=>m.id===id);rendererRef.current?.fitNodes(map?.captures.find(c=>c.id===map.currentRevision)?.conceptIds??[],{bottom:160});}}}
 					onRelax={(id) => rendererRef.current?.relaxAtlas(id)}
 					viewActions={{
 						canSave: !isEmpty && !atlasFocus,
-						capture: () => rendererRef.current ? {camera: rendererRef.current.getViewCamera(), query} : null,
+                        activeId:activeViewId,emphasis,
+                        setEmphasis:(id,value)=>setEmphasis(previous=>{const next={...previous};if(value==="normal")delete next[id];else next[id]=value;return next;}),
+                        resetEmphasis:()=>setEmphasis({}),
+						capture: () => rendererRef.current ? {camera: rendererRef.current.getViewCamera(), query,emphasis:Object.fromEntries(Object.entries(emphasis).filter(([id])=>atlas.snapshot.concepts.some(c=>c.id===id)))} : null,
 						restore: view => {
-							setQuery(view.query); setAtlasFocus(null); setAtlasOpen(false);
+ setActiveViewId(view.id);setEmphasis(view.emphasis??{});setLinkPair(null);
+							setQuery(view.query); setAtlasFocus(null);setMapFocus(null); setAtlasOpen(false);
 							rendererRef.current?.restoreViewCamera(view.camera);
 						},
 					}}
-					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={setAtlasFocus} />
+					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={focusPath} />
 			)}
+            {mapScope&&<AtlasNeighbourhood key={`${mapScope.kind}:${mapScope.id}`} atlas={atlas.snapshot} scope={mapScope} onClose={()=>setMapScope(null)} onInspect={id=>{setConceptId(id);setAtlasOpen(true);setMapScope(null);}} onDerivations={setDerivationId} onLesson={(id,chatId,key)=>setSavedProof({id,chatId,key})}/>}
+            {snapshot&&derivationId&&atlas.snapshot.concepts.some(c=>c.id===derivationId)&&<ConceptDerivations key={derivationId} concept={atlas.snapshot.concepts.find(c=>c.id===derivationId)!} graph={snapshot} lessonMaps={atlas.snapshot.lessonMaps} onOpenLesson={(id,chatId,key)=>setSavedProof({id,chatId,key})} save={atlas.save} onClose={()=>setDerivationId(null)} onLearn={onAtlasLearn?(context,prompt)=>{setDerivationId(null);setAtlasOpen(false);onAtlasLearn(context,prompt);}:undefined}/>}
+            {linkPair&&<AtlasLinkEditor key={`${linkPair.sourceId}:${linkPair.targetId}`} snapshot={atlas.snapshot} {...linkPair} save={atlas.save} onSelect={id=>{setLinkPair(null);setConceptId(id);setAtlasOpen(true);}} onClose={()=>setLinkPair(null)}/>}
+			{savedProof&&<LessonIntegrationReview trigger={false} open initialId={savedProof.id} initialProofKey={savedProof.key} chatId={savedProof.chatId} onOpenChange={open=>{if(!open)setSavedProof(null);}}/>}
 			{isEmpty ? (
 				// The empty graph keeps the first action clear without zero-valued statistics.
 				<div className="flex h-full w-full items-center justify-center px-4">

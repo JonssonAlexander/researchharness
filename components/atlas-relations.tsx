@@ -24,22 +24,22 @@ const meaning = {
 };
 
 export function AtlasRelations({
-	conceptId,
+	conceptId,otherId,
 	snapshot,
 	save,
-	onSelect,
+	onSelect,onLearn,
 }: {
-	conceptId: string;
+	conceptId: string;otherId?:string;
 	snapshot: AtlasSnapshot;
 	save: (command: AtlasCommand) => Promise<void>;
-	onSelect: (id: string) => void;
+	onSelect: (id: string) => void;onLearn?:(context:import("@/src/core").LearningContext,title:string)=>void;
 }) {
 	const [draft, setDraft] = useState<RelationInput | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const name = (id: string) => snapshot.concepts.find((c) => c.id === id)?.title ?? "Unavailable concept";
-	const links = snapshot.relations.filter((r) => r.sourceId === conceptId || r.targetId === conceptId);
+	const links = snapshot.relations.filter((r) => (r.sourceId === conceptId || r.targetId === conceptId)&&(!otherId||r.sourceId===otherId||r.targetId===otherId));
 	function edit(relation?: AtlasRelation) {
 		setError(null);
 		setConfirmDelete(false);
@@ -62,7 +62,7 @@ export function AtlasRelations({
 						id: `ar_${crypto.randomUUID()}`,
 						expectedRevision: 0,
 						sourceId: conceptId,
-						targetId: snapshot.concepts.find((c) => c.id !== conceptId)?.id ?? "",
+						targetId: otherId ?? snapshot.concepts.find((c) => c.id !== conceptId)?.id ?? "",
 						relationType: "prerequisite",
 						conditions: "",
 						claimStatus: "hypothesis",
@@ -293,6 +293,8 @@ export function AtlasRelations({
 								</p>
 							))}
 							{!r.evidence.length && <p className="text-muted-foreground">No source cited</p>}
+							{r.evidence.some(e=>e.citation.startsWith("AI suggestion"))&&<p className="text-amber-600">● AI-generated · mathematical review and personal study required</p>}
+							{onLearn&&<button type="button" className={button} onClick={()=>onLearn({conceptIds:[r.sourceId,r.targetId],relationId:r.id,goal:"proof"},`Help me understand the precise ${r.relationType} relationship between ${name(r.sourceId)} and ${name(r.targetId)}. Conditions: ${r.conditions||"need clarification"}. Establish the exact statement first; ask me to reconstruct any argument independently and retain hints and gaps.`)}>Study this connection</button>}
 							<button type="button" className={button} onClick={() => edit(r)}>
 								Edit link
 							</button>

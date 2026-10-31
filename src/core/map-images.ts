@@ -9,6 +9,11 @@ export const mapEvidence=z.object({page:z.number().int().min(0).max(7),quote:z.s
 export interface MapImageSet {pages:Uint8Array[];layout:MapImageLayout[]}
 export const wholeMapRegion={x:0,y:0,w:1,h:1};
 
+/** Ignore formatting whitespace, while retaining all mathematical symbols. */
+export function mapFormulaInNotes(formula:string,notes:string):boolean {
+	return notes.replace(/\s+/g,"").includes(formula.replace(/\s+/g,""));
+}
+
 /** Cover the canvas in row order with 20% overlap, independent of paper pages. */
 export function mapDetailRegions(width:number,height:number) {
 	const cols=width>height*1.5?3:2,rows=height>width*1.5?3:2;

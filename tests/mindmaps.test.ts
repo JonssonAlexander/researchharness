@@ -126,7 +126,7 @@ test('bounded HTTP import binds preview to an exact revision, serves safe downlo
 
 test('schema v6 upgrade preserves metadata, creates a backup and rolls back a failed migration',()=>{
  const {store,file}=fixture(),before=store.read(),db=new DatabaseSync(file);
- db.exec('DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=6');db.close();
+ db.exec('ALTER TABLE atlas_views DROP COLUMN emphasis; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; DROP TABLE mindmap_captures; DROP TABLE mindmaps; PRAGMA user_version=6');db.close();
  assert.deepEqual(createAtlasStore(file).read(),before);
  const old=fs.readdirSync(path.dirname(file)).find(f=>f.includes('.v6-'))!;
  const saved=new DatabaseSync(path.join(path.dirname(file),old));assert.equal(saved.prepare('PRAGMA user_version').get()!.user_version,6);saved.close();

@@ -21,8 +21,8 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 	const projection=useMemo(()=>{
 		const p=projectMapDraft(draft,proposal.imageLayout);
 		for(const n of p.nodes){const old=positions.current.get(n.id);if(old){n.x=old.x;n.y=old.y;}Object.assign(n,{badgeColor:mapReviewReasons(draft.concepts.find(c=>c.key===n.id)!).length?"#e6b35a":undefined,htmlLabel:typeof document!=="undefined"?graphMathLabel(n.label):undefined});}
-		if(inAtlas&&plan&&atlas){const base=projectAtlas(atlas);
-			return {nodes:[...base.nodes.map(n=>({...n,draggable:false,htmlLabel:graphMathLabel(n.label)})),...p.nodes.filter(n=>{const c=plan.concepts.find(c=>c.key===n.id);return c&&!c.existing;}).map(n=>{const c=plan.concepts.find(c=>c.key===n.id)!;return {...n,id:c.id,x:c.x,y:c.y,draggable:false};})],edges:[],mapEdges:[...base.mapEdges,...(plan.mapConnections??[]).map(c=>({from:c.sourceId,to:c.targetId}))],semanticEdges:[...base.semanticEdges,...plan.relations.map(r=>({from:r.sourceId,to:r.targetId}))]};
+		if(inAtlas&&plan&&atlas){const retired=new Set(plan.retiredMapConnections?.map(c=>c.id)),base=projectAtlas({...atlas,mapConnections:atlas.mapConnections?.filter(c=>!retired.has(c.id))});
+			return {nodes:[...base.nodes.map(n=>({...n,draggable:false,htmlLabel:graphMathLabel(n.label)})),...p.nodes.filter(n=>{const c=plan.concepts.find(c=>c.key===n.id);return c&&!c.existing;}).map(n=>{const c=plan.concepts.find(c=>c.key===n.id)!;return {...n,id:c.id,x:c.x,y:c.y,draggable:false};})],edges:[],mapEdges:[...base.mapEdges,...(plan.associations??[]).map(c=>({from:c.sourceId,to:c.targetId})),...(plan.mapConnections??[]).map(c=>({from:c.sourceId,to:c.targetId}))],semanticEdges:[...base.semanticEdges,...plan.relations.map(r=>({from:r.sourceId,to:r.targetId}))]};
 		}
 		return p;
 	},[draft,proposal.imageLayout,inAtlas,plan,atlas]);
@@ -47,6 +47,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 			const rgb=swatch.getImageData(0,0,1,1).data,label=`#${[...rgb].slice(0,3).map(c=>c.toString(16).padStart(2,"0")).join("")}`;
 			for(const n of projection.nodes)positions.current.set(n.id,n);
 			graph.setData({...projection,clusters:[],logicalEdges:[],colors:{node:"#65a3dc",edge:"#808590",label,hoverText:label},fontFamily:getComputedStyle(document.body).fontFamily});
+			graph.setHighlighted(inAtlas&&plan?new Set([...plan.concepts.map(n=>n.id),...(plan.relinkedConcepts??[]).map(n=>n.id),...(plan.mapConnections??[]).flatMap(c=>[c.sourceId,c.targetId]),...plan.relations.flatMap(r=>[r.sourceId,r.targetId]),...(plan.associations??[]).flatMap(r=>[r.sourceId,r.targetId])]):null);
 			renderer.current=graph;setError(null);
 		}catch{graph?.destroy();graph=undefined;setError("Interactive map unavailable. The draft remains reviewable through the lists below.");}
 		return()=>{graph?.destroy();renderer.current=null;};
@@ -68,7 +69,7 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 				<div><p className="font-medium">{inAtlas?"In Atlas · integration preview":"This map only · proposed"}</p><p className="mt-1 text-muted-foreground">{draft.concepts.length} concepts · {draft.connections.length} connections · no Atlas changes</p></div>
 				<div className="flex flex-wrap gap-1"><button type="button" className={button} onClick={()=>renderer.current?.fit()}>Fit map</button>{plan&&<button type="button" className={button} onClick={()=>setInAtlas(!inAtlas)}>{inAtlas?"This map only":"In Atlas"}</button>}
 				<button type="button" className={button} disabled={!dirty||saving||!review||!!review.integration} onClick={()=>void save()}>{saving?"Saving…":dirty?"Save draft edits":"Draft saved"}</button>
-				<button type="button" className={button} disabled={dirty||saving||integrating||!review} onClick={()=>void integrate()}>{review?.integration?"Restore map connections…":"Integrate…"}</button></div>
+				<button type="button" className={button} disabled={dirty||saving||integrating||!review||review.integration?.reconciled} onClick={()=>void integrate()}>{review?.integration?.reconciled?"Update integrated":review?.integration?"Restore map connections…":review?.priorIdentities?"Update Atlas…":"Integrate…"}</button></div>
 			</div>
 			{error&&<p role="status" className="p-3 text-xs text-muted-foreground">{error}</p>}
 			<div className="relative min-h-72 flex-1"><canvas ref={canvas} aria-label="Proposed mind map; select a concept to inspect its notes" className="absolute inset-0 h-full w-full" /></div>
@@ -79,17 +80,17 @@ export function MapDraftPreview({proposal,onEvidence,onDirtyChange}:{proposal:Pr
 			{saveError&&<p role="alert" className="text-xs text-destructive">{saveError}</p>}
 			{dirty&&<p className="text-xs text-amber-600">Unsaved draft edits · save before integration or leaving this view.</p>}
 			{integrating&&review?.integration&&atlas&&<MapConnectionRepair review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
-			{integrating&&review&&!review.integration&&atlas&&<DraftIntegration key={`${review.revision}:${atlas.layoutRevision}`} review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setReview({...review,integration:{id:plan!.id,committedAt:new Date().toISOString()}});setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
+			{integrating&&review&&!review.integration&&atlas&&<DraftIntegration key={`${review.revision}:${atlas.layoutRevision}`} review={review} atlas={atlas} onPrepared={prepared} onCancel={()=>{setIntegrating(false);setPlan(null);setInAtlas(false);}} onCommitted={()=>{setReview({...review,integration:{id:plan!.id,committedAt:new Date().toISOString(),...(plan!.schemaVersion===5?{reconciled:true}:{})}});setIntegrating(false);setPlan(null);setInAtlas(false);}}/>}
 			<button type="button" className={button} onClick={()=>setSelected(null)}>Draft overview</button>
 			{concept?<article className="space-y-3"><h3 className="text-lg font-medium"><MessageResponse mode="static">{concept.title}</MessageResponse></h3>{support(concept)}
 				{concept.existingId&&<p className="text-xs text-muted-foreground">Possible existing match: {proposal.context.find(n=>n.id===concept.existingId)?.title??concept.title}. Identity still needs review.</p>}
 				{mapReviewReasons(concept).length>0&&<ul className="list-disc pl-4 text-xs text-amber-600">{mapReviewReasons(concept).map(r=><li key={r}>{r}</li>)}</ul>}
-				{concept.notes.map((n,i)=><section key={i} className="space-y-2 rounded-xl border p-3">{support(n)}<MessageResponse mode="static">{n.text}</MessageResponse></section>)}
+				{concept.notes.map((n,i)=><section key={i} className="space-y-2 rounded-xl border p-3"><MessageResponse mode="static">{n.text}</MessageResponse>{support(n)}</section>)}
 			</article>:connection?<article className="space-y-3"><h3 className="font-medium">{title(connection.source)} {connection.direction==="both"?"↔":connection.direction==="forward"?"→":"—"} {title(connection.target)}</h3>
 				<MessageResponse mode="static">{connection.label||"Unlabelled connection"}</MessageResponse><p className="text-xs text-muted-foreground">{connection.relationType??"No mathematical type assigned"} · proposed, not a proven implication</p>{support(connection)}
 			</article>:<section className="space-y-3"><h3 className="font-medium">Draft overview · model synthesis</h3><MessageResponse mode="static">{draft.overview||"No overview was proposed."}</MessageResponse>
 				{draft.questions.length>0&&<div className="space-y-2 rounded-xl border border-amber-500/40 p-3"><h4 className="font-medium">Needs review</h4>{draft.questions.map((q,i)=><p key={i} className="text-xs leading-relaxed">{q}</p>)}</div>}
-				<p className="text-xs text-muted-foreground">Review the structure first. Select a concept or connection for its notes and evidence. Reconstructions and explanations are model proposals, not verified mathematics.</p>
+				<p className="text-xs text-muted-foreground">Select a concept to see its equations and notes. The graph shows short titles; equations are in the side panel. Reconstructions and explanations are model proposals, not verified mathematics.</p>
 			</section>}
 			{selected&&(concept||connection)&&review&&!review.integration&&!integrating&&<DraftItemEditor draft={draft} selection={selected} onChange={edit}/>}
 			{review&&!review.integration&&!integrating&&<DraftAdd draft={draft} onChange={edit}/>}

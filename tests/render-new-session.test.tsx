@@ -47,7 +47,7 @@ describe("startDraftSession — the create-on-send contract", () => {
 		assert.equal(calls.length, 1);
 		assert.equal(calls[0]!.url, "/api/chats");
 		assert.equal(calls[0]!.method, "POST");
-		assert.deepEqual(calls[0]!.body, { title: "teach me orbital mechanics" });
+		assert.deepEqual(calls[0]!.body, { title: "teach me orbital mechanics", learning:true });
 	});
 
 	it("no settings PUT on create — the server stamps the newborn (per-session models, owner 2026-09-28)", async () => {
@@ -119,7 +119,7 @@ describe("DraftShell — the sessionless surface", () => {
 		// No CTA by default: a configured surface stays quiet.
 		assert.ok(!html.includes('data-testid="setup-cta"'));
 		// The same empty state a fresh chat shows.
-		assert.ok(html.includes("The teacher will open by probing what you already know."));
+		assert.ok(html.includes("Explore a visible lesson map, start conceptually, and work through selected derivations."));
 		// The pointer-events pattern (953b22b): the wrapper stays inert…
 		assert.ok(html.includes("pointer-events-none"));
 		// …and the blob re-enables it.
@@ -251,6 +251,6 @@ describe("the practice draft (?mode=practice, 2026-10-04)", () => {
 			return new Response(JSON.stringify({ id: "c8" }), { status: 201 });
 		}) as unknown as typeof fetch;
 		await startDraftSession("orbital mechanics", f);
-		assert.deepEqual(body, { title: "orbital mechanics" });
+		assert.deepEqual(body, { title: "orbital mechanics", learning:true });
 	});
 });

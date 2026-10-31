@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {SubjectPicker} from "./atlas-sync-review";
+import type {AtlasCommand,IntegrationChoices} from "@/src/core";
 import {MapProposalDialog} from "./map-proposal-review";
 import type { AtlasSnapshot, Mindmap, MindmapInput } from "@/src/core";
 
@@ -8,9 +10,10 @@ const button = "rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacit
 const field = "w-full rounded border bg-background px-2 py-1 text-xs";
 const asset = (revision: string, kind: "original" | "preview") => `/api/atlas/mindmaps?revision=${revision}&kind=${kind}`;
 
-export function AtlasMindmaps({snapshot, selectedId, refresh}: {
-	snapshot: AtlasSnapshot; selectedId: string | null; refresh: () => Promise<void>;
+export function AtlasMindmaps({snapshot, selectedId, refresh,save,onMapFocus,focusedMapId,onGridChange}: {
+	snapshot: AtlasSnapshot; selectedId: string | null; refresh: () => Promise<void>;save?:(c:AtlasCommand)=>Promise<void>;onMapFocus?:(id:string|null,center?:boolean)=>void;focusedMapId?:string|null;onGridChange?:(grid:boolean)=>void;
 }) {
+	const [grid,setGrid]=useState(false);
 	const [editing, setEditing] = useState<Omit<MindmapInput, "filename"> | null>(null);
 	const [original, setOriginal] = useState<File | null>(null), [preview, setPreview] = useState<File | null>(null);
 	const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -76,8 +79,9 @@ export function AtlasMindmaps({snapshot, selectedId, refresh}: {
 				{busy && <p role="status" className="text-muted-foreground">Checking the Rnote file and making a preview locally. This can take up to 90 seconds; no AI model is being used.</p>}
 			</form>}
 		{error && <p role="alert" className="text-destructive">{error}</p>}
-		{maps.filter(m => !m.archived && linked(m)).map(map => <MindmapCard key={map.id} map={map} snapshot={snapshot} selectedId={selectedId}
-			busy={busy} onEdit={() => edit(map)} onArchive={() => void archive(map)} />)}
+		<div className="flex gap-1" role="group" aria-label="Mind-map view"><button type="button" className={button} aria-pressed={!grid} onClick={()=>{setGrid(false);onGridChange?.(false);}}>List</button><button type="button" className={button} aria-pressed={grid} onClick={()=>{setGrid(true);onGridChange?.(true);}}>Grid</button>{focusedMapId&&<button type="button" className={button} onClick={()=>onMapFocus?.(null)}>Clear map highlight</button>}</div>
+		<div className={grid?"grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3":"space-y-3"}>{maps.filter(m => !m.archived && linked(m)).map(map => <MindmapCard key={map.id} map={map} snapshot={snapshot} selectedId={selectedId}
+			busy={busy} save={save} focused={focusedMapId===map.id} onFocus={center=>onMapFocus?.(map.id,center)} onEdit={() => edit(map)} onArchive={() => void archive(map)} />)}</div>
 		{maps.some(m => m.archived && linked(m)) && <details><summary className="cursor-pointer text-muted-foreground">Archived maps</summary>
 			{maps.filter(m => m.archived && linked(m)).map(map => <div key={map.id} className="flex items-center gap-2">
 				<span>{map.title}</span><button type="button" className={button} disabled={busy} onClick={() => void archive(map)}>Restore</button>
@@ -85,17 +89,20 @@ export function AtlasMindmaps({snapshot, selectedId, refresh}: {
 		</details>}
 	</details>;
 }
-function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive}: {
-	map: Mindmap; snapshot: AtlasSnapshot; selectedId: string | null; busy: boolean; onEdit: () => void; onArchive: () => void;
+function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive,save,focused,onFocus}: {
+	map: Mindmap; snapshot: AtlasSnapshot; selectedId: string | null; busy: boolean; onEdit: () => void; onArchive: () => void;save?:(c:AtlasCommand)=>Promise<void>;focused?:boolean;onFocus?:(center?:boolean)=>void;
 }) {
+	const [subject,setSubject]=useState<Pick<IntegrationChoices,"subjectId"|"newSubject">>({subjectId:map.subjectId??null}),[editingSubject,setEditingSubject]=useState(false),[subjectError,setSubjectError]=useState(""),[assigning,setAssigning]=useState(false);
 	const [revision, setRevision] = useState<string | null>(null), [confirm, setConfirm] = useState(false);
 	const [review,setReview] = useState(false);
 	const [brokenPreview, setBrokenPreview] = useState<string | null>(null);
 	const current = map.captures.find(c => c.id === map.currentRevision)!;
 	const latest = selectedId && !current.conceptIds.includes(selectedId) ? [...map.captures].reverse().find(c => c.conceptIds.includes(selectedId))! : current;
 	const capture = map.captures.find(c => c.id === (revision ?? latest.id))!;
-	return <section className="space-y-2 rounded border p-2" aria-label={`Mind map ${map.title}`}>
-		<h3 className="font-medium">{map.title}</h3>
+	return <section className={`space-y-2 rounded border p-3 ${focused?"border-primary bg-accent/30":""}`} aria-label={`Mind map ${map.title}`}>
+		<h3 className="font-medium"><button type="button" className="text-left hover:underline" aria-pressed={!!focused} onClick={()=>onFocus?.()}>{map.title}</button></h3>
+		<div className="flex flex-wrap gap-2"><span className="text-muted-foreground">{snapshot.subjects.find(s=>s.id===map.subjectId)?.title??"Subject unassigned"}</span><button type="button" className={button} onClick={()=>onFocus?.(true)} disabled={!current.conceptIds.some(id=>snapshot.concepts.some(c=>c.id===id))}>Center map</button>{save&&<button type="button" className={button} onClick={()=>{setSubject({subjectId:map.subjectId??null});setEditingSubject(!editingSubject);}}>Assign subject</button>}</div>
+		{editingSubject&&<div className="space-y-2 rounded border p-2"><SubjectPicker atlas={snapshot} value={subject} onChange={setSubject}/><p>Assign to this map and its {current.conceptIds.filter(id=>snapshot.concepts.some(c=>c.id===id)).length} linked concepts. Existing memberships and positions are kept.</p><button type="button" className={button} disabled={assigning||(!subject.subjectId&&!subject.newSubject?.title.trim())} onClick={async()=>{setAssigning(true);setSubjectError("");try{await save!({kind:"map-subject",id:map.id,expectedRevision:map.revision,...subject});setEditingSubject(false);}catch(e){setSubjectError((e as Error).message);}finally{setAssigning(false);}}}>Approve subject assignment</button><button type="button" className={button} disabled={assigning} onClick={()=>setEditingSubject(false)}>Cancel</button>{subjectError&&<p role="alert" className="text-destructive">{subjectError}</p>}</div>}
 		<label className="block">Source revision<select className={field} value={capture.id} onChange={e => setRevision(e.target.value)}>
 			{map.captures.map((c,i) => <option key={c.id} value={c.id}>{i+1} · {new Date(c.capturedAt).toLocaleString()}{c.id === map.currentRevision ? " · current" : ""}</option>)}
 		</select></label>
@@ -106,7 +113,7 @@ function MindmapCard({map, snapshot, selectedId, busy, onEdit, onArchive}: {
 		</a> : <p className="text-muted-foreground">Preview unavailable for this revision. The original remains downloadable.</p>}
 		<p className="text-muted-foreground">{capture.validation === "rnote-cli" ? "Rnote format checked" : "Rnote format unchecked"} · {capture.previewKind === "manual-png" ? "Owner-supplied PNG" : capture.previewKind === "rnote-thumbnail" ? "Rnote thumbnail" : "No preview"}</p>
 		{capture.notice && <p>{capture.notice}</p>}
-		{capture.conceptIds.length > 0 && <p>References: {capture.conceptIds.map(id => snapshot.concepts.find(c => c.id === id)?.title ?? "Removed concept").join(", ")}</p>}
+		{capture.conceptIds.length > 0 && <details><summary className="cursor-pointer text-muted-foreground">Linked concepts ({capture.conceptIds.length})</summary><p>{capture.conceptIds.map(id => snapshot.concepts.find(c => c.id === id)?.title ?? "Removed concept").join(", ")}</p></details>}
 		<a className="underline" href={asset(capture.id,"original")}>Download Rnote original</a>
 		<p className="text-muted-foreground">Edit the downloaded copy in Rnote, then import it as a new revision here.</p>
 		<div className="flex flex-wrap gap-1">

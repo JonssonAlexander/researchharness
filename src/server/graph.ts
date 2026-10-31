@@ -20,7 +20,8 @@ import { callCost } from "./pricing.ts";
  * reflects whatever the pipeline has merged so far.
  */
 export function graphView(): GraphSnapshot {
-	return graphSnapshot(stores);
+	const pending=new Set(stores.atlasStore.lessonReviews.list().filter(r=>r.status==="applying").map(r=>r.id));
+ return graphSnapshot({...stores,graphStore:{...stores.graphStore,readNodes:()=>stores.graphStore.readNodes().filter(n=>!n.integrationId||!pending.has(n.integrationId)),readChains:()=>stores.graphStore.readChains().filter(n=>!n.integrationId||!pending.has(n.integrationId))}});
 }
 
 /** The graph view's cost surface (GET /api/graph/costs — the 2026-09 cost
@@ -102,6 +103,7 @@ export type NodeDeleteOutcome =
  *     existingIds guard) — no dangling edges, no resurrection.
  */
 export function deleteGraphNode(nodeId: string): NodeDeleteOutcome {
+ if(stores.atlasStore.lessonReviews.list().some(r=>r.status==="applying"))return {ok:false,status:409,code:"extraction_running",error:"Resume the interrupted lesson integration before deleting canonical knowledge."};
 	if (extractionStatuses().length > 0) {
 		return {
 			ok: false,

@@ -613,3 +613,38 @@ Ordinary source-map connections are separate schema-v10 extension rows, not
 mathematical relations. Their projection is dotted and current-source-bound;
 the original integration journal supports explicit v2 connection-only repairs
 of older v1 imports. See [repair, projection and compatibility](atlas-map-integration.md#ordinary-map-lines-and-repair-schema-v10).
+
+
+### Atlas reviewed discovery and learning (29 October 2026)
+
+The schema-v12 extension and integration-v3 envelope add subjects at import,
+reviewed AI identity/connection suggestions and an explicit learning-to-Atlas
+notes path. Core validates/projects; an injected submit agent proposes; server
+composition retrieves bounded context; stores commit only exact approved updates.
+Ordinary associations, mathematical claim status and self-reported learning
+evidence stay distinct. See [as-built flow, limits and remaining work](atlas-reviewed-learning.md).
+
+Atlas concept derivation navigation is an isolated, bounded projection of the
+canonical proposition/argument graph, with explicit stable concept references and
+selected-step teaching context. It preserves joint premises and source assertions;
+it does not create another mathematical store or promote map associations. See
+[the as-built derivation slice](atlas-concept-derivations.md).
+
+New teaching sessions can explicitly use the conversational lesson workspace. Its
+versioned session-local maps/targets live under `<data>/lessons`, not in canonical
+knowledge ledgers; an injected planning tool and existing SSE/native turn loop
+serve them. See [learning workspace](atlas-learning-workspace.md).
+
+Conversational lesson review now persists conceptual lesson maps and separate
+canonical proof graphs through one approved bundle. Schema v14 adds the hashed
+`lesson_reviews` journal. Reserved IDs and operation-tagged Library appends support
+exact retry before transactional concept/reference metadata commit. See
+[lesson integration](atlas-lesson-integration.md) for source bounds, recovery and
+the distinction between current canonical graphs and captured argument snapshots.
+
+The embedded learning scratchpad uses `src/core/scratchpad.ts` contracts,
+`src/store/scratchpad.ts` atomic draft/immutable attempt storage and
+`src/server/scratchpad.ts` source validation. A native `scratchpad` input resolves a
+saved attempt through the existing chat writer; an injected agent port materializes
+the image only at dispatch. No base64 duplication in chat history or alternate
+provider dispatch loop is introduced. See [scratchpad](atlas-scratchpad.md).

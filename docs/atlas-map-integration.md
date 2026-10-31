@@ -199,3 +199,77 @@ stoch init found 15 missing lines and skipped 4 excluded-endpoint connections;
 it proposed zero new concepts or typed relations. No model calls or semantic
 writes to the owner's graph were made by that preview. Source originals and old
 approval receipts were preserved. Live visual appearance remains unverified.
+
+
+29 October follow-up: integration envelope v3 requires an existing/new subject,
+applies membership to reused concepts, and can include explicitly selected AI
+identity/bridge review results. Committed v1/v2 receipts retain their old meaning.
+See [reviewed discovery and learning](atlas-reviewed-learning.md) for schema v12,
+approval bindings, UI and remaining Library synchronization gates.
+
+### Repair excluded identities (29 October 2026)
+
+A repair can now explicitly map previously excluded/removed draft nodes to existing
+Atlas concepts, then restore their incident source lines. It cannot create nodes,
+remap a surviving approved identity, collapse two draft nodes into one, edit notes
+or promote a mathematical claim. The exact preview binds these additional identity
+choices, any subject membership and capture-reference updates, and all missing lines.
+Earlier repair mappings are recovered from committed receipts; the original receipt
+remains immutable. Subject memberships preserve existing preferred placement. All
+updates share one SQL transaction; a failed insert rolls back membership and source
+references too. No database schema migration is needed.
+
+New import UI keeps potential identity matches visibly undecided until explicitly
+resolved. An undecided match cannot silently become Exclude/defer. Intentional
+exclusions are listed before approval with a warning about dropped lines and
+possible fragmentation.
+# Reviewed additive updates — 30 October 2026
+
+A new proposal for a previously integrated map now prepares an integration
+envelope v4. Previously approved, unambiguous identities from that map are
+preselected when titles still agree; conflicting, removed or changed-name
+identities require review. Current saved integration choices resume after reload.
+No global name matching automatically authorizes a merge.
+
+The update preview lists added, changed and unchanged note contributions, with
+previous/proposed text. Changed readings are appended with an explicit update
+label; existing owner notes, source originals and earlier integration receipts
+remain intact. Unchanged contributions (ignoring source/draft/evidence metadata)
+are not appended again. New source references and membership use the same atomic
+commit. Accepted typed relations are reused by their existing semantic key;
+matching source lines in the same revision are reused by endpoints/direction/label.
+
+This is an **additive update**, not full rewrite reconciliation: omitted concepts,
+source lines and mathematical claims are retained. Changed depiction metadata can
+remain alongside earlier evidence. Explicit removal/reconciliation is pending.
+There is no schema migration; unsupported envelope versions are refused. Legacy
+receipts retain their original digest meaning. Exact retries return the existing
+receipt, stale previews fail, and SQL failures roll back the entire update.
+Failed UI approval clears the obsolete preview instead of leaving an active
+approval button beneath an error.
+# Reviewed drawing reconciliation — 30 October 2026
+
+Updates prepared with the optional `reconcile` choice use integration envelope
+v5. The UI enables drawing reconciliation for updates and offers an explicit
+additive-only alternative. The preview groups added, changed and missing lines,
+lists nodes leaving this drawing, and retains the previous/proposed note review.
+The In Atlas comparison omits lines scheduled for retirement.
+
+One digest-bound approval archives replaced/missing source lines in
+`atlas_archive` (`kind=map-connection`) before removing their active rows. The
+archive includes the original connection and retiring integration ID. Omitted
+previously integrated nodes lose their current drawing reference only: concepts,
+notes, memberships, typed mathematical relations, AI associations, original files,
+old captures and approval receipts remain. Changed arrows are source depictions,
+not changes to mathematical claims. Reconciliation is scoped to this map's
+captures, never another map or general Atlas relations. Historical lines and
+originals remain inspectable through retained records; no archive restore UI is
+provided. Older proposals cannot use repair to resurrect lines after a newer v5
+update. New source revisions receive their own references; old captures remain.
+
+Archival, line insertion, reference updates and the receipt share one SQL
+transaction. Failed inserts roll back archival/deletion; exact retries return the
+committed receipt and stale bases cannot commit. No schema migration is needed.
+Legacy v1–v4 receipts/previews keep their original semantics. Interpretation
+completeness and semantic identity ambiguity still require review; renames are
+not inferred from similar wording.

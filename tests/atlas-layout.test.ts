@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAtlasDemo } from "../src/core/atlas-demo.ts";
-import { createAtlasLayout } from "../src/core/atlas-layout.ts";
+import { arrangeAtlas, createAtlasLayout } from "../src/core/atlas-layout.ts";
 import { projectAtlas, type AtlasSnapshot } from "../src/core/atlas.ts";
 
 function fixture(): AtlasSnapshot {
@@ -67,4 +67,23 @@ test("moving into another subject before settling keeps both touched regions in 
  const positions=settle(combined);
  assert.equal(positions.length,7);
  assert(!positions.some(p=>snapshot.concepts.find(c=>c.id===p.id)!.preferredSubjectId===snapshot.subjects[2]!.id));
+});
+
+
+test("organic overview keeps subject regions separate despite cross-subject bridges",()=>{
+ const snapshot=fixture(),before=structuredClone(snapshot),ids=snapshot.concepts.map(c=>c.id);
+ const positions=arrangeAtlas(snapshot,ids,"organic");
+ assert.deepEqual(positions,arrangeAtlas(snapshot,ids,"organic"));
+ assert.deepEqual(snapshot,before);
+ const ranges=snapshot.subjects.map(subject=>{
+  const points=positions.filter(p=>snapshot.concepts.find(c=>c.id===p.id)!.preferredSubjectId===subject.id);
+  return {min:Math.min(...points.map(p=>p.x)),max:Math.max(...points.map(p=>p.x))};
+ }).sort((a,b)=>a.min-b.min);
+ for(let i=1;i<ranges.length;i++)assert(ranges[i]!.min-ranges[i-1]!.max>=179);
+ const moved=structuredClone(snapshot),subject=snapshot.subjects[0]!.id;
+ for(const c of moved.concepts)if(c.preferredSubjectId!==subject){c.x+=10000;c.y-=10000;}
+ // A distant foundation must not drag a local topic into a long thin shape.
+ const a=settle(createAtlasLayout(snapshot,subject)),b=settle(createAtlasLayout(moved,subject));
+ const span=(points:typeof a)=>Math.max(...points.map(p=>p.x))-Math.min(...points.map(p=>p.x));
+ assert(Math.abs(span(a)-span(b))<30);
 });
