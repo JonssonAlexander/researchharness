@@ -47,6 +47,8 @@ export interface RenderSvgOptions {
 }
 
 export interface RenderPdfOptions {
+ /** Optional caller resource bound for uploaded pages. */
+ maxPixels?:number;
 	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200. */
 	dpi?: number;
 }
@@ -496,6 +498,7 @@ async function renderPdfPages(
 			if (pageNo < 1 || pageNo > doc.numPages) continue;
 			const pg = await doc.getPage(pageNo);
 			const vp = pg.getViewport({ scale: dpi / 72 });
+			if(opts.maxPixels&&vp.width*vp.height>opts.maxPixels)throw new Error("PDF page exceeds the image size limit.");
 			const canvas = createCanvas(Math.ceil(vp.width), Math.ceil(vp.height));
 			const ctx = canvas.getContext("2d");
 			// pdfjs's render types speak the DOM context; @napi-rs/canvas's

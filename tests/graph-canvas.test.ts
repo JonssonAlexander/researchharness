@@ -435,7 +435,7 @@ test("proof highlighting never paints an implication junction as an empty claim 
    const ctx=new Proxy(context,{get:(target,key)=>key in target?target[String(key)]:()=>{}});
    context.stroke=()=>strokes.push(context.lineWidth as number);
    const nodes=[{id:"n_claim",x:10,y:20},{id:"arg_joint",x:30,y:40}];
-   const view={data:{nodes,edges:[{from:"n_claim",to:"arg_joint"}],colors:{node:"#fff",label:"#aaa",edge:"#888"}},settings:{edgeWidth:.5,labelZoom:8},canvas:{clientWidth:600,clientHeight:400},ctx,transform:{x:0,y:0,k:1},kFit:1,world:{nodeR:2,glowOuter:10},regionBuiltVersion:0,geoVersion:0,builtVersion:0,frameCount:0,nodesPath:{},coloredNodes:new Map(),nodeById:new Map(nodes.map(n=>[n.id,n])),labelLines:new Map(),highlighted:new Set(nodes.map(n=>n.id)),subtleHighlight,nodeWorld:()=>({nodeR:2,labelSize:12,labelGap:3})};
+   const view={data:{nodes,edges:[{from:"n_claim",to:"arg_joint"}],colors:{node:"#fff",label:"#aaa",edge:"#888"}},settings:{edgeWidth:.5,labelZoom:8},canvas:{clientWidth:600,clientHeight:400},ctx,transform:{x:0,y:0,k:1},kFit:1,world:{nodeR:2,glowOuter:10},regionBuiltVersion:0,geoVersion:0,builtVersion:0,frameCount:0,nodesPath:{},coloredSemanticPaths:new Map(),coloredMapPaths:new Map(),coloredNodes:new Map(),nodeById:new Map(nodes.map(n=>[n.id,n])),labelLines:new Map(),highlighted:new Set(nodes.map(n=>n.id)),subtleHighlight,nodeWorld:()=>({nodeR:2,labelSize:12,labelGap:3})};
    (GraphCanvasRenderer.prototype as unknown as {draw:(this:unknown)=>void}).draw.call(view);
    assert.deepEqual(arcs.map(a=>a.slice(0,2)),[[10,20]]);
    if(subtleHighlight)assert(strokes.every(width=>width===.5),"focus preserves the thin edge width");

@@ -1,4 +1,5 @@
 "use client";
+import {AtlasReview} from "./atlas-review";
 import type {LearningContext} from "@/src/core";
 import {graphMathLabel} from "./graph-math-label";
 
@@ -996,6 +997,7 @@ export function GraphView({
 	const [layoutError, setLayoutError] = useState<string | null>(null);
 	const atlasRef = useRef(atlas.snapshot);
 	atlasRef.current = atlas.snapshot;
+	const [reviewOpen,setReviewOpen]=useState(false);
 	const [atlasOpen, setAtlasOpen] = useState(false);
  const [savedProof,setSavedProof]=useState<{id:string;chatId:string;key?:string}|null>(null);
  const [mapScope,setMapScope]=useState<AtlasMapScope|null>(null);
@@ -1599,6 +1601,7 @@ export function GraphView({
 					}}
 					onClose={() => setAtlasOpen(false)} propositions={snapshot?.propositions ?? []} onFocus={focusPath} />
 			)}
+            {reviewOpen&&<AtlasReview atlas={atlas.snapshot} onClose={()=>setReviewOpen(false)}/>}
             {mapScope&&<AtlasNeighbourhood key={`${mapScope.kind}:${mapScope.id}`} atlas={atlas.snapshot} scope={mapScope} onClose={()=>setMapScope(null)} onInspect={id=>{setConceptId(id);setAtlasOpen(true);setMapScope(null);}} onDerivations={setDerivationId} onLesson={(id,chatId,key)=>setSavedProof({id,chatId,key})}/>}
             {snapshot&&derivationId&&atlas.snapshot.concepts.some(c=>c.id===derivationId)&&<ConceptDerivations key={derivationId} concept={atlas.snapshot.concepts.find(c=>c.id===derivationId)!} graph={snapshot} lessonMaps={atlas.snapshot.lessonMaps} onOpenLesson={(id,chatId,key)=>setSavedProof({id,chatId,key})} save={atlas.save} onClose={()=>setDerivationId(null)} onLearn={onAtlasLearn?(context,prompt)=>{setDerivationId(null);setAtlasOpen(false);onAtlasLearn(context,prompt);}:undefined}/>}
             {linkPair&&<AtlasLinkEditor key={`${linkPair.sourceId}:${linkPair.targetId}`} snapshot={atlas.snapshot} {...linkPair} save={atlas.save} onSelect={id=>{setLinkPair(null);setConceptId(id);setAtlasOpen(true);}} onClose={()=>setLinkPair(null)}/>}
@@ -1710,6 +1713,7 @@ export function GraphView({
 			    its open dropdowns cover the number; clicks land on the panel. */}
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
 				<button type="button" onClick={() => rendererRef.current?.fit()} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Fit graph</button>
+				<button type="button" className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent" onClick={()=>setReviewOpen(true)}>Review</button>
 				<button type="button" aria-expanded={atlasOpen} onClick={() => setAtlasOpen((open) => !open)} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Atlas</button>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +

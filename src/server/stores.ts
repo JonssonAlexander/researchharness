@@ -1,3 +1,5 @@
+import {createProblemStore} from "../store/problems.ts";
+import {createLessonDocumentStore} from "../store/lesson-documents.ts";
 /**
  * THE COMPOSITION ROOT for storage — the single place concrete store
  * adapters are wired. Everything else (core, services, agents) codes against
@@ -18,6 +20,8 @@ import { createAtlasStore } from "../store/atlas.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
+ problemStore:createProblemStore(path.join(PATHS.data,"problems")),
+ lessonDocuments:createLessonDocumentStore(path.join(PATHS.data,"lesson-sources")),
  scratchpadStore:createScratchpadStore(path.join(PATHS.data,"scratchpads")),
  lessonStore:createLearningSessionStore(path.join(PATHS.data,"lessons")),
 	chatStore,

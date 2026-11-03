@@ -33,6 +33,14 @@ export function lessonScratchTarget(lesson:LearningSession,targetId?:string):Scr
  const topic=p.nodes.find(n=>n.id===(targetId?.startsWith("topic-")?targetId.slice(6):p.currentNodeId))??p.nodes[0]!;
  return d?{id:d.id,title:d.title,start:d.start,finish:d.finish}:{id:`topic-${topic.id}`,title:"Lesson scratchpad",start:topic.title,finish:p.objective};
 }
+/** Separate working pad per successfully posed practice problem; never reads its hidden solution. */
+export function practiceScratchTarget(messages:readonly LhMessage[],padId?:string):ScratchTarget|null{
+ const succeeded=new Set(messages.flatMap(m=>m.role==="toolResult"&&m.toolName==="problem"&&!m.isError?[m.toolCallId]:[]));
+ const problems=messages.flatMap(m=>m.role==="assistant"?m.content.flatMap(c=>c.type==="toolCall"&&c.name==="problem"&&succeeded.has(c.id)&&typeof c.arguments.statement==="string"?[c.arguments.statement]:[]):[]);
+ if(padId==="practice-draft"||!padId&&!problems.length)return {id:"practice-draft",title:"Practice scratchpad",start:"Working notes for this practice session.",finish:"Explain your reasoning."};
+ const index=padId?Number(/^practice-(\d+)$/.exec(padId)?.[1])-1:problems.length-1,statement=problems[index];
+ return typeof statement==="string"?{id:`practice-${index+1}`,title:`Practice problem ${index+1}`,start:statement.length<=4000?statement:"See the full problem statement in the conversation.",finish:"Solve the problem and explain your reasoning."}:null;
+}
 export function scratchAttemptMessage(a:ScratchAttempt):LhMarkerMessage{return {id:a.id,role:"custom",customType:"scratchpad-attempt",display:true,timestamp:Date.parse(a.createdAt),details:{attemptId:a.id,padId:a.padId,number:a.number,hasImage:!!a.imageHash,text:a.draft.text,title:a.draft.target.title},content:`Learner attempt ${a.number}: ${a.draft.target.title}\nStart: ${a.draft.target.start}\nFinish: ${a.draft.target.finish}\n${a.draft.text}${a.imageHash?"\n[Submitted drawing attached at the model boundary.]":""}\nGive a concise hint or explanation based on this attempt; preserve uncertainty in handwritten symbols.`};}
 /** Hydrate only at dispatch. Native history retains references, never base64 copies. */
 export function resolveScratchpadImages(messages:readonly AgentMessage[],read:(id:string)=>ImageContent):AgentMessage[]{const source=messages as readonly LhMessage[],cut=activeCompactionOf(source),start=cut?keptIndexFor(source,cut):0;return messages.map((m,i)=>{

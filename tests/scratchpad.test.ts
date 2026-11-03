@@ -8,7 +8,7 @@ import {Resvg} from '@resvg/resvg-js';
 import {createFauxCore,fauxAssistantMessage,fauxText} from '@earendil-works/pi-ai';
 import {createScratchpadStore,checkScratchPng} from '../src/store/scratchpad.ts';
 import {initialLesson} from '../src/core/learning-session.ts';
-import {lessonScratchTarget,scratchAttemptMessage,resolveScratchpadImages,scratchDelivery,type ScratchScene} from '../src/core/scratchpad.ts';
+import {practiceScratchTarget,lessonScratchTarget,scratchAttemptMessage,resolveScratchpadImages,scratchDelivery,type ScratchScene} from '../src/core/scratchpad.ts';
 import {projectView} from '../src/core/view.ts';
 import {toLlmMessages,asAgentMessages,nativeInputCause} from '../src/core/native-messages.ts';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'atlas-scratch-test-'));process.env.LH_DATA_DIR=path.join(root,'data');process.env.LH_AUTH_FILE=path.join(root,'auth.json');process.env.OPENROUTER_API_KEY='fake-key-presence';
@@ -91,4 +91,17 @@ test('retained lesson scratchwork is immutable, restart-safe and survives remova
  const restored=createScratchpadStore(folder);assert.deepEqual(restored.retained(note.id)!.draft,draft);assert.deepEqual(restored.retainedImage(note.id),image);
  const file=path.join(folder,'_retained',`${note.id}.json`),edited=JSON.parse(fs.readFileSync(file,'utf8'));edited.draft.text='Tampered';fs.writeFileSync(file,JSON.stringify(edited));assert.throws(()=>restored.retained(note.id),/corrupt/);
  assert.throws(()=>restored.retained('../outside'),/Invalid/);
+});
+
+
+test('ordinary Practice saves per-problem scratchpads and sends attempts through the existing practice agent',async()=>{
+ const {fauxToolCall}=await import('@earendil-works/pi-ai'),{createPracticeAgent}=await import('../src/agent/teacher-agent.ts'),{handleChatInput}=await import('../src/server/chat-handler.ts'),{runningTurn}=await import('../src/server/turn-runs.ts');
+ const chat=stores.chatStore.createChat('Practice drawing','practice');stores.chatStore.saveSettings(chat.id,{model:{provider:'openrouter',id:'openai/gpt-4.1'}});
+ const initial=await scratchpadResponse(new Request('http://local/pad'),chat.id);assert.equal(initial.status,200);assert.equal((await initial.json()).target.id,'practice-draft');
+ const messages=[{...fauxAssistantMessage([fauxToolCall('problem',{statement:'Prove the identity.',mode:'composition',modelSolution:'SECRET solution'},{id:'practice-call'})],{stopReason:'toolUse'}),id:'practice-pose'},{id:'practice-ack',role:'toolResult' as const,toolCallId:'practice-call',toolName:'problem',isError:false,content:[{type:'text' as const,text:'Problem posed'}],details:null,timestamp:Date.now()}];stores.chatStore.saveMessages(chat.id,messages);
+ const target=practiceScratchTarget(messages)!;assert.equal(target.id,'practice-1');assert(!JSON.stringify(target).includes('SECRET'));assert.equal(practiceScratchTarget(messages,'practice-999'),null);
+ const put=await scratchpadResponse(new Request('http://local/pad',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({padId:target.id,draft:{expectedRevision:0,target,scene,text:'My practice argument.'}})}),chat.id);assert.equal(put.status,200);
+ const token=id(),capture=await scratchpadResponse(new Request('http://local/pad',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({padId:target.id,id:token,expectedRevision:1,image:`data:image/png;base64,${image.toString('base64')}`})}),chat.id);assert.equal(capture.status,200);
+ const faux=createFauxCore({});faux.setResponses([context=>{assert(JSON.stringify(context.messages).includes('My practice argument.'));return fauxAssistantMessage([fauxText('Check the first equality in your argument.')]);}]);
+ const reply=await handleChatInput(chat.id,{type:'scratchpad',attemptId:token},opts=>createPracticeAgent({chatId:chat.id,chatStore:stores.chatStore},{...opts,engine:{model:faux.getModel(),streamFn:faux.streamSimple}}));assert.equal(reply.status,200);const run=runningTurn(chat.id);if(run)await new Response(run.subscribe()).text();assert(stores.chatStore.getChat(chat.id)!.messages.some(m=>m.id===token));assert.equal(stores.scratchpadStore.read(chat.id,target.id)!.text,'My practice argument.');
 });

@@ -1,4 +1,6 @@
 "use client";
+import {LessonSources,uploadLessonDocuments} from "./lesson-sources";
+import {AtlasLessonPicker} from "./atlas-lesson-picker";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -35,6 +37,7 @@ export function Home({
 }) {
 	const router = useRouter();
 	const [topic, setTopic] = useState("");
+ const [sourceFiles,setSourceFiles]=useState<File[]>([]),[sourceError,setSourceError]=useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
 	 * dictation flush lands via setState, invisible to a closure that
@@ -93,7 +96,9 @@ export function Home({
 	 *  Not enforcing any input format — the picks are a convenience. */
 	const [atlasContext,setAtlasContext]=useState<LearningContext|undefined>();
 	const [mode, setMode] = useState<"teach" | "practice">("teach");
-	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
+	const [practiceWorkflow,setPracticeWorkflow]=useState<"short"|"challenge">("short");
+ const [challengeMinutes,setChallengeMinutes]=useState(45);
+ const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
 	const pickedIds = useMemo(() => new Set(practiceProps.map((p) => p.id)), [practiceProps]);
@@ -111,7 +116,7 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
-		const t = topicRef.current.trim();
+		const t = topicRef.current.trim()||(mode==="practice"&&practiceWorkflow==="challenge"&&(atlasContext?.conceptIds.length||practiceProps.length)?"Choose one challenging proof problem involving the selected Atlas concepts. Use our prior work to select a useful unfamiliar application or combination.":"")||(mode==="teach"&&sourceFiles.length?`Teach me the main ideas and selected derivations in ${sourceFiles.map(f=>f.name).join(", ")}, connected to my existing Atlas knowledge.`:"");
 		if (!t || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
@@ -137,7 +142,7 @@ export function Home({
 		}
 		startingRef.current = true;
 		setBusy(true);
-		setStartError(false);
+		setStartError(false);setSourceError("");
 		try {
 			// The map context (owner, 2026-10-04): picks in EITHER mode ride
 			// the CREATION as graphContext — the server writes a
@@ -148,11 +153,13 @@ export function Home({
 				title: t,
 				atlasContext,
 				learning:mode!=="practice",
-				...(mode === "practice" ? { kind: "practice" } : {}),
+				...(mode === "practice" ? { kind: "practice",...(practiceWorkflow==="challenge"?{challenge:{workflow:"challenge" as const,minutes:challengeMinutes}}:{}) } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
+			if(mode==="teach"&&sourceFiles.length)await uploadLessonDocuments(target.split("/").at(-1)!,sourceFiles);
 			router.push(target);
-		} catch {
+		} catch (error) {
+   setSourceError(error instanceof Error?error.message:"");
 			startingRef.current = false;
 			setBusy(false);
 			setStartError(true);
@@ -222,9 +229,10 @@ export function Home({
 					    send consumes it). Practice mode with nothing picked
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
-					{atlasContext&&<div className="mb-2 flex items-center gap-2 rounded border bg-card px-3 py-2 text-xs"><span>Atlas learning target · {atlasContext.goal} · reviewed updates</span><button type="button" className="underline" onClick={()=>setAtlasContext(undefined)}>Clear target</button></div>}
+					{mode==="practice"&&<div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs"><select aria-label="Practice workflow" className="h-7 rounded border bg-card px-2" value={practiceWorkflow} onChange={e=>setPracticeWorkflow(e.target.value as "short"|"challenge")}><option value="short">Short practice</option><option value="challenge">Challenge</option></select>{practiceWorkflow==="challenge"&&<><label className="flex items-center gap-1"><input aria-label="Challenge minutes" type="number" min={5} max={240} className="h-7 w-14 rounded border bg-card px-1" value={challengeMinutes} onChange={e=>setChallengeMinutes(Math.max(5,Math.min(240,Number(e.target.value)||45)))}/>min</label><AtlasLessonPicker context={atlasContext} onChange={setAtlasContext}/></>}</div>}
+ {mode==="teach"?<div className="mb-1.5 flex min-w-0 items-start gap-1.5"><AtlasLessonPicker context={atlasContext} onChange={setAtlasContext}/><LessonSources files={sourceFiles} onFiles={setSourceFiles} disabled={busy}/></div>:atlasContext&&<button type="button" className="mb-2 rounded border bg-card px-3 py-2 text-xs" onClick={()=>setAtlasContext(undefined)}>Clear Atlas practice target</button>}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
+						picker={(practiceProps.length > 0 || mode === "practice") && !(mode==="practice"&&practiceWorkflow==="challenge") && (
 							<NodePickerControl
 								count={practiceProps.length}
 								onOpen={() => setChainSelectOpen(true)}
@@ -246,7 +254,7 @@ export function Home({
 							)
 						)}
 					/>
-					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{sourceError||OPENING_PROMPT_FAILURE}</p>}
 					<form
 						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
@@ -286,7 +294,7 @@ export function Home({
 					<button
 						type="submit"
 						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
+						disabled={(!topic.trim() && !dictation.active && !(mode==="teach"&&sourceFiles.length) && !(mode==="practice"&&practiceWorkflow==="challenge"&&(atlasContext?.conceptIds.length||practiceProps.length))) || busy}
 						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />

@@ -1,3 +1,6 @@
+import {currentChallenge} from "./problems.ts";
+import {challengeLesson,attemptStatus} from "../core/problems.ts";
+import {createRetrievalService} from "./retrieval.ts";
 import {z} from "zod";
 import {AtlasError,type AtlasSnapshot} from "../core/atlas.ts";
 import {lessonSummary,validateLessonSummary,initialLessonDecisions,planLessonSummary,type LessonReview,type LessonSource} from "../core/lesson-integration.ts";
@@ -24,10 +27,12 @@ const command=z.discriminatedUnion("action",[
 async function withLibraryGate<T>(critical:()=>T):Promise<T>{const g=globalThis as typeof globalThis&{__lhAuditLock?:{tail:Promise<void>}};const gate=g.__lhAuditLock??={tail:Promise.resolve()},previous=gate.tail;let release!:()=>void;gate.tail=new Promise<void>(resolve=>{release=resolve;});await previous;try{return critical();}finally{release();}}
 function engineFor(chatId:string){const chat=stores.chatStore.getChat(chatId),settings=stores.settingsStore.readSettings(),spec=resolveConversationSpec(chat?.settings,resolveSlot(settings?.models?.strong));if(!spec)throw new AtlasError("Choose a model for this lesson.",503);return piEngineForSpec(spec,false);}
 function source(chatId:string):LessonSource{
- const chat=stores.chatStore.getChat(chatId);if(!chat||chat.kind==="practice")throw new AtlasError("A learning session is required.",404);if(isTurnRunning(chatId))throw new AtlasError("Wait for the response to finish before reviewing.",409);
+ const chat=stores.chatStore.getChat(chatId);if(!chat||chat.kind==="practice"&&!chat.challenge)throw new AtlasError("A learning session is required.",404);if(isTurnRunning(chatId))throw new AtlasError("Wait for the response to finish before reviewing.",409);
  if(!chat.messages.some(m=>m.role==="assistant"))throw new AtlasError("Work through some material before reviewing the lesson.");
- const transcript=sessionMarkdown(chat.messages,{anchors:true});if(transcript.length>160000)throw new AtlasError("This session exceeds the 160,000-character review limit. Split it into focused sessions.",413);
- const lesson=stores.lessonStore.read(chatId)??{schemaVersion:1 as const,revision:1,status:"active" as const,plan:initialLesson(chat.title,stores.atlasStore.read().concepts.filter(c=>stores.atlasStore.sync.context(chatId)?.conceptIds.includes(c.id)))};
+ const challenge=chat.challenge?currentChallenge(chatId):null;
+ if(chat.challenge&&(!challenge||attemptStatus(challenge.attempt)==="inProgress"))throw new AtlasError("Finish or set aside this challenge before proposing Atlas updates.",409);
+ const transcript=(challenge?`[Saved challenge attempt: ${attemptStatus(challenge.attempt)}. The committed model solution and checking are preparation, not learner work. Only learner messages and submitted scratchwork show independent work. Retain requested hints, reveals, failed approaches and uncertainty. Reusable technique notes should include recognition cues, mechanism, conditions and failure cases; do not manufacture new concepts merely to populate Atlas.]\n\n`:"")+sessionMarkdown(chat.messages,{anchors:true});if(transcript.length>160000)throw new AtlasError("This session exceeds the 160,000-character review limit. Split it into focused sessions.",413);
+ const lesson=(challenge?challengeLesson(challenge.problem,challenge.attempt):null)??stores.lessonStore.read(chatId)??{schemaVersion:1 as const,revision:1,status:"active" as const,plan:initialLesson(chat.title,stores.atlasStore.read().concepts.filter(c=>stores.atlasStore.sync.context(chatId)?.conceptIds.includes(c.id)))};
  const scratchwork:NonNullable<LessonSource["scratchwork"]>=[];
  const pads:{padId:string;topicId:string;derivationId?:string}[]=[...lesson.plan.nodes.map(n=>({padId:`topic-${n.id}`,topicId:n.id})),...lesson.plan.derivations.map(d=>({padId:d.id,topicId:d.nodeId,derivationId:d.id}))];
  for(const pad of pads){
@@ -76,7 +81,7 @@ export function createLessonIntegrationService(engine=engineFor,distill=distillL
  },
  async commit(raw:unknown){const c=command.parse(raw);if(c.action!=="commit")throw new AtlasError("Explicit approval is required.");return withLibraryGate(()=>{
   let r=reviews.read(c.id);if(!r)throw new AtlasError("Review not found.",404);
-  if(r.status==="committed"){if(r.approval?.digest!==c.digest)throw new AtlasError("Approval differs.",409);return r;}
+  if(r.status==="committed"){if(r.approval?.digest!==c.digest)throw new AtlasError("Approval differs.",409);for(const saved of stores.problemStore.byChat(r.chatId))stores.problemStore.link(saved.problem.id,r.id);return r;}
   const pending=reviews.list().find(p=>p.status==="applying"&&p.id!==r!.id);if(pending)throw new AtlasError("Resume the interrupted lesson integration first.",409);
   if(r.status==="prepared"){
    if(r.digest!==c.digest||!r.plan)throw new AtlasError("Save a valid exact preview before approving.",409);
@@ -93,12 +98,13 @@ export function createLessonIntegrationService(engine=engineFor,distill=distillL
   mergeFindings(r.chatId,{propositions:plan.nodes.map(n=>({id:n.key,name:n.name,statement:n.statement,aliases:[],messageId:n.messageId})),chains:plan.chains.map(a=>({premises:a.premises,conclusion:a.conclusion}))},{links:plan.nodes.filter(n=>n.existing).map(n=>({id:n.key,linkTo:n.id}))},stores,{foldedAt:r.createdAt,reviewed:{operationId:r.id,nodes:expectedNodes,chains:expectedChains,createdAt:r.createdAt}});
   const canonical=getGraph(stores.graphStore);
   if(plan.nodes.some(n=>!canonical.nodes.some(p=>p.id===n.id&&[p.statement,...p.aliases].includes(n.statement)))||plan.chains.some(a=>!canonical.chains.some(b=>b.id===a.id&&b.conclusion===a.conclusion&&[...a.premises].sort().join(":")===[...b.premises].sort().join(":"))))throw new AtlasError("Canonical integration is incomplete; retry the same approval.",409);
-  const result=reviews.finish(r.id,c.digest);emit("atlas-changed",{});emit("lesson-changed",{chatId:r.chatId});emit("record-changed",{chatId:r.chatId});return result;
+  const result=reviews.finish(r.id,c.digest);
+  for(const saved of stores.problemStore.byChat(r.chatId))stores.problemStore.link(saved.problem.id,r.id);emit("atlas-changed",{});emit("lesson-changed",{chatId:r.chatId});emit("record-changed",{chatId:r.chatId});return result;
  });},
  };
 }
 export async function lessonIntegrationResponse(request:Request):Promise<Response>{try{
  const service=createLessonIntegrationService();if(request.method==="GET"){const q=new URL(request.url).searchParams;if(q.has("config"))return Response.json({model:service.model(q.get("chatId")??"")});if(q.has("id"))return Response.json({review:stores.atlasStore.lessonReviews.read(id.parse(q.get("id")))});return Response.json({reviews:stores.atlasStore.lessonReviews.list(q.get("chatId")??undefined)});}
  if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
- const c=command.parse(JSON.parse((await readSourceBody(request,1048576)).toString("utf8")));return Response.json({review:c.action==="generate"?await service.generate(c,request.signal):c.action==="edit"?service.edit(c):await service.commit(c)});
+ const c=command.parse(JSON.parse((await readSourceBody(request,1048576)).toString("utf8")));const review=c.action==="generate"?await service.generate(c,request.signal):c.action==="edit"?service.edit(c):await service.commit(c);if(c.action==="commit"){await createRetrievalService().autoEnrol();emit("review-changed",{});}return Response.json({review});
 }catch(e){return Response.json({error:e instanceof AtlasError?e.message:e instanceof z.ZodError?`Check proposal fields: ${e.issues[0]?.path.join(".")||"request"} — ${e.issues[0]?.message}`:"Lesson integration is unavailable. Local work is retained; retry the exact approval if interrupted."},{status:e instanceof AtlasError?e.status:400});}}

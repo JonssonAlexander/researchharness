@@ -103,3 +103,60 @@ test('topic transitions preserve coverage and learner-owned derivations across r
  assert.equal(saved.plan.nodes[0]!.progress,'explored');assert.equal(saved.plan.activeDerivationId,null);
  assert.equal(saved.plan.derivations[0]!.status,'working');assert.equal(nextLessonTopic(saved.plan),undefined);
 });
+
+test('multi-concept creation preserves selected order and rejects duplicates before creating a chat',async()=>{
+ const ids=[1,2].map(n=>`ac_00000000-0000-4000-8000-${String(n).padStart(12,'0')}`);
+ for(const [i,id] of ids.entries())stores.atlasStore.save({kind:'concept',id,expectedRevision:0,title:`Starting concept ${i}`,aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[]});
+ const create=(conceptIds:string[])=>POST(new Request('http://test/api/chats',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'Bridge these concepts',learning:true,atlasContext:{conceptIds,goal:'explain'}})}));
+ const response=await create([...ids].reverse());assert.equal(response.status,200);const {id}=await response.json();assert.deepEqual(stores.lessonStore.read(id)!.plan.nodes.map(n=>n.conceptId),[...ids].reverse());
+ const before=stores.chatStore.listChats().length;assert.equal((await create([ids[0]!,ids[0]!])).status,400);assert.equal(stores.chatStore.listChats().length,before);
+});
+test('Atlas tools are opt-in injected, plan updates reject fabricated concepts, and existing IDs survive',async()=>{
+ const {createLearningAgent}=await import('../src/agent/teacher-agent.ts'),{createFauxCore}=await import('@earendil-works/pi-ai');
+ const store=createLearningSessionStore(path.join(root,'aware-agent')),lesson=store.create('aware',initialLesson('A tailored route'));
+ const reader={read:()=>({atlas:stores.atlasStore.read(),propositions:[],chains:[]}),lesson:()=>null},faux=createFauxCore({});
+ const agent=createLearningAgent({chatId:'aware',chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},store,()=>{},{learning:lesson,engine:{model:faux.getModel(),streamFn:faux.streamSimple},atlasLookup:reader});
+ const names=agent.state.tools.map(t=>t.name);assert(names.includes('search_atlas'));assert(names.includes('read_atlas'));assert(!names.includes('quiz'));assert(agent.state.systemPrompt.includes('assisted argument never establishes independent mastery'));
+ const plan=structuredClone(lesson.plan);plan.nodes[0]!.conceptId='ac_00000000-0000-4000-8000-000000000099';
+ const tool=agent.state.tools.find(t=>t.name==='update_lesson')!;await assert.rejects(()=>tool.execute('invalid',{expectedRevision:1,plan},undefined),/existing Atlas/);assert.equal(store.read('aware')!.revision,1);
+});
+
+test('a native lesson retrieves Atlas notes, plans a bridge and teaches without changing canonical knowledge',async()=>{
+ process.env.OPENROUTER_API_KEY='test-key-presence-gate';
+ const {createLearningAgent}=await import('../src/agent/teacher-agent.ts'),{createFauxCore,fauxAssistantMessage,fauxToolCall,fauxText}=await import('@earendil-works/pi-ai'),{handleChatInput}=await import('../src/server/chat-handler.ts'),{runningTurn}=await import('../src/server/turn-runs.ts');
+ const conceptId='ac_00000000-0000-4000-8000-000000000003';stores.atlasStore.save({kind:'concept',id:conceptId,expectedRevision:0,title:'A known foundation',aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[],markdown:'Previously discussed with substantial assistance.'});
+ const chat=stores.chatStore.createChat('Bridge to an application');stores.chatStore.saveSettings(chat.id,{model:{provider:'openrouter',id:'z-ai/glm-5.3-flash'}});
+ const lesson=stores.lessonStore.create(chat.id,initialLesson('Connect a foundation to an application',[{id:conceptId,title:'A known foundation'}])),plan=structuredClone(lesson.plan);plan.nodes.push({id:'application',title:'A new application',conceptId:null,tangent:false});plan.connections.push({from:'topic_0',to:'application'});
+ const before=JSON.stringify([stores.atlasStore.read(),stores.graphStore.readNodes(),stores.graphStore.readChains()]),faux=createFauxCore({});
+ faux.setResponses([
+  ()=>fauxAssistantMessage([fauxToolCall('search_atlas',{query:'known foundation'},{id:'search_atlas_call'})],{stopReason:'toolUse'}),
+  context=>{assert(JSON.stringify(context.messages).includes(conceptId));return fauxAssistantMessage([fauxToolCall('read_atlas',{kind:'concept',id:conceptId},{id:'read_atlas_call'})],{stopReason:'toolUse'});},
+  context=>{assert(JSON.stringify(context.messages).includes('substantial assistance'));return fauxAssistantMessage([fauxToolCall('update_lesson',{expectedRevision:1,plan},{id:'bridge_plan'})],{stopReason:'toolUse'});},
+  ()=>fauxAssistantMessage([fauxText('We will connect the foundation to the application, revisiting the key step as needed.')]),
+ ]);
+ const response=await handleChatInput(chat.id,{type:'text',text:'Plan a lesson from my foundation to the application.'},opts=>{assert(opts.atlasLookup);return createLearningAgent({chatId:chat.id,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},stores.lessonStore,()=>{},{...opts,engine:{model:faux.getModel(),streamFn:faux.streamSimple}});});
+ assert.equal(response.status,200);const run=runningTurn(chat.id);if(run)await new Response(run.subscribe()).text();
+ assert.equal(stores.lessonStore.read(chat.id)!.revision,2);assert.equal(JSON.stringify([stores.atlasStore.read(),stores.graphStore.readNodes(),stores.graphStore.readChains()]),before);
+ const messages=stores.chatStore.getChat(chat.id)!.messages;for(const name of ['search_atlas','read_atlas','update_lesson'])assert(messages.some(m=>m.role==='toolResult'&&m.toolName===name));
+ // The existing global graph switch also disables the new read tools.
+ const previousSettings=stores.settingsStore.readSettings()??{version:1 as const};stores.settingsStore.writeSettings({...previousSettings,graph:{...previousSettings.graph,enabled:false}});
+ const disabled=createFauxCore({});disabled.setResponses([()=>fauxAssistantMessage([fauxText('We can continue from the current lesson context.')])]);
+ const next=await handleChatInput(chat.id,{type:'text',text:'Continue.'},opts=>{assert.equal(opts.atlasLookup,undefined);return createLearningAgent({chatId:chat.id,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},stores.lessonStore,()=>{},{...opts,engine:{model:disabled.getModel(),streamFn:disabled.streamSimple}});});
+ assert.equal(next.status,200);const second=runningTurn(chat.id);if(second)await new Response(second.subscribe()).text();stores.settingsStore.writeSettings(previousSettings);
+});
+
+test('topic inspection reads existing teaching and whole equations without changing the current topic',async()=>{
+ const {lessonTopicDetail}=await import('../src/core/lesson-topic.ts'),{fauxAssistantMessage,fauxText,fauxToolCall}=await import('@earendil-works/pi-ai');
+ const chat=stores.chatStore.createChat('Inspectable lesson'),plan=initialLesson('Understand variance');plan.nodes.push({id:'variance',title:'Curvature extracts variance',conceptId:null,tangent:false});plan.currentNodeId='variance';const lesson=stores.lessonStore.create(chat.id,plan);
+ const messages=[{...fauxAssistantMessage([fauxToolCall('update_lesson',{expectedRevision:1,plan},{id:'focus_variance'})],{stopReason:'toolUse'}),id:'plan-message'},{id:'focus-result',role:'toolResult' as const,toolCallId:'focus_variance',toolName:'update_lesson',isError:false,content:[{type:'text' as const,text:'Saved'}],details:null,timestamp:Date.now()},{...fauxAssistantMessage([fauxText('Curvature measures how the slope changes.\n\n$$d[F(X_t)] = F\u2032(X_t)dX_t + \\tfrac12 F\u2033(X_t)d[X]_t.$$\n\nThe second term captures accumulated variance.')]),id:'teaching-message'}];
+ stores.chatStore.saveMessages(chat.id,messages);const before=JSON.stringify([stores.lessonStore.read(chat.id),stores.chatStore.getChat(chat.id),stores.atlasStore.read()]);
+ const detail=lessonTopicDetail(lesson,messages,'variance');assert.equal(detail?.source,'From the lesson conversation');assert(detail?.text.includes('\\tfrac12'));assert.equal((detail!.text.match(/\$\$/g)??[]).length,2);
+ const response=await lessonResponse(new Request(`http://test/lesson?topic=variance`),chat.id);assert.equal(response.status,200);assert.deepEqual((await response.json()).detail,detail);assert.equal(JSON.stringify([stores.lessonStore.read(chat.id),stores.chatStore.getChat(chat.id),stores.atlasStore.read()]),before);
+ assert.equal((await lessonResponse(new Request('http://test/lesson?topic=absent'),chat.id)).status,404);
+});
+test('short topic notes take precedence, survive plan updates and old nodes need no migration',async()=>{
+ const {lessonTopicDetail}=await import('../src/core/lesson-topic.ts'),store=createLearningSessionStore(path.join(root,'topic-notes')),plan=initialLesson('A clear route');plan.nodes[0]!.notes='The local variance rate is $\\sigma_t^2$. Symbols refer to the underlying process.';
+ const original=store.create('notes',plan);assert.equal(lessonTopicDetail(original,[],'topic_0')?.text,plan.nodes[0]!.notes);const update=structuredClone(plan);delete update.nodes[0]!.notes;
+ await lessonTools('notes',store,()=>{}).update_lesson!.execute('preserve',{expectedRevision:1,plan:update},undefined);assert.equal(store.read('notes')!.plan.nodes[0]!.notes,plan.nodes[0]!.notes);
+ const legacy=store.create('legacy',initialLesson('An unexplored topic'));assert.equal(lessonTopicDetail(legacy,[],'topic_0')?.text,'');assert.equal(lessonTopicDetail(legacy,[],'missing'),null);
+});

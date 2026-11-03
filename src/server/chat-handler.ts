@@ -1,3 +1,6 @@
+import {challengeProjection,challengeScratchLesson,recoverChallengeHistory,reconcileChallengeCalls} from "./problems.ts";
+import {lessonDocumentReader} from "./lesson-documents.ts";
+import {graphView} from "./graph.ts";
 import {scratchDelivery} from "../core/scratchpad.ts";
 import {scratchMessage,scratchImages} from "./scratchpad.ts";
 import {learningInstructions} from "../core/learning-session.ts";
@@ -198,6 +201,7 @@ export async function handleChatInput(
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 ): Promise<Response> {
 	let record = stores.chatStore.getChat(chatId);
+ if(record?.challenge)record=recoverChallengeHistory(record);
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
 	}
@@ -206,7 +210,7 @@ export async function handleChatInput(
 
  if(input.type==="scratchpad"){
   if(record.messages.some(m=>m.id===input.attemptId))return settledTurnResponse();
-  try{if(!stores.lessonStore.read(chatId)||record.kind==="practice")return Response.json({error:"Open a learning session first."},{status:409});scratchMessage(chatId,input.attemptId);}catch(e){return Response.json({error:e instanceof Error?e.message:"Attempt unavailable"},{status:400});}
+  try{if(!stores.lessonStore.read(chatId)&&!challengeScratchLesson(chatId)&&record.kind!=="practice")return Response.json({error:"Open a learning session first."},{status:409});scratchMessage(chatId,input.attemptId);}catch(e){return Response.json({error:e instanceof Error?e.message:"Attempt unavailable"},{status:400});}
  }
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
@@ -449,6 +453,9 @@ export async function handleChatInput(
 	});
 	const agentOpts: AgentBuildOptions = {
  learning:lesson??undefined,
+ lessonSources:lesson?lessonDocumentReader(chatId,engine.model.input.includes("image")):undefined,
+ challenge:record.challenge?{store:stores.problemStore,minutes:record.challenge.minutes}:undefined,
+ atlasLookup:(lesson||record.challenge)&&graphToolsEnabled(effective)?{read:()=>{const graph=graphView();return {atlas:stores.atlasStore.read(),propositions:graph.propositions,chains:graph.chains};},lesson:id=>stores.atlasStore.lessonReviews.read(id)}:undefined,
  resolveAttachments:messages=>scratchImages(chatId,messages,engine.model.input.includes("image")),
 		engine,
 		callPurpose,
@@ -553,6 +560,7 @@ export async function handleChatInput(
 		// LH_PROVIDER_EVENTS=1.
 		providerEventNote(chatId, "turn", `run start (base: ${agentMessages.length} messages)`);
 		const handle = runPiTurn({
+ ...(record.challenge?{clientProjection:challengeProjection(chatId)}:{}),
 			agent: constructed,
 			requestCycle,
 			// The coalescing window seam (COMPACTION LAW, 2026-10-09): tests
@@ -594,6 +602,7 @@ export async function handleChatInput(
 				// Wave B: append only messages past the temporary agent prefix.
 				// Retry's saved record still includes its earlier failed attempts.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
+ if(record.challenge)reconcileChallengeCalls(chatId,stores.chatStore.getChat(chatId)!.messages);
 				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The

@@ -391,6 +391,35 @@ Start with the pinned package defaults and expose the effective retention settin
 
 Use a configurable review-time budget and useful-item prioritization; excess work is deferred, not an endless mandatory queue. Conversation starting parameters are approximately **10–15 minutes retrieval on study days and two longer problem-solving sessions per week**, configurable suggestions rather than an optimum or authorization for calendar reminders. Reduce workload when it interferes with primary research.
 
+### 12.2 Owner-approved graph-aware review design (31 October 2026; first slice implemented)
+
+Use a separate full-Atlas Review view with the existing stable layout. Node
+appearance comes directly from FSRS scheduling for its enrolled basic retrieval
+target: scheduled for later, approaching due, due/overdue along a continuous visual
+scale. Do not add three separate map modes, a separate "worked through with help"
+state/marker, or a general concept-mastery score. Attempt assistance can remain in
+source history for honest scheduling without becoming another map classification.
+
+Prefer short basic questions covering roughly 3–4 genuinely connected concepts
+when useful due material can be grouped; use proper Anki-style front/back cards
+for individual targets and isolated/particularly overdue material. Keep stable
+per-target scheduling beneath the temporary daily groups. Credit only concepts
+actually exercised; never give every mentioned node the same successful rating.
+Revealing/explaining a solution does not certify independent recall. No numerical
+plug-and-chug: review conceptual understanding, symbolic identities, assumptions,
+short arguments and simple applications. Advanced problems remain separate.
+
+The daily hard ceiling is **20 activities**, not a goal; normally aim well below
+it (initial suggestion 3–6, fewer when connected questions cover the useful due
+material). One cluster question is one activity even if it exercises several
+nodes. Retain a configurable time budget, limit new enrolments, and leave excess
+work due rather than manufacturing failures or forcing catch-up. No automatic
+card for every node, no hundreds-card daily deck. The first implemented slice
+uses explicit per-node card enrolment, FSRS-7, connected basic question preparation,
+self-rated outcomes and a separate Review canvas. Automated target suggestions,
+advanced practice and calibrated personal understanding remain later work.
+See [review storage, workflow and validation](docs/atlas-spaced-review.md).
+
 ## 13. Research workspace and VS Code integration (R13–R15)
 
 Support mathematical and computational styles inside the same Research workspace. Sessions may begin exploratorily without a declared hypothesis. Maintain a compact owner-editable record of question, assumptions, approaches/failed attempts, evidence, actual result, limitations and next question, linked to underlying artifacts and canonical IDs. Summaries support continuity; they never replace the evidence or silently change a conjecture into a theorem.
@@ -782,3 +811,102 @@ evidence may additionally link a specific claim. Topic context is not proof evid
 Keep galleries collapsed, preserve false starts and unsent drafts, and never add
 scratchwork as graph claims. Copies survive source chat deletion. No extra image
 upload/model call or automatic knowledge integration occurs. See atlas-scratchpad.md.
+
+Atlas-aware lessons (R04–R05, R08–R09, R14–R17): the home composer offers one
+optional multi-concept picker (up to 20, preserving selected order). Conversational
+learning agents can search/read Atlas concepts, claims and integrated lesson
+arguments through injected read-only tools under the existing graph-access gate.
+Retrieve relevant notes and source-labelled assistance to plan a route; never infer
+independent understanding from a saved node or discussed lesson. Keep actual joint
+premise sets, provenance, uncertainty and explicit retrieval omissions. Stable IDs
+link the lesson map; genuinely new topics remain local with null concept IDs.
+No automatic canonical writes, image uploads or new agent hierarchy. See
+[as-built lookup, UI and limits](docs/atlas-aware-lessons.md).
+
+Spaced review first slice (R01–R04, R08–R12, R15–R17): keep the FSRS canvas in
+its own Review view; never recolour or move the main Atlas. Pin ts-fsrs 6.0.0 /
+FSRS-7, retain effective defaults and every event/correction, and apply scheduling
+only to explicitly attempted/rated targets. Schema v15 backs up v14 before adding
+independent retrieval items, activities, immutable events and settings. Persist card
+schedules and event receipts in one SQLite transaction. Preserve exact target
+versions and per-concept outcomes; Not tested and skips do not grade recall.
+Use the existing local Excalidraw/dictation seams for answer drafts and retained
+attempts. Only explicit connected-question preparation invokes the selected strong
+model, with usage retained and bounded calls; source text is not instructions.
+Model-checked references are not formal proof verification. No automatic card mass
+enrolment, source-note writes, main-Atlas changes or advanced-practice scheduling.
+See docs/atlas-spaced-review.md for limits, source staleness and real-device gates.
+
+1 November review follow-up (R07, R12): approved lesson/map concepts with useful
+source notes automatically receive one basic retrieval target, including catch-up
+when Review opens. This supersedes manual-only enrolment. Preserve existing cards,
+pauses and schedules; no extra model call, ratings or main-Atlas styling changes.
+Use the latest approved reading intact; skip bare labels/oversized references.
+
+1 November daily review follow-up (R01–R04, R12): Review node colours now reflect
+FSRS recall probability directly (unknown remains neutral); edges use the mean of
+their endpoint probabilities. This supersedes the due-progress palette. Keep main
+Atlas styling unchanged. One Daily review action authorizes its bounded queue,
+prepares connected basics on demand, falls back to cards and advances after each
+explicit outcome. Show scheduler-derived next-review intervals after reveal;
+previews never mutate scheduling. No background paid generation job.
+
+1 November source-based lessons (R05, R10–R11, R14–R17): Add source on home and
+lesson composers accepts PDFs and supported UTF-8 text formats. Retain immutable,
+content-addressed local originals through the composed lesson-document store.
+Upload/validation never invokes a model. Learning agents receive bounded, cited
+source-reading/page-inspection tools alongside existing gated Atlas lookup, and
+plan around relevant prior work without inferring mastery. Treat all source text
+as evidence, never instructions. Preserve native history, image capability checks,
+usage and reviewed canonical integration. See docs/atlas-lesson-sources.md for
+limits, persistence, privacy and unsupported formats/cleanup.
+
+### Saved challenges and Problems collection (1 November 2026; implemented)
+
+Practice now has a distinct Challenge workflow, with an editable 45-minute
+selection budget, bounded Atlas traversal, checked-before-pose solution commitment
+and one persistent problem per session. Keep the short-practice doctrine unchanged;
+challenge policy allows long search, learner-requested minimal hints, no imposed
+warm-ups/checkpoints/retests and no automatic end at the time budget.
+
+Problems live outside chat transcripts with separate chronological attempts,
+source/checking provenance, hidden solutions, correction/reveal/defect events and
+canonical concept/technique links. Retry uses a fresh chat and scratchpad, not prior
+hints. Save before successful presentation; recover interrupted durable poses.
+Browser, stream and export projections must conceal private preparation until
+reveal while retaining native model history. Revealing does not establish a solve.
+
+Atlas → Problems and Related problems provide a separate shared-hub map and list.
+Keep problem nodes out of the main Atlas. Completed/set-aside attempts may propose
+reviewed derivations, techniques or concepts through the existing integration and
+scratchwork-retention path; link receipts without duplicate integration. Private
+model solutions are not evidence of independent learner work. Challenge outcomes
+never directly update FSRS. AI checking is evidence, not formal certification.
+See [as-built workflow, storage, limitations and validation](docs/atlas-challenges.md).
+
+### Inspectable lesson topics (2 November 2026; implemented)
+
+Lesson node inspection shows a compact Markdown/LaTeX explanation, including the
+current topic. Topic plans accept optional short `notes`; the teacher supplies a
+plain-language meaning and useful equation, and preserves existing notes when a
+plan update omits them. Legacy lessons need no migration: read-only inspection can
+show existing learner-facing teaching for that topic, a saved derivation target or
+linked Atlas notes. Do not invent explanations from a title or expose model
+preparation. Keep complete equation blocks. Inspecting does not advance the lesson
+or invoke a model; Clarify in chat explicitly requests a concise saved explanation
+through the existing teacher. Continue here remains a separate action.
+
+Practice scratchpad follow-up (2 November 2026): the existing small/half/full
+scratchpad is available in ordinary Practice as well as Challenge, including
+working notes before the first problem. Each successfully posed short-practice
+problem has a separate saved pad; previous pads remain readable and flushable.
+Explicit submissions use the existing image-capability gate, native reference
+markers, immutable attempts and practice hint protocol. Never expose the hidden
+model solution as a scratchpad target.
+
+Review scratchpad visibility follow-up (3 November 2026): daily review's drawing
+control is labelled Scratchpad and opens a separate small/half/full writing pane.
+Half/small keep the question visible; fullscreen keeps the canvas clear and offers
+a collapsed Question and explicit reveal action. Reuse existing per-activity
+local autosave, drawing capture and retention. Opening or resizing the pad never
+reveals the reference, rates an item or calls a model.

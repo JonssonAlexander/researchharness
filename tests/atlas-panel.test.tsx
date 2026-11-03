@@ -878,3 +878,54 @@ test('lesson review keeps two proposed proofs in one map and selects results wit
   assert(ui.document.body.textContent.includes('3 claims · 1 arguments'));
  }finally{await ui.close();}
 });
+
+test('lesson context picker selects and removes several concepts without changing graph data',async()=>{
+ const {AtlasLessonPicker}=await import('../components/atlas-lesson-picker.tsx');
+ const nextId='ac_00000000-0000-4000-8000-000000000002',data={...snapshot,concepts:[...snapshot.concepts,{...snapshot.concepts[0]!,id:nextId,title:'Quadratic variation'}]},oldFetch=globalThis.fetch,calls:{url:string;method:string}[]=[];
+ globalThis.fetch=async(url,options)=>{calls.push({url:String(url),method:options?.method??'GET'});return Response.json(data);};
+ let selection:import('../src/core/atlas-sync.ts').LearningContext|undefined;
+ function Harness(){const [context,setContext]=React.useState<typeof selection>();return <AtlasLessonPicker context={context} onChange={value=>{selection=value;setContext(value);}}/>;}
+ const connect=()=>({close(){},onOpen(){},onEvent(){}}),ui=await mount(()=><ServerEventsProvider connect={connect}><Harness/></ServerEventsProvider>);
+ try{
+  await act(async()=>{});
+  const checks=[...ui.document.querySelectorAll('input[type="checkbox"]')];assert.equal(checks.length,2);
+  for(const check of checks)await act(async()=>{check.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(selection?.conceptIds,[id,nextId]);assert.equal(selection?.goal,'explain');
+  const remove=ui.document.querySelector('button[aria-label="Remove Brownian motion"]')!;await act(async()=>{remove.dispatchEvent(new window.Event('click',{bubbles:true}));});assert.deepEqual(selection?.conceptIds,[nextId]);
+  const clear=[...ui.document.querySelectorAll('button')].find(n=>n.textContent==='Clear')!;await act(async()=>{clear.dispatchEvent(new window.Event('click',{bubbles:true}));});assert.equal(selection,undefined);assert(calls.every(c=>c.url==='/api/atlas'&&c.method==='GET'));
+ }finally{await ui.close();globalThis.fetch=oldFetch;}
+});
+
+test('separate Review reveals a reference only after an attempt and applies an Anki rating without Atlas writes',async()=>{
+ const {AtlasReview}=await import('../components/atlas-review.tsx'),{DEFAULT_REVIEW_SETTINGS,REVIEW_VERSION}=await import('../src/core/retrieval.ts');
+ const now=new Date().toISOString(),item={id:'ri_00000000-0000-4000-8000-000000000001',conceptId:id,title:'Brownian motion',front:'State the basic idea.',back:'A hidden reference answer.',sourceHash:'hash',revision:1,targetVersion:1,paused:false,createdAt:now,card:{dueAt:now,lastReviewAt:null,reps:0},config:{...REVIEW_VERSION,parameters:{}}};
+ let activity={id:'ra_00000000-0000-4000-8000-000000000001',revision:1,day:'2026-10-31',timeZone:'Europe/Stockholm',createdAt:now,status:'ready',items:[{id:item.id,conceptId:id,title:item.title,revision:1,targetVersion:1}],front:item.front,answer:'',attempted:false} as Record<string,unknown>;
+ let active:Record<string,unknown>|null=activity,last:Record<string,unknown>|null=null;const calls:Record<string,unknown>[]=[],old=globalThis.fetch;
+ const state=()=>({now,refreshAt:new Date(Date.now()+3600000).toISOString(),day:'2026-10-31',settings:DEFAULT_REVIEW_SETTINGS,items:[{item,retrievability:null,stale:false}],model:null,used:1,remaining:5,deck:{groups:[],due:1,deferred:0,estimatedSeconds:0},active,last});
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('drawing='))return Response.json({draft:null});if(!init?.body)return Response.json(state());const command=JSON.parse(String(init.body));calls.push(command);if(command.action==='reveal'){activity={...activity,revision:2,status:'revealed',attempted:true,back:item.back};active=activity;}if(command.action==='rate'){activity={...activity,revision:3,status:'rated',ratings:command.ratings};active=null;last=activity;}return Response.json({result:activity,snapshot:state()});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><AtlasReview atlas={snapshot} onClose={()=>{}}/></ServerEventsProvider>);
+ try{
+  await act(async()=>{});assert(!ui.document.body.textContent.includes(item.back));assert([...ui.document.querySelectorAll('button')].some(b=>b.textContent==='Scratchpad'));
+  const reveal=[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='I tried · show answer')!;assert(reveal);await act(async()=>{reveal.dispatchEvent(new window.Event('click',{bubbles:true}));});assert(ui.document.body.textContent.includes(item.back));
+  const good=[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Good')!;await act(async()=>{good.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(calls.map(c=>c.action),['reveal','rate']);assert.deepEqual(calls[1]!.ratings,{[item.id]:3});assert(ui.document.body.textContent.includes('Today'));
+ }finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('Daily review advances through cards automatically and displays FSRS intervals',async()=>{
+ const {AtlasReview}=await import('../components/atlas-review.tsx'),{DEFAULT_REVIEW_SETTINGS,REVIEW_VERSION}=await import('../src/core/retrieval.ts');
+ const now=new Date().toISOString(),items=[1,2].map(n=>({id:`ri_00000000-0000-4000-8000-00000000000${n}`,conceptId:id,title:`Concept ${n}`,front:`Recall ${n}`,back:`Reference ${n}`,sourceHash:'hash',revision:1,targetVersion:1,paused:false,createdAt:now,card:{dueAt:now,lastReviewAt:null,reps:0},config:{...REVIEW_VERSION,parameters:{}}}));
+ let active:Record<string,unknown>|null=null,last:Record<string,unknown>|null=null,started=0;const calls:string[]=[],old=globalThis.fetch;
+ const state=()=>({now,refreshAt:new Date(Date.now()+3600000).toISOString(),day:'2026-11-01',settings:DEFAULT_REVIEW_SETTINGS,items:items.map(item=>({item,retrievability:null,stale:false})),model:null,used:started,remaining:6-started,deck:{groups:items.slice(started).map(i=>[i.id]),due:2-started,deferred:0,estimatedSeconds:90},active,last,intervals:Object.fromEntries(items.map(i=>[i.id,[1,2,3,4].map(n=>new Date(Date.parse(now)+n*86400000).toISOString())]))});
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('drawing='))return Response.json({draft:null});if(!init?.body)return Response.json(state());const c=JSON.parse(String(init.body));calls.push(c.action);if(c.action==='start'){const item=items.find(i=>i.id===c.itemIds[0])!;started++;active={id:c.id,revision:1,status:'ready',items:[item],front:item.front,answer:'',attempted:false};}if(c.action==='reveal')active={...active,revision:2,status:'revealed',back:items[started-1]!.back};if(c.action==='rate'){last={...active,status:'rated',revision:3};active=null;}return Response.json({result:active??last,snapshot:state()});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><AtlasReview atlas={snapshot} onClose={()=>{}}/></ServerEventsProvider>);
+ const press=async(label:string)=>{await act(async()=>{const b=[...ui.document.querySelectorAll('button')].find(b=>b.textContent?.startsWith(label));assert(b,label);b.dispatchEvent(new window.Event('click',{bubbles:true}));});};
+ try{await act(async()=>{});await press('Daily review');assert(ui.document.body.textContent.includes('Recall 1'));await press('I tried');assert(ui.document.body.textContent.includes('Good3d'));await press('Good');assert(ui.document.body.textContent.includes('Recall 2'));await press('I tried');await press('Good');assert.deepEqual(calls,['start','reveal','rate','start','reveal','rate']);assert(ui.document.body.textContent.includes('Nothing due'));}finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('lesson source control uploads the chosen file without dispatching a teaching turn',async()=>{
+ const {LessonSources}=await import('../components/lesson-sources.tsx');const old=globalThis.fetch,calls:{url:string;method:string}[]=[],source={id:'ls_'+'a'.repeat(64),name:'paper.tex'},files:typeof source[]=[];let attached=0;
+ globalThis.fetch=async(url,init)=>{calls.push({url:String(url),method:init?.method??'GET'});if(init?.method==='POST'){assert(init.body instanceof File);files.push(source);return Response.json({source});}return Response.json({sources:files});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><LessonSources chatId="lesson" onAttached={()=>attached++}/></ServerEventsProvider>);
+ try{await act(async()=>{});const input=ui.document.querySelector('input[type="file"]')!;Object.defineProperty(input,'files',{configurable:true,value:[new File(['Assume independence.'],'paper.tex',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new window.Event('change',{bubbles:true}));});assert.equal(attached,1);assert(ui.document.body.textContent.includes('paper.tex'));assert.equal(calls.filter(c=>c.method==='POST').length,1);assert(calls.every(c=>c.url.includes('/sources')));}finally{await ui.close();globalThis.fetch=old;}
+});

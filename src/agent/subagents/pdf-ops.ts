@@ -160,7 +160,8 @@ export function parsePageSpec(spec: string, total: number): number[] {
 
 /** pdf_extract: text of the requested pages, `--- Page N ---` headed. */
 export async function pdfExtract(filePath: string, pageSpec: string): Promise<string> {
-	const { doc } = await openDocument(filePath);
+	const { doc, task } = await openDocument(filePath);
+ try {
 	const pages = parsePageSpec(pageSpec, doc.numPages);
 	if (pages.length === 0) return "No pages selected — page spec matched nothing.";
 	const out: string[] = [];
@@ -171,6 +172,7 @@ export async function pdfExtract(filePath: string, pageSpec: string): Promise<st
 		out.push(itemsToText(content.items as unknown[]));
 	}
 	return out.join("\n");
+ }finally{await task.destroy();}
 }
 
 export interface PdfSearchHit {
@@ -237,3 +239,5 @@ export function renderDir(filePath: string): string {
 	}
 	return path.join("/tmp", `lh-pdf-${h.toString(16).padStart(8, "0")}`);
 }
+/** Bounded upload validation; no extraction/model call. */
+export async function pdfPageCount(filePath:string):Promise<number>{const {doc,task}=await openDocument(filePath);try{return doc.numPages;}finally{await task.destroy();}}

@@ -1,9 +1,14 @@
 "use client";
+import {ChallengeWorkspace} from "./challenge-workspace";
+import {problemRequest} from "./problems";
+import {challengeLesson,type ChallengeSettings,type PublicProblem} from "@/src/core";
+
+import {LessonSources} from "./lesson-sources";
 import {LessonScratchpad} from "./lesson-scratchpad";
 import Image from "next/image";
 import {LessonIntegrationReview} from "./lesson-integration";
 import {LessonWorkspace} from "./lesson-workspace";
-import {lessonScratchTarget,type LearningSession} from "@/src/core";
+import {lessonScratchTarget,practiceScratchTarget,type LearningSession} from "@/src/core";
 import {LessonAtlasReview} from "./atlas-sync-review";
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -223,10 +228,12 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
  initialLearning=null,
+ initialChallenge,
 	kind = "teach",
 }: {
 	chatId: string;
  initialLearning?:LearningSession|null;
+ initialChallenge?:ChallengeSettings;
 	title: string;
 	initialMessages: LhMessage[];
 	/** Memory-only settlement notice supplied on reopening. */
@@ -252,6 +259,8 @@ export function Chat({
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
+ const [challengeProblem,setChallengeProblem]=useState<PublicProblem|null>(null);
+ const challengeLayout=challengeProblem?challengeLesson(challengeProblem,challengeProblem.attempts.find(a=>a.id===challengeProblem.selectedAttemptId)??challengeProblem.attempts.at(-1)!):null;
  const [lesson,setLesson]=useState<LearningSession|null>(initialLearning);
  const [lessonReviewOpen,setLessonReviewOpen]=useState(false);
  const [scratchpadOpen,setScratchpadOpen]=useState(false);
@@ -465,12 +474,19 @@ export function Chat({
 	// same dock-ownership rule as a pending question — an active problem
 	// replaces the composer. Computed from the NATIVE record (the fold is
 	// the gate the tools themselves read), not the projected view.
-	const activeProblem = activeProblemOf(nativeMessages);
+	const challengeAttempt=challengeProblem?.attempts.find(a=>a.id===challengeProblem.selectedAttemptId);
+ const scratchTarget=lesson?lessonScratchTarget(lesson):challengeLayout?lessonScratchTarget(challengeLayout):kind==="practice"?practiceScratchTarget(nativeMessages):null;
+ const activeProblem = initialChallenge&&challengeAttempt&&challengeAttempt.status!=="inProgress"?null:activeProblemOf(nativeMessages);
 	const activeProblemRef = useRef(activeProblem);
 	activeProblemRef.current = activeProblem;
 
 	const localStream = status === "submitted" || status === "streaming";
-	const busy = localStream || turnInFlight;
+	const [sourceUploading,setSourceUploading]=useState(false);
+ const busy = localStream || turnInFlight;
+ const loadChallenge=useCallback(()=>{if(initialChallenge)void problemRequest(`chatId=${encodeURIComponent(chatId)}`).then(v=>setChallengeProblem(v.problems[0]??null)).catch(()=>{});},[chatId,initialChallenge]);
+ useEffect(()=>{if(!busy)loadChallenge();},[busy,loadChallenge]);
+ useServerEvent("problems-changed",loadChallenge);
+ useServerResync(loadChallenge);
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
 	// The attach handoff (stream-reattach wave): the moment a resumed
@@ -759,7 +775,7 @@ export function Chat({
 	 * has ever been posed (the fresh session's opening turn is owed, not
 	 * the move-on). Enter-on-empty and the Next chip both key on it. */
 	const nextReady =
-		kind === "practice" &&
+		kind === "practice" && !initialChallenge &&
 		!pending &&
 		!activeProblem &&
 		!compacting &&
@@ -1277,8 +1293,8 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-        <div className={lesson&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
- {lesson&&!scratchpadOpen&&<LessonWorkspace chatId={chatId} lesson={lesson} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
+        <div className={scratchTarget&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
+ {lesson&&!scratchpadOpen&&<LessonWorkspace chatId={chatId} lesson={lesson} onExplain={(id,title)=>{void send({type:"text",text:`Briefly clarify what “${title}” means in this lesson: one plain-language explanation and the key equation with its symbols defined, if relevant. Save the concise explanation in the notes of lesson node ${id}. Keep our current topic and lesson route unchanged.`});}} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1354,8 +1370,8 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
-					{lesson&&<button type="button" className="lh-no-drag shrink-0 rounded border px-3 py-1.5 text-xs hover:bg-accent" onClick={()=>setScratchpadOpen(true)}>Scratchpad</button>}
-					{lesson?<LessonIntegrationReview chatId={chatId} open={lessonReviewOpen} onOpenChange={setLessonReviewOpen}/>:<LessonAtlasReview chatId={chatId}/>}
+					{scratchTarget&&<button type="button" className="lh-no-drag shrink-0 rounded border px-3 py-1.5 text-xs hover:bg-accent" onClick={()=>setScratchpadOpen(true)}>Scratchpad</button>}
+					{lesson?<LessonIntegrationReview chatId={chatId} open={lessonReviewOpen} onOpenChange={setLessonReviewOpen}/>:!initialChallenge?<LessonAtlasReview chatId={chatId}/>:null}
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1393,12 +1409,13 @@ export function Chat({
 							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
 						>
 							<DumbbellIcon className="size-3" />
-							Practice
+							{initialChallenge?"Challenge":"Practice"}
 						</span>
 					) : (
 						lesson?<span className="text-xs uppercase text-muted-foreground">Learning</span>:<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
 				</TopBar>
+ {initialChallenge&&challengeProblem&&<ChallengeWorkspace problem={challengeProblem} busy={busy} onChange={setChallengeProblem}/>}
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
@@ -1728,7 +1745,8 @@ export function Chat({
 							)
 						)
 					}
-					composer={
+					composer={<>
+ {lesson&&<div className="px-2 pt-1"><LessonSources chatId={chatId} disabled={busy} onUploading={setSourceUploading} onAttached={()=>{if(!textRef.current.trim())applyText("Teach me from the attached source. Connect its ideas to my Atlas and adapt the lesson to our prior work.");}}/></div>}
 						<Composer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -1740,7 +1758,7 @@ export function Chat({
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
-							canSend={canSend}
+							canSend={canSend&&!sourceUploading}
 							onEscape={dictation.active ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
@@ -1748,7 +1766,7 @@ export function Chat({
 							nextProblem={nextReady}
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
-						/>
+						/></>
 					}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;
@@ -1787,7 +1805,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
-		{lesson&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${lessonScratchTarget(lesson).id}`} chatId={chatId} lesson={lesson} busy={busy} onClose={()=>setScratchpadOpen(false)} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
+		{scratchTarget&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${scratchTarget.id}`} chatId={chatId} targetOverride={scratchTarget} busy={busy} onClose={()=>setScratchpadOpen(false)} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>

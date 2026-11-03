@@ -106,6 +106,7 @@ export interface CanvasNode {
  *  implication point, one arrowed line leaves it; a single-premise
  *  argument is one ordinary arrow (see deriveView). */
 export interface CanvasEdge {
+ color?:string;
  /** Styling only: shared proof references brighten when the argument is focused. */
  quiet?:boolean;
 	from: string;
@@ -687,7 +688,9 @@ export class GraphCanvasRenderer {
 	private atlasLayout: ReturnType<typeof createAtlasLayout> | null = null;
 	private atlasLayoutRevision = 0;
 	private subjectDrag: {id: string; origin: Pt; dx: number; dy: number} | null = null;
-	private semanticPath = new Path2D();
+	private coloredSemanticPaths=new Map<string,Path2D>();
+ private coloredMapPaths=new Map<string,Path2D>();
+ private semanticPath = new Path2D();
 	private mapPath = new Path2D();
 	private bridgePath = new Path2D();
 	private semanticFocus: ReadonlySet<string> | null = null;
@@ -1535,6 +1538,7 @@ export class GraphCanvasRenderer {
 		}
 		this.nodesPath = nodesPath;
 		this.semanticPath = new Path2D();
+  this.coloredSemanticPaths.clear();this.coloredMapPaths.clear();
 		this.bridgePath = new Path2D();
 		const homes = new Map(data.atlas?.concepts.map(c => [c.id, c.preferredSubjectId]));
 		const bridge = (edge: CanvasEdge) => homes.has(edge.from) && homes.has(edge.to) && homes.get(edge.from) !== homes.get(edge.to);
@@ -1543,7 +1547,8 @@ export class GraphCanvasRenderer {
 			if (!isVisible(edge.from) || !isVisible(edge.to)) continue;
 			const from = this.nodeById.get(edge.from), to = this.nodeById.get(edge.to);
 			if (!from || !to) continue;
-			const path = bridge(edge) ? this.bridgePath : this.semanticPath;
+			const path = edge.color?(this.coloredSemanticPaths.get(edge.color)??new Path2D()):bridge(edge)?this.bridgePath:this.semanticPath;
+   if(edge.color)this.coloredSemanticPaths.set(edge.color,path);
 			path.moveTo(from.x, from.y);
 			path.lineTo(to.x, to.y);
 		}
@@ -1552,7 +1557,8 @@ export class GraphCanvasRenderer {
 		if(!this.semanticFocus)for(const edge of data.mapEdges??[]){
 			if(!isVisible(edge.from)||!isVisible(edge.to))continue;
 			const from=this.nodeById.get(edge.from),to=this.nodeById.get(edge.to);if(!from||!to)continue;
-			const path=bridge(edge)?this.bridgePath:this.mapPath;
+			const path=edge.color?(this.coloredMapPaths.get(edge.color)??new Path2D()):bridge(edge)?this.bridgePath:this.mapPath;
+   if(edge.color)this.coloredMapPaths.set(edge.color,path);
 			path.moveTo(from.x,from.y);path.lineTo(to.x,to.y);
 		}
 
@@ -2004,7 +2010,9 @@ export class GraphCanvasRenderer {
 			ctx.lineWidth = settings.edgeWidth / k;
 			ctx.setLineDash([5 / k, 5 / k]);
 			ctx.stroke(this.semanticPath);
+   for(const [color,path] of this.coloredSemanticPaths){ctx.strokeStyle=color;ctx.stroke(path);}ctx.strokeStyle=data.colors.edge;
 			ctx.globalAlpha=this.highlighted?.size?0.12:.65;ctx.setLineDash([2/k,4/k]);ctx.stroke(this.mapPath);
+   for(const [color,path] of this.coloredMapPaths){ctx.strokeStyle=color;ctx.stroke(path);}ctx.strokeStyle=data.colors.edge;
 			ctx.globalAlpha=(this.highlighted?.size ? .12 : 1)*(this.semanticFocus?1:.16+.49*nodeAlpha);
 			ctx.setLineDash([3/k,6/k]);ctx.stroke(this.bridgePath);
 			if(this.hoverNode&&data.atlas){

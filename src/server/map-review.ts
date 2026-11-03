@@ -2,6 +2,7 @@ import {z} from "zod";
 import {AtlasError,atlasConceptId} from "../core/atlas.ts";
 import {mapReviewInput,integrationChoices} from "../core/map-review.ts";
 import {emit} from "../core/events.ts";
+import {createRetrievalService} from "./retrieval.ts";
 import {stores} from "./stores.ts";
 const command=z.discriminatedUnion("action",[
 	mapReviewInput.extend({action:z.literal("save")}),
@@ -20,6 +21,7 @@ export async function mapReviewResponse(request:Request):Promise<Response>{
 		const result=command.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));if(!result.success)throw new AtlasError(result.error.issues[0]?.message??"Invalid review.");
 		const c=result.data;
 		const value=c.action==="save"?store.save({proposalId:c.proposalId,expectedRevision:c.expectedRevision,draft:c.draft}):c.action==="prepare"?store.prepare(c.proposalId,c.expectedRevision,c.choices,c.baseRevision):c.action==="prepare-connections"?store.prepareConnections(c.proposalId,c.baseRevision,c.identities):store.commit(c.id,c.digest);
+		if(c.action==="commit"){await createRetrievalService().autoEnrol();emit("review-changed",{});}
 		emit("atlas-changed",{});return Response.json(value);
 	}catch(error){return Response.json({error:error instanceof AtlasError?error.message:"Map review could not be saved. Local edits remain in this view."},{status:error instanceof AtlasError?error.status:400});}
 }

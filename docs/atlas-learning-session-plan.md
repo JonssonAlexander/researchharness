@@ -5,7 +5,10 @@ This clarifies the maintained implementation contract's §11.1. The existing
 concept-to-derivation navigation is only an entry point; it does not yet supply
 the complete learning experience. The [first workspace slice](atlas-learning-workspace.md)
 now adds objectives, lesson maps, nested targets and conversational teaching;
-handwriting and canonical end-of-session integration remain pending.
+handwriting and canonical end-of-session integration are now implemented in the
+[scratchpad](atlas-scratchpad.md) and [reviewed integration](atlas-lesson-integration.md)
+slices. [Atlas-aware lookup and multi-concept priming](atlas-aware-lessons.md) now
+support lesson planning; separate FSRS/challenging practice remains later work.
 
 ## Teaching
 

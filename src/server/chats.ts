@@ -35,7 +35,7 @@ const WIND_DOWN_POLL_MS = 50;
 /** What deleteChatSession did — the route maps it straight to HTTP. */
 export type ChatDeleteOutcome =
 	| { ok: false; status: 404; code: "not_found"; error: string }
-	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running" | "lesson_integration_pending"; error: string; jobIds: string[] }
+	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running" | "lesson_integration_pending" | "problem_history"; error: string; jobIds: string[] }
 	| { ok: false; status: 503; code: "extraction_winding_down"; error: string }
 	| {
 			ok: true;
@@ -69,6 +69,7 @@ export type ChatDeleteOutcome =
  *      nothing merged.
  */
 function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status: 409 }> | null {
+ if(stores.problemStore.byChat(chatId).length)return {ok:false,status:409,code:"problem_history",error:"This session contains a saved problem attempt. Keep it to preserve its reasoning and scratchpad history.",jobIds:[]};
 	if (isTurnRunning(chatId)) {
 		return {
 			ok: false,

@@ -1,7 +1,8 @@
+import {challengeScratchLesson} from "./problems.ts";
 import {z} from "zod";
 import type {AgentMessage} from "@earendil-works/pi-agent-core";
 import {AtlasError} from "../core/atlas.ts";
-import {scratchKey,attemptId,scratchScene,scratchTarget,lessonScratchTarget,scratchAttemptMessage,scratchDelivery,resolveScratchpadImages} from "../core/scratchpad.ts";
+import {scratchKey,attemptId,scratchScene,scratchTarget,practiceScratchTarget,lessonScratchTarget,scratchAttemptMessage,scratchDelivery,resolveScratchpadImages} from "../core/scratchpad.ts";
 import {stores} from "./stores.ts";
 import {readSourceBody} from "./mindmaps.ts";
 export function scratchMessage(chatId:string,id:string){const a=stores.scratchpadStore.attempt(chatId,id);if(!a)throw new AtlasError("Saved attempt not found.",404);return scratchAttemptMessage(a);}
@@ -11,16 +12,17 @@ export function scratchImages(chatId:string,messages:readonly AgentMessage[],vis
 });}
 const save=z.object({expectedRevision:z.number().int().nonnegative(),target:scratchTarget,scene:scratchScene,text:z.string().max(20000)}).strict();
 export async function scratchpadResponse(request:Request,chatId:string):Promise<Response>{try{
- const chat=stores.chatStore.getChat(chatId),lesson=stores.lessonStore.read(chatId);if(!chat||!lesson||chat.kind==="practice")throw new AtlasError("Open a learning session to use its scratchpad.",404);
+ const chat=stores.chatStore.getChat(chatId),lesson=stores.lessonStore.read(chatId)??challengeScratchLesson(chatId);if(!chat||!lesson&&chat.kind!=="practice")throw new AtlasError("Open a learning or practice session to use its scratchpad.",404);
+ const targetFor=(pad?:string)=>{const target=chat.kind==="practice"&&pad?.startsWith("practice-")?practiceScratchTarget(chat.messages,pad):lesson?lessonScratchTarget(lesson,pad):practiceScratchTarget(chat.messages,pad);if(!target)throw new AtlasError("Practice problem not found.",404);return target;};
  const q=new URL(request.url).searchParams;
  if(request.method==="GET"){
   if(q.has("image")){const bytes=stores.scratchpadStore.image(chatId,attemptId.parse(q.get("image")));return new Response(Buffer.from(bytes),{headers:{"Content-Type":"image/png","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"}});}
   if(q.has("attempt")){const attempt=stores.scratchpadStore.attempt(chatId,attemptId.parse(q.get("attempt")));if(!attempt)throw new AtlasError("Attempt not found.",404);return Response.json({attempt,delivery:scratchDelivery(chat.messages,attempt.id)},{headers:{"Cache-Control":"no-store"}});}
-  const target=lessonScratchTarget(lesson),padId=scratchKey.parse(q.get("pad")??target.id),draft=stores.scratchpadStore.read(chatId,padId),attempts=stores.scratchpadStore.list(chatId,padId).map(a=>({id:a.id,number:a.number,createdAt:a.createdAt,target:a.draft.target,revision:a.draft.revision,hasImage:!!a.imageHash,delivery:scratchDelivery(chat.messages,a.id)}));return Response.json({target,padId,draft,attempts},{headers:{"Cache-Control":"no-store"}});
+  const target=targetFor(),padId=scratchKey.parse(q.get("pad")??target.id),draft=stores.scratchpadStore.read(chatId,padId),attempts=stores.scratchpadStore.list(chatId,padId).map(a=>({id:a.id,number:a.number,createdAt:a.createdAt,target:a.draft.target,revision:a.draft.revision,hasImage:!!a.imageHash,delivery:scratchDelivery(chat.messages,a.id)}));return Response.json({target,padId,draft,attempts},{headers:{"Cache-Control":"no-store"}});
  }
  if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
  const body=JSON.parse((await readSourceBody(request,24*1024*1024)).toString("utf8"));
- const padId=scratchKey.parse(body.padId),target=lessonScratchTarget(lesson,padId);
+ const padId=scratchKey.parse(body.padId),target=targetFor(padId);
  if(request.method==="PUT"){
   const input=save.parse(body.draft);if(padId!==target.id||JSON.stringify(input.target)!==JSON.stringify(target))throw new AtlasError("The lesson target changed. Reopen the scratchpad; your local work is retained.",409);
   return Response.json({draft:stores.scratchpadStore.save(chatId,padId,input.expectedRevision,input)});

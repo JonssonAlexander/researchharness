@@ -14,7 +14,7 @@ export const syncFindings = z.object({
     if (c.source === c.target || c.status === "ai-proof-sketch" && !c.proof.trim() || c.status !== "ai-proof-sketch" && c.proof.trim())
         ctx.addIssue({ code: "custom", message: "A proof sketch needs its argument and distinct endpoints; other statuses cannot contain a proof." }); });
 export type SyncFindings = z.infer<typeof syncFindings>;
-export const learningContext = z.object({ conceptIds: z.array(atlasConceptId).min(1).max(20), relationId: z.string().regex(/^ar_[0-9a-f-]{36}$/).optional(), goal: z.enum(["explain", "derive", "proof", "practice"]), derivation:z.object({rootId:z.string().regex(/^n_[\w-]+$/),targetId:z.string().regex(/^n_[\w-]+$/),chainId:z.string().regex(/^arg_[\w-]+$/).optional()}).strict().optional() }).strict();
+export const learningContext = z.object({ conceptIds: z.array(atlasConceptId).min(1).max(20).refine(ids=>new Set(ids).size===ids.length,"Choose distinct concepts"), relationId: z.string().regex(/^ar_[0-9a-f-]{36}$/).optional(), goal: z.enum(["explain", "derive", "proof", "practice"]), derivation:z.object({rootId:z.string().regex(/^n_[\w-]+$/),targetId:z.string().regex(/^n_[\w-]+$/),chainId:z.string().regex(/^arg_[\w-]+$/).optional()}).strict().optional() }).strict();
 export type LearningContext = z.infer<typeof learningContext>;
 export const syncChoices = z.object({ identities: z.record(key, z.union([atlasConceptId, z.literal("new"), z.null()])), connections: z.array(key).max(20), observations: z.array(z.number().int().min(0).max(19)).max(20).optional(), outcome: z.enum(["untested", "with-help", "independent"]) }).strict();
 export type SyncChoices = z.infer<typeof syncChoices>;

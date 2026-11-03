@@ -1,3 +1,4 @@
+import {createReviewStore} from "./retrieval.ts";
 import {createLessonReviewStore,readLessonReviews} from "./lesson-integration.ts";
 import {drawingLink,drawingConnections} from "../core/atlas-drawing.ts";
 import {syncAssociation} from "../core/atlas-sync.ts";
@@ -57,7 +58,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 14)
+			if (version > 15)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -228,6 +229,18 @@ PRAGMA user_version=13; COMMIT;`);}catch(error){db.exec("ROLLBACK");throw error;
                 if(version===13)db.prepare("VACUUM INTO ?").run(`${file}.v13-${randomUUID()}.bak`);
                 db.exec("BEGIN IMMEDIATE");try{db.exec(`CREATE TABLE lesson_reviews (id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),contentHash TEXT NOT NULL) STRICT; PRAGMA user_version=14; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
             }
+            if(version<15){
+                if(version===14)db.prepare("VACUUM INTO ?").run(`${file}.v14-${randomUUID()}.bak`);
+                db.exec("BEGIN IMMEDIATE");try{db.exec(`
+CREATE TABLE retrieval_items(id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),hash TEXT NOT NULL) STRICT;
+CREATE TABLE retrieval_activities(id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),hash TEXT NOT NULL) STRICT;
+CREATE TABLE retrieval_events(id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),hash TEXT NOT NULL) STRICT;
+CREATE INDEX retrieval_event_item ON retrieval_events(json_extract(record,'$.itemId'));
+CREATE INDEX retrieval_activity_status ON retrieval_activities(json_extract(record,'$.status'));
+CREATE INDEX retrieval_activity_day ON retrieval_activities(json_extract(record,'$.day'));
+CREATE TABLE retrieval_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),hash TEXT NOT NULL) STRICT;
+PRAGMA user_version=15; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
+            }
 			return run(db);
 		} finally {
 			db.close();
@@ -380,6 +393,7 @@ PRAGMA user_version=13; COMMIT;`);}catch(error){db.exec("ROLLBACK");throw error;
 	const mindmaps = createMindmapStore(database, path.dirname(file));
 	const proposals=createMapProposalStore(database,mindmaps);
 	return {
+		retrieval:createReviewStore(database),
 		lessonReviews:createLessonReviewStore(database,snapshot,writeNote),
 		sync:createAtlasSyncStore(database,snapshot,writeNote),
 		mindmaps,

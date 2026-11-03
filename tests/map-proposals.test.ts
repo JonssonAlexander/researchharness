@@ -203,7 +203,7 @@ test('restart leaves an interrupted attempt without auto retry; v7 migration and
  const row=db.prepare('SELECT record FROM map_proposals').get()!;
  db.prepare('UPDATE map_proposals SET record=?').run(JSON.stringify({...JSON.parse(String(row.record)),schemaVersion:4}));
  assert.throws(()=>f.store.proposals.latest(f.source),/newer app/);
- db.exec('ALTER TABLE atlas_views DROP COLUMN emphasis; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
+ db.exec('ALTER TABLE atlas_views DROP COLUMN emphasis; DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_items; DROP TABLE retrieval_settings; DROP TABLE lesson_reviews; DROP TABLE atlas_drawing_links; DROP TABLE atlas_associations; DROP TABLE atlas_learning_sessions; DROP TABLE atlas_sync_reviews; ALTER TABLE mindmaps DROP COLUMN subjectId; DROP TABLE map_connections; DROP TABLE map_concept_reviews; DROP TABLE map_integrations; DROP TABLE map_reviews; DROP TABLE map_proposals; PRAGMA user_version=7');db.close();
  const before=f.store.read();assert.deepEqual(createAtlasStore(f.file).read(),before);
  assert(fs.readdirSync(path.dirname(f.file)).some(n=>n.includes('.v7-')));
 });

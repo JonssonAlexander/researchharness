@@ -1,3 +1,4 @@
+import {challengeClientChat} from "@/src/server";
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
@@ -29,7 +30,8 @@ export default async function ChatPage({
 			// Wave D: the record IS native agent history — the client view is
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
-				initialMessages={chat.messages}
+				initialMessages={challengeClientChat(chat).messages}
+ initialChallenge={chat.challenge}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}

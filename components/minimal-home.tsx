@@ -1,4 +1,6 @@
 "use client";
+import {AtlasReview} from "./atlas-review";
+import {useAtlas} from "./atlas-panel";
 
 /**
  * THE MINIMAL HOME (owner, 2026-10-06 — the no-graph home, take two):
@@ -97,6 +99,7 @@ export function MinimalHome({
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const [chats, setChats] = useState<ChatSummary[]>([]);
 	const [chainsOpen, setChainsOpen] = useState(false);
+ const [reviewOpen,setReviewOpen]=useState(false),atlas=useAtlas();
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const readState = useCallback(() => {
@@ -132,6 +135,7 @@ export function MinimalHome({
 
 	return (
 		<div className="relative h-full">
+ {reviewOpen&&<AtlasReview atlas={atlas.snapshot} onClose={()=>setReviewOpen(false)}/>}
 			<input
 				ref={fileInputRef}
 				type="file"
@@ -166,6 +170,7 @@ export function MinimalHome({
 			    entry law). */}
 			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
 				<div className="flex min-w-0 items-start gap-2">
+ <button type="button" className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent" onClick={()=>setReviewOpen(true)}>Review</button>
 					<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 						<Hint label="Every reasoning chain" side="bottom">
 							<button

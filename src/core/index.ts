@@ -109,3 +109,13 @@ export * from "./lesson-integration.ts";
 
 export * from "./scratchpad.ts";
 export * from "./atlas-neighbourhood.ts";
+
+export * from "./atlas-lesson-context.ts";
+
+export * from "./retrieval.ts";
+
+export * from "./lesson-documents.ts";
+
+export * from "./problems.ts";
+
+export {lessonTopicDetail} from "./lesson-topic.ts";

@@ -79,7 +79,7 @@ test('metadata failure rolls back the Atlas transaction and resumes after canoni
  const count=stores.graphStore.readNodes().length;await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true});assert.equal(stores.graphStore.readNodes().length,count);
 });
 test('v13 migration backs up original metadata and opens a durable review store',()=>{
- const file=path.join(root,'migration','atlas.sqlite');createAtlasStore(file).read();const db=new DatabaseSync(file);db.exec('DROP TABLE lesson_reviews; PRAGMA user_version=13');db.close();
+ const file=path.join(root,'migration','atlas.sqlite');createAtlasStore(file).read();const db=new DatabaseSync(file);db.exec('DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_items; DROP TABLE retrieval_settings; DROP TABLE lesson_reviews; PRAGMA user_version=13');db.close();
  const store=createAtlasStore(file);assert.deepEqual(store.lessonReviews.list(),[]);assert(fs.readdirSync(path.dirname(file)).some(n=>n.includes('.v13-')&&n.endsWith('.bak')));
 });
 test('SQL failure rolls back notes, concept roots and receipt while retaining a resumable approval',async()=>{
@@ -151,4 +151,12 @@ test('interrupted approval requires its exact retained scratchwork before resumi
  const count=stores.graphStore.readNodes().length;
  await assert.rejects(()=>f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true}),/Scratchwork attachment/);assert.equal(stores.graphStore.readNodes().length,count);
  fs.writeFileSync(file,bytes);assert.equal((await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true})).status,'committed');
+});
+
+test('Atlas-aware lessons retrieve reviewed rationale and gaps without sending saved scratchwork or raw transcripts',async()=>{
+ const {readLessonAtlas}=await import('../src/core/atlas-lesson-context.ts');const f=fixture(),r=await f.generate();await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true});
+ const value=readLessonAtlas({read:()=>({atlas:stores.atlasStore.read(),propositions:getGraph(stores.graphStore).nodes,chains:getGraph(stores.graphStore).chains}),lesson:id=>stores.atlasStore.lessonReviews.read(id)},'lesson',r.id);
+ assert(value.kind==='lesson');assert(JSON.stringify(value).includes('Both assumptions are required together.'));assert(JSON.stringify(value).includes('This implication has not been established.'));assert(!('transcript' in value));
+ const argument=value.arguments.items.find(a=>a.key==='joint')!;assert.deepEqual(argument.premises,r.plan!.chains[0]!.premises);assert.equal(argument.canonicalId,r.plan!.chains[0]!.id);
+ const focused=readLessonAtlas({read:()=>({atlas:stores.atlasStore.read(),propositions:[],chains:[]}),lesson:id=>stores.atlasStore.lessonReviews.read(id)},'lesson',r.id,argument.canonicalId!);assert(focused.kind==='lesson');assert.equal(focused.arguments.items.length,1);assert.equal(focused.arguments.items[0]!.rationale,'Both assumptions are required together.');
 });

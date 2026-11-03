@@ -70,6 +70,8 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+ /** Optional browser-only projection; never changes agent history or persistence. */
+ clientProjection?: (event:TurnWireEvent)=>TurnWireEvent;
 	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
@@ -158,7 +160,8 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	// Send = compact the log + fan out to every live view. A view's own
 	// enqueue failure (a cancelled reader) is swallowed by the view — the
 	// turn must still settle; onFinish persists regardless of who watches.
-	const send = (event: TurnWireEvent) => {
+	const send = (raw: TurnWireEvent) => {
+ const event=spec.clientProjection?spec.clientProjection(raw):raw;
 		if (settled) return;
 		const key = coalesceKey(event);
 		if (key !== null) {

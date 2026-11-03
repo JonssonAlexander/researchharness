@@ -1,4 +1,5 @@
 "use client";
+import {ProblemEntry} from "./problems";
 import {LessonScratchwork} from "./lesson-scratchwork";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -173,7 +174,8 @@ export function AtlasPanel({
 						{atlas.error}
 					</p>
 				)}
-				<LessonMaps atlas={atlas.snapshot}/>
+				<div className="flex flex-wrap gap-2"><ProblemEntry atlas={atlas.snapshot}/>{selectedId&&<ProblemEntry atlas={atlas.snapshot} conceptId={selectedId}/>}</div>
+ <LessonMaps atlas={atlas.snapshot}/>
 				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
 				{selectedId&&atlas.snapshot.conceptReviews?.[selectedId]?.length&&<div className="rounded border border-amber-500/40 p-2 text-xs"><p className="font-medium text-amber-600">● Source notes need review</p>{atlas.snapshot.conceptReviews[selectedId]!.map(r=><p key={r}>{r}</p>)}<p className="mt-1 text-muted-foreground">Upper amber dot: source or mathematical review needed. Lower blue/green dot: self-reported learning evidence, not verified mastery.</p></div>}
 				<AtlasMindmaps snapshot={atlas.snapshot} selectedId={selectedId} refresh={atlas.refresh} save={atlas.save} focusedMapId={focusedMapId} onMapFocus={onMapFocus} onGridChange={setMapsGrid}/>

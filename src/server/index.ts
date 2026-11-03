@@ -56,3 +56,9 @@ export {getLesson,startLesson,lessonResponse} from "./learning-session.ts";
 export {lessonIntegrationResponse} from "./lesson-integration.ts";
 
 export {scratchpadResponse,scratchworkResponse} from "./scratchpad.ts";
+
+export {retrievalResponse} from "./retrieval.ts";
+
+export {lessonDocumentsResponse} from "./lesson-documents.ts";
+
+export {problemsResponse,challengeClientChat} from "./problems.ts";

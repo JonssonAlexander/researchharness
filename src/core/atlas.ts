@@ -165,6 +165,7 @@ export interface AtlasSnapshot {
 	subjects: AtlasSubject[];
 }
 export interface AtlasStore {
+ retrieval:import("./retrieval.ts").ReviewStore;
  lessonReviews:LessonReviewStore;
 	sync:AtlasSyncStore;
 	proposals: MapProposalStore;
