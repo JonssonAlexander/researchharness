@@ -10,18 +10,24 @@ export type ReviewSettings=z.infer<typeof reviewSettings>;
 export const DEFAULT_REVIEW_SETTINGS:ReviewSettings={revision:0,dailyGoal:6,minutes:12,retention:.9,timeZone:"Europe/Stockholm"};
 export type ReviewCard=Record<string,unknown>&{dueAt:string;lastReviewAt:string|null;reps:number;};
 export interface ReviewConfig {library:string;model:string;parameters:Record<string,unknown>;}
-export interface ReviewItem {id:string;conceptId:string;title:string;front:string;back:string;sourceHash:string;revision:number;targetVersion:number;paused:boolean;createdAt:string;card:ReviewCard;config:ReviewConfig;}
-export interface ReviewActivity {id:string;revision:number;day:string;timeZone:string;createdAt:string;readyAt?:string;status:"preparing"|"ready"|"revealed"|"rated"|"skipped"|"failed";items:ReviewItem[];front:string;back:string;criteria:{itemId:string;text:string}[];answer:string;scratchwork?:ScratchNote;attempted:boolean;revealedAt?:string;ratedAt?:string;ratings?:Record<string,number|null>;error?:string;model?:string;usage?:JobUsage;config:ReviewConfig;}
+export interface ReviewItem {repairProvenance?:{basis:"source-notes"|"ai-authored";model:string;at:string;notes:string};id:string;conceptId:string;title:string;front:string;back:string;sourceHash:string;revision:number;targetVersion:number;paused:boolean;createdAt:string;card:ReviewCard;config:ReviewConfig;}
+export const reviewHelpProposal=z.object({cardStatus:z.enum(["sound","flawed","not-covered","uncertain"]),answerStatus:z.enum(["correct","partial","incorrect","no-attempt","not-assessable"]),feedback:z.string().trim().min(1).max(3000),replacement:z.object({basis:z.enum(["source-notes","ai-authored"]).optional(),front:z.string().trim().min(1).max(2500),back:z.string().trim().min(1).max(12000)}).strict().nullable()}).strict();
+export type ReviewHelpProposal=z.infer<typeof reviewHelpProposal>;
+export interface ReviewHelp {state:"running"|"ready"|"failed";mode:"check"|"repair";model:string;at:string;requestRevision:number;sourceHash:string;itemRevision:number;result?:ReviewHelpProposal;error?:string;applied?:boolean;}
+export interface ReviewActivity {help?:ReviewHelp;id:string;revision:number;day:string;timeZone:string;createdAt:string;readyAt?:string;status:"preparing"|"ready"|"revealed"|"rated"|"skipped"|"failed";items:ReviewItem[];front:string;back:string;criteria:{itemId:string;text:string}[];answer:string;scratchwork?:ScratchNote;attempted:boolean;revealedAt?:string;ratedAt?:string;ratings?:Record<string,number|null>;error?:string;model?:string;usage?:JobUsage;config:ReviewConfig;}
 export interface ReviewEvent {id:string;activityId:string;itemId:string;targetVersion:number;at:string;recordedAt:string;rating:number|null;config:ReviewConfig;revlog:Record<string,unknown>|null;}
 export interface ReviewStore {
  items:()=>ReviewItem[];active:()=>ReviewActivity|null;last:()=>ReviewActivity|null;activities:(day?:string)=>ReviewActivity[];activity:(id:string)=>ReviewActivity|null;events:(itemId:string)=>ReviewEvent[];
  settings:()=>ReviewSettings;saveSettings:(settings:ReviewSettings)=>ReviewSettings;
  saveItem:(item:ReviewItem,expectedRevision:number)=>void;
+ applyHelp:(activityId:string,revision:number,item:ReviewItem,expectedItemRevision:number)=>ReviewActivity;
  reserve:(activity:ReviewActivity)=>ReviewActivity;update:(activity:ReviewActivity,expectedRevision:number)=>ReviewActivity;
  rate:(id:string,revision:number,ratings:Record<string,number|null>,now:string,apply:(item:ReviewItem,events:ReviewEvent[])=>{card:ReviewCard;logs:Map<string,Record<string,unknown>>})=>ReviewActivity;
 }
 export const reviewActivityProposal=z.object({front:z.string().trim().min(1).max(2500),back:z.string().trim().min(1).max(10000),criteria:z.array(z.object({itemId,text:z.string().trim().min(1).max(1000)}).strict()).min(3).max(4)}).strict();
 export const reviewCommand=z.discriminatedUnion("action",[
+ z.object({action:z.literal("assist"),id:uuid,revision:z.number().int().positive(),mode:z.enum(["check","repair"]),expectedModel:z.string().max(240),consent:z.literal(true)}).strict(),
+ z.object({action:z.literal("apply-help"),id:uuid,revision:z.number().int().positive(),mode:z.enum(["repair","pause"]),approve:z.literal(true)}).strict(),
  z.object({action:z.literal("enrol"),conceptId:z.string().regex(/^ac_[0-9a-f-]{36}$/),expectedRevision:z.number().int().nonnegative(),front:z.string().trim().min(1).max(2500),back:z.string().trim().min(1).max(12000),paused:z.boolean()}).strict(),
  z.object({action:z.literal("settings"),settings:reviewSettings}).strict(),
  z.object({action:z.literal("start"),id:uuid,itemIds:z.array(itemId).min(1).max(4),expectedModel:z.string().optional(),consent:z.boolean().optional()}).strict(),
@@ -50,13 +56,12 @@ export function reviewDeck(atlas:AtlasSnapshot,items:ReviewItem[],now:Date,remai
 /** Estimated recall probability, not mastery. Unknown targets remain neutral. */
 export function retentionColour(probability:number|null){
  if(probability===null||!Number.isFinite(probability))return '#88909b';
- const p=Math.max(0,Math.min(1,probability)),stops=[[224,112,91],[218,184,96],[85,156,181]],t=p<.9?p/.9:(p-.9)/.1,a=p<.9?stops[0]!:stops[1]!,b=p<.9?stops[1]!:stops[2]!;
- return '#'+a.map((v,i)=>Math.round(v+(b[i]!-v)*t).toString(16).padStart(2,'0')).join('');
+ return probability>=.9?'#559cb5':probability>=.3?'#dab860':'#ff3737';
 }
 export function reviewColour(item:ReviewItem|undefined,probability:number|null){return item?retentionColour(probability):'#606976';}
 export function reviewEdgeColour(a:number|null,b:number|null){return retentionColour(a===null||b===null?null:(a+b)/2);}
 export function reviewInterval(due:string,now:string){const seconds=Math.max(0,(Date.parse(due)-Date.parse(now))/1000);return seconds<60?'<1m':seconds<3600?`${Math.round(seconds/60)}m`:seconds<86400?`${Math.round(seconds/3600)}h`:seconds<30*86400?`${Math.round(seconds/86400)}d`:`${Math.round(seconds/(30*86400))}mo`;}
-export function publicReviewActivity(a:ReviewActivity){const revealed=['revealed','rated'].includes(a.status);return {...a,items:a.items.map(i=>({id:i.id,conceptId:i.conceptId,title:i.title,revision:i.revision,targetVersion:i.targetVersion})),back:revealed?a.back:undefined,criteria:revealed?a.criteria:undefined,config:undefined};}
+export function publicReviewActivity(a:ReviewActivity){const revealed=['revealed','rated'].includes(a.status);return {...a,items:a.items.map(i=>({id:i.id,conceptId:i.conceptId,title:i.title,revision:i.revision,targetVersion:i.targetVersion,repairProvenance:i.repairProvenance})),back:revealed?a.back:undefined,criteria:revealed?a.criteria:undefined,config:undefined};}
 
 export interface ReviewSnapshot {
  intervals?:Record<string,string[]>;

@@ -910,3 +910,40 @@ Half/small keep the question visible; fullscreen keeps the canvas clear and offe
 a collapsed Question and explicit reveal action. Reuse existing per-activity
 local autosave, drawing capture and retention. Opening or resizing the pad never
 reveals the reference, rates an item or calls a model.
+
+Shared scratchpad pencil defaults (3 November 2026): all scratchpads use the
+shared ScratchpadEditor, including future workflows. Opening/restoring a scene
+starts with a locked thin freehand pencil (stroke width 1), retaining existing
+strokes and viewport. Provide one-tap black, blue and red thin-pencil presets near
+the native bottom palette, which remains available. Presets clear selection and
+change only subsequent strokes, never recolour selected existing work; hide the
+presets in read-only views.
+
+Lesson integration identity navigation (6 November 2026): unresolved identity
+warnings link directly to the relevant claim in its derivation or Atlas concept.
+Open the corresponding tab/step and focus its identity selector, including claims
+hidden inside joint arguments. Navigation never chooses an identity, changes the
+draft or approves integration; explicit choices and saved-preview checks remain.
+
+
+Review card help (6 November 2026): after reveal, compact Check my answer and
+Fix card actions use the configured teaching model to check both the question/key
+and the saved written answer or retained scratchwork. Never infer a learner error
+from a flawed key or rate FSRS automatically. Deferred/untaught topics stay marked
+not covered, without implying failed recall. Fix card may use established
+mathematics when notes are incomplete, explicitly labelling AI authorship and
+chosen assumptions without claiming prior learning. Repairs are checked,
+single-target previews requiring Save repaired card; persist authorship/model
+and explanation with the replacement target. Offer pause as an alternative. Check my
+answer only assesses the learner response and never proposes replacement text.
+Fix card separately proposes the corrected question/key, without assessing the
+learner answer. Saving
+creates a new target version/schedule using existing target-edit semantics, retaining
+original attempts and rating history. Pause preserves the schedule. Keep bounded
+calls, usage receipts, image capability checks, revision/source guards and atomic
+apply; no background model checks or Atlas note writes.
+
+6 November Review palette: discrete recall bands replace the gradient: blue at
+90–100%, gold from 30% up to 90%, vivid red below 30%; unknown remains grey.
+Gold covers the otherwise unspecified 80–90% interval. Edges still use endpoint
+mean recall before applying the same palette; main Atlas is unchanged.

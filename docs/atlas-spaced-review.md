@@ -5,7 +5,7 @@ canvas from graph home or minimal home. It uses saved concept positions and the
 existing renderer, with read-only node selection; it never saves positions,
 recolours the main Atlas, changes concept notes or promotes mathematical claims.
 Node colour comes directly from the enrolled target's FSRS recall estimate:
-blue at 100%, gold at 90%, fading to red at 0%. Unreviewed, unenrolled or
+blue at 90–100%, gold at 30–90% (excluding 90%), vivid red below 30%. Unreviewed, unenrolled or
 source-stale targets are neutral; paused cards retain their known recall colour.
 Edges use the arithmetic mean of both endpoints' recall estimates (neutral when
 either is unknown). Select a node to see its percentage. There is no separate assistance state, marker or
@@ -141,3 +141,16 @@ FSRS dates, and endpoint-mean retention colours. Typecheck and targeted lint
 passed. The owner-profile Review screen was visually checked without dispatching
 a paid question or recording an outcome. Live provider question preparation was
 not rerun for this UI change.
+
+
+Card help: reveal after attempting, then use **Check my answer** to assess your
+saved answer/drawing, using the question/key as context. It gives feedback only,
+never replacement card text. The separate **Fix card** button proposes a short
+checked question/key for a single target. Incomplete notes may be supplemented
+with established mathematics, labelled AI-authored with explicit assumptions;
+this never implies prior learning. Authorship and model provenance stay with the saved card. Nothing changes until **Save
+repaired card**; it creates a new target version with a fresh schedule and retains
+prior history. A deferred/untaught topic can be paused instead, preserving its
+schedule. These explicit model calls use the configured teaching model (up to two
+calls, twenty-minute limit), retain usage and never choose your FSRS rating. This
+is model feedback, not formal mathematical verification.

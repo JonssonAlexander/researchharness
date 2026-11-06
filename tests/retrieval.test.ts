@@ -6,21 +6,21 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {createAtlasStore} from '../src/store/atlas.ts';
-import {reviewDeck,reviewColour,retentionColour,reviewEdgeColour,reviewInterval,studyDay,nextReviewChange,REVIEW_LIMIT,type ReviewItem} from '../src/core/retrieval.ts';
+import {reviewDeck,reviewColour,retentionColour,reviewEdgeColour,reviewInterval,studyDay,nextReviewChange,REVIEW_LIMIT,publicReviewActivity,type ReviewItem,type ReviewHelpProposal} from '../src/core/retrieval.ts';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'atlas-retrieval-'));process.env.LH_DATA_DIR=path.join(root,'profile');process.env.LH_AUTH_FILE=path.join(root,'auth.json');
 after(()=>fs.rmSync(root,{recursive:true,force:true}));
 const {createRetrievalService}=await import('../src/server/retrieval.ts');
 const {stores}=await import('../src/server/stores.ts');
 const {createFauxCore}=await import('@earendil-works/pi-ai');
-function fixture(count=1){
+function fixture(count=1, help?:Parameters<typeof createRetrievalService>[5]){
  const file=path.join(root,randomUUID(),'atlas.sqlite'),atlas=createAtlasStore(file),ids=Array.from({length:count},()=>`ac_${randomUUID()}`);
  for(const [i,id] of ids.entries())atlas.save({kind:'concept',id,expectedRevision:0,title:`Concept ${i}`,aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[],markdown:`Source definition and assumptions ${i}.`});
  let now=new Date('2026-10-31T10:00:00Z'),calls=0;const faux=createFauxCore({});
- const service=createRetrievalService(atlas.retrieval,()=>atlas.read(),()=>new Date(now),()=>({model:faux.getModel(),streamFn:faux.streamSimple}),async(_engine,items)=>{calls++;return {front:'Explain the basic relationship between these objects.',back:'A concise symbolic explanation with essential assumptions.',criteria:items.map(i=>({itemId:i.id,text:`Explain ${i.title} independently.`}))};});
+ const service=createRetrievalService(atlas.retrieval,()=>atlas.read(),()=>new Date(now),()=>({model:faux.getModel(),streamFn:faux.streamSimple}),async(_engine,items)=>{calls++;return {front:'Explain the basic relationship between these objects.',back:'A concise symbolic explanation with essential assumptions.',criteria:items.map(i=>({itemId:i.id,text:`Explain ${i.title} independently.`}))};},help);
  const command=(raw:unknown)=>service.command(raw,new AbortController().signal);
  const enrol=async()=>{for(const id of ids)await command({action:'enrol',conceptId:id,expectedRevision:0,front:`Recall the key idea of ${id}.`,back:'The definition, conditions and a short symbolic argument.',paused:false});};
  const start=async(itemIds=atlas.retrieval.items().slice(0,1).map(i=>i.id))=>command({action:'start',id:`ra_${randomUUID()}`,itemIds,...itemIds.length>1?{consent:true,expectedModel:`${faux.getModel().provider}:${faux.getModel().id}`}:{}});
- return {file,atlas,ids,service,command,enrol,start,calls:()=>calls,advance:(ms:number)=>{now=new Date(now.getTime()+ms);}};
+ return {file,atlas,ids,service,command,enrol,start,model:`${faux.getModel().provider}:${faux.getModel().id}`,calls:()=>calls,advance:(ms:number)=>{now=new Date(now.getTime()+ms);}};
 }
 test('a real FSRS-7 review is durable, hidden until reveal, idempotent and never changes Atlas geometry or notes',async()=>{
  const f=fixture();await f.enrol();const before=JSON.stringify(f.atlas.read()),item=f.atlas.retrieval.items()[0]!,a=await f.start() as {id:string;revision:number;back?:string;items:unknown[]};
@@ -124,7 +124,7 @@ test('approved map notes auto-enrol once, preserve existing targets and skip emp
 });
 
 test('review colours use recall probability and edge means, not scheduled urgency',()=>{
- assert.equal(retentionColour(1),'#559cb5');assert.equal(retentionColour(.9),'#dab860');assert.equal(retentionColour(0),'#e0705b');
+ assert.equal(retentionColour(1),'#559cb5');assert.equal(retentionColour(.9),'#559cb5');assert.equal(retentionColour(.899),'#dab860');assert.equal(retentionColour(.8),'#dab860');assert.equal(retentionColour(.3),'#dab860');assert.equal(retentionColour(.299),'#ff3737');assert.equal(retentionColour(0),'#ff3737');
  assert.equal(reviewEdgeColour(.8,1),retentionColour(.9));assert.equal(reviewEdgeColour(null,1),retentionColour(null));
  assert.equal(reviewInterval('2026-10-31T11:00:00Z','2026-10-31T10:00:00Z'),'1h');
 });
@@ -134,4 +134,38 @@ test('rating previews match the actual FSRS due date and do not advance memory',
  const snapshot=await f.service.snapshot(),due=snapshot.intervals[item.id]![2];assert(due);assert.equal(f.atlas.retrieval.items()[0]!.card.reps,0);
  await f.command({action:'rate',id:a.id,revision:shown.revision,ratings:{[item.id]:3}});assert.equal(f.atlas.retrieval.items()[0]!.card.dueAt,due);
  assert.equal((await f.service.snapshot()).deck.groups.length,0);
+});
+
+const repaired:ReviewHelpProposal={cardStatus:'flawed',answerStatus:'partial',feedback:'The key omitted the essential condition.',replacement:{front:'State the source definition and its condition.',back:'The source definition holds under the supplied condition.'}};
+test('card help checks the attempt, previews repairs without scheduling, and applies once while preserving history',async()=>{
+ let calls=0;const f=fixture(1,async(_e,input)=>{calls++;assert.equal(input.answer,'');assert(input.sources[0]!.notes.includes('Source definition'));return repaired;});await f.enrol();const item=f.atlas.retrieval.items()[0]!,start=await f.start() as ReturnType<typeof publicReviewActivity>;
+ await assert.rejects(()=>f.command({action:'assist',id:start.id,revision:start.revision,mode:'repair',expectedModel:f.model,consent:true}),/Reveal/);
+ const shown=await f.command({action:'reveal',id:start.id,revision:start.revision,answer:'My attempt',attempted:true}) as ReturnType<typeof publicReviewActivity>;
+ const cmd={action:'assist',id:start.id,revision:shown.revision,mode:'repair',expectedModel:f.model,consent:true},checked=await f.command(cmd) as ReturnType<typeof publicReviewActivity>;
+ assert.equal(checked.help?.result?.replacement?.front,repaired.replacement!.front);assert.deepEqual(f.atlas.retrieval.items()[0],item);assert.equal(f.atlas.retrieval.events(item.id).length,0);
+ await f.command(cmd);assert.equal(calls,1);const apply={action:'apply-help',id:start.id,revision:checked.revision,mode:'repair',approve:true},done=await f.command(apply) as ReturnType<typeof publicReviewActivity>;
+ assert.equal(done.status,'skipped');assert.equal(f.atlas.retrieval.activity(done.id)!.back,item.back);assert.equal(done.answer,'My attempt');assert.equal(done.help?.applied,true);const next=f.atlas.retrieval.items()[0]!;assert.equal(next.front,repaired.replacement!.front);assert.equal(next.targetVersion,item.targetVersion+1);assert.equal(next.card.reps,0);await f.command(apply);assert.deepEqual(f.atlas.retrieval.items()[0],next);assert.equal(f.atlas.retrieval.events(item.id).length,0);assert.equal(createAtlasStore(f.file).retrieval.activity(done.id)!.help?.applied,true);
+});
+test('untaught cards can be paused without changing FSRS; checks never automatically rate',async()=>{
+ const f=fixture(1,async()=>({cardStatus:'not-covered',answerStatus:'not-assessable',feedback:'This topic was deferred.',replacement:null}));await f.enrol();const item=f.atlas.retrieval.items()[0]!,start=await f.start() as ReturnType<typeof publicReviewActivity>,shown=await f.command({action:'reveal',id:start.id,revision:start.revision,answer:'',attempted:true}) as ReturnType<typeof publicReviewActivity>;
+ const checked=await f.command({action:'assist',id:start.id,revision:shown.revision,mode:'check',expectedModel:f.model,consent:true}) as ReturnType<typeof publicReviewActivity>;
+ await assert.rejects(()=>f.command({action:'apply-help',id:start.id,revision:checked.revision,mode:'repair',approve:true}),/no supported replacement/);
+ await f.command({action:'apply-help',id:start.id,revision:checked.revision,mode:'pause',approve:true});const next=f.atlas.retrieval.items()[0]!;assert.equal(next.paused,true);assert.deepEqual(next.card,item.card);assert.equal(next.targetVersion,item.targetVersion);assert.equal(f.atlas.retrieval.events(item.id).length,0);
+});
+test('repair refuses changed source notes and failed checks retain the card and learner answer',async()=>{
+ let fail=false;const f=fixture(1,async()=>{if(fail)throw new Error('private provider failure');return repaired;});await f.enrol();const item=f.atlas.retrieval.items()[0]!,start=await f.start() as ReturnType<typeof publicReviewActivity>,shown=await f.command({action:'reveal',id:start.id,revision:start.revision,answer:'Attempt',attempted:true}) as ReturnType<typeof publicReviewActivity>;
+ const checked=await f.command({action:'assist',id:start.id,revision:shown.revision,mode:'repair',expectedModel:f.model,consent:true}) as ReturnType<typeof publicReviewActivity>;
+ const concept=f.atlas.read().concepts[0]!;f.atlas.save({kind:'concept',id:concept.id,title:concept.title,aliases:concept.aliases,subjectIds:concept.subjectIds,preferredSubjectId:concept.preferredSubjectId,propositionIds:concept.propositionIds,expectedRevision:concept.revision,markdown:'Changed source definition.'});
+ await assert.rejects(()=>f.command({action:'apply-help',id:start.id,revision:checked.revision,mode:'repair',approve:true}),/source notes changed/);fail=true;
+ const failed=await f.command({action:'assist',id:start.id,revision:checked.revision,mode:'check',expectedModel:f.model,consent:true}) as ReturnType<typeof publicReviewActivity>;
+ assert.equal(failed.help?.state,'failed');assert(!JSON.stringify(failed).includes('private provider'));assert.equal(failed.answer,'Attempt');assert.deepEqual(f.atlas.retrieval.items()[0],item);assert.equal(f.atlas.retrieval.events(item.id).length,0);
+});
+
+test('Fix card can propose untaught AI-authored content, preserving provenance without grading the old attempt',async()=>{
+ const proposal:ReviewHelpProposal={cardStatus:'not-covered',answerStatus:'not-assessable',feedback:'AI-authored definition under the explicitly stated assumptions; not taught in the notes.',replacement:{basis:'ai-authored',front:'State the definition under these assumptions.',back:'A self-contained mathematical definition with its assumptions.'}};
+ const f=fixture(1,async(_engine,input)=>{assert.equal(input.answer,'');assert.equal(input.drawing,undefined);return proposal;});await f.enrol();const item=f.atlas.retrieval.items()[0]!,a=await f.start() as ReturnType<typeof publicReviewActivity>,shown=await f.command({action:'reveal',id:a.id,revision:a.revision,answer:'Original attempt',attempted:true}) as ReturnType<typeof publicReviewActivity>;
+ const checked=await f.command({action:'assist',id:a.id,revision:shown.revision,mode:'repair',expectedModel:f.model,consent:true}) as ReturnType<typeof publicReviewActivity>;
+ assert.equal(checked.help?.state,'ready');assert.equal(checked.help.result?.replacement?.basis,'ai-authored');assert.deepEqual(f.atlas.retrieval.items()[0],item);
+ await f.command({action:'apply-help',id:a.id,revision:checked.revision,mode:'repair',approve:true});const next=f.atlas.retrieval.items()[0]!;
+ assert.equal(next.repairProvenance?.basis,'ai-authored');assert.equal(next.repairProvenance?.model,f.model);assert.equal(next.repairProvenance?.notes,proposal.feedback);assert.equal(next.card.reps,0);assert.equal(f.atlas.retrieval.events(item.id).length,0);assert.equal(f.atlas.retrieval.activity(a.id)!.answer,'Original attempt');
 });

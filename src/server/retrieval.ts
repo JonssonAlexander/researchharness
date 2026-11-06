@@ -1,7 +1,8 @@
+import {checkReviewCard,reviewHelpInput} from "../agent/subagents/review-help.ts";
 import {z} from "zod";
 import {createHash} from "node:crypto";
 import {AtlasError} from "../core/atlas.ts";
-import {reviewCommand,reviewSource,reviewDeck,studyDay,publicReviewActivity,REVIEW_LIMIT,reviewActivityProposal,nextReviewChange,type ReviewItem,type ReviewActivity,type ReviewStore} from "../core/retrieval.ts";
+import {reviewCommand,reviewSource,reviewDeck,studyDay,publicReviewActivity,REVIEW_LIMIT,reviewActivityProposal,reviewHelpProposal,nextReviewChange,type ReviewItem,type ReviewActivity,type ReviewStore} from "../core/retrieval.ts";
 import {accumulateJobUsage,piUsageToStep} from "../core/index.ts";
 import {resolveSlot} from "../core/settings-resolution.ts";
 import {piEngineForSpec,type PiEngine} from "../agent/models.ts";
@@ -11,8 +12,8 @@ import {stores} from "./stores.ts";
 import {readSourceBody} from "./mindmaps.ts";
 import {emit} from "../core/events.ts";
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-function engineFor(){const spec=resolveSlot(stores.settingsStore.readSettings()?.models?.strong);if(!spec)throw new AtlasError('Choose a teaching model in Settings for connected questions. Individual cards work locally.',503);return piEngineForSpec(spec,false);}
-export function createRetrievalService(store:ReviewStore=stores.atlasStore.retrieval,atlas=()=>stores.atlasStore.read(),clock=()=>new Date(),engine:()=>PiEngine=engineFor,generate=makeReviewQuestion){
+function engineFor(){const spec=resolveSlot(stores.settingsStore.readSettings()?.models?.strong);if(!spec)throw new AtlasError('Choose a teaching model in Settings for AI checks and connected questions. Individual cards work locally.',503);return piEngineForSpec(spec,false);}
+export function createRetrievalService(store:ReviewStore=stores.atlasStore.retrieval,atlas=()=>stores.atlasStore.read(),clock=()=>new Date(),engine:()=>PiEngine=engineFor,generate=makeReviewQuestion,assist=checkReviewCard){
  // Local, idempotent catch-up also repairs an interrupted post-integration enrolment.
  async function autoEnrol(){
   const view=atlas(),known=new Set(store.items().map(i=>i.conceptId)),lessons=new Set(view.lessonMaps?.flatMap(m=>m.conceptIds)??[]);
@@ -66,6 +67,36 @@ export function createRetrievalService(store:ReviewStore=stores.atlasStore.retri
    return publicReviewActivity(activity);
   }
   const a=store.activity(c.id);if(!a)throw new AtlasError('Review not found.',404);
+  if(c.action==='assist'){
+   if(a.help?.requestRevision===c.revision&&a.help.mode===c.mode&&a.help.model===c.expectedModel&&a.help.state!=='running')return publicReviewActivity(a);
+   if(a.revision!==c.revision||!['revealed','rated'].includes(a.status))throw new AtlasError('Reveal your attempt before checking the card.',409);
+   if(a.help?.state==='running'&&now.getTime()-Date.parse(a.help.at)<20*60*1000)throw new AtlasError('A card check is already running.',409);
+   if(c.mode==='repair'&&a.items.length!==1)throw new AtlasError('Repair individual cards; connected questions can still be checked.');
+   const current=store.items().find(i=>i.id===a.items[0]!.id);if(!current||current.targetVersion!==a.items[0]!.targetVersion)throw new AtlasError('This card was replaced. Open its current version.',409);
+   const e=engine(),model=`${e.model.provider}:${e.model.id}`;if(model!==c.expectedModel)throw new AtlasError('The check model changed. Reload before checking.',409);
+   if(c.mode==='check'&&a.scratchwork&&!e.model.input.includes('image'))throw new AtlasError('Choose an image-capable model to check your scratchpad.',409);
+   const concepts=atlas().concepts.filter(n=>a.items.some(i=>i.conceptId===n.id)),sourceHash=hash(concepts.map(reviewSource));
+   if(concepts.length!==a.items.length)throw new AtlasError('A source concept is no longer available.',409);
+   const drawing=c.mode==='check'&&a.scratchwork?{type:'image' as const,mimeType:'image/png',data:Buffer.from(stores.scratchpadStore.retainedImage(a.scratchwork.id)).toString('base64')}:undefined;
+   let working=store.update({...a,revision:a.revision+1,help:{state:'running',mode:c.mode,requestRevision:c.revision,at:now.toISOString(),model,sourceHash,itemRevision:current.revision}},a.revision);emit('review-changed',{});
+   try{
+    const result=reviewHelpProposal.parse(await assist(e,reviewHelpInput(a,c.mode,concepts,drawing),AbortSignal.any([signal,AbortSignal.timeout(20*60*1000)]),u=>{working=store.update({...working,revision:working.revision+1,usage:accumulateJobUsage(working.usage,model,piUsageToStep(u))},working.revision);}));
+    if(result.replacement&&(c.mode!=='repair'||a.items.length!==1))throw new AtlasError('The card could not be repaired responsibly from its source.');
+    working=store.update({...working,revision:working.revision+1,help:{...working.help!,state:'ready',result}},working.revision);
+   }catch{
+    if(store.activity(a.id)?.revision!==working.revision)throw new AtlasError('The review changed while it was being checked. Reload.',409);
+    working=store.update({...working,revision:working.revision+1,help:{...working.help!,state:'failed',error:'The AI check failed or was interrupted. Your answer and schedule are retained. Retry explicitly.'}},working.revision);
+   }
+   return publicReviewActivity(working);
+  }
+  if(c.action==='apply-help'){
+   if(a.help?.applied)return publicReviewActivity(a);
+   const h=a.help,current=store.items().find(i=>i.id===a.items[0]!.id);if(a.revision!==c.revision||h?.state!=='ready'||!h.result||a.items.length!==1||!current||current.revision!==h.itemRevision)throw new AtlasError('The card changed. Check it again before saving.',409);
+   if(hash(atlas().concepts.filter(n=>a.items.some(i=>i.conceptId===n.id)).map(reviewSource))!==h.sourceHash)throw new AtlasError('The source notes changed. Check the card again.',409);
+   const replacement=c.mode==='repair'?h.result.replacement:null;if(c.mode==='repair'&&(h.mode!=='repair'||!replacement))throw new AtlasError('There is no supported replacement to save.');
+   const next:ReviewItem=replacement?{...current,front:replacement.front,back:replacement.back,repairProvenance:{basis:replacement.basis??'ai-authored',model:h.model,at:now.toISOString(),notes:h.result.feedback},revision:current.revision+1,targetVersion:current.targetVersion+1,createdAt:now.toISOString(),sourceHash:hash(reviewSource(atlas().concepts.find(n=>n.id===current.conceptId)!)),card:serial(scheduler.newCard({cardId:current.id,now})),config:schedulerConfig(scheduler)}:{...current,revision:current.revision+1,paused:true};
+   return publicReviewActivity(store.applyHelp(a.id,c.revision,next,current.revision));
+  }
   if(c.action==='draft'){if(a.status!=='ready')throw new AtlasError('Only working answers can be edited.',409);return publicReviewActivity(store.update({...a,answer:c.answer,revision:a.revision+1},c.revision));}
   if(c.action==='drawing'){
    if(a.status!=='ready'||a.revision!==c.revision)throw new AtlasError('The review changed. Keep your drawing open and reload.',409);
