@@ -6,7 +6,7 @@ const [mode, id = ""] = process.argv.slice(2);
 const { chatStore } = await import("../../src/store/chats.ts");
 const { PATHS } = await import("../../config.ts");
 if (mode === "create") {
-	const chat = chatStore.createChat("Crash fixture");
+	const chat = chatStore.createChat("Crash fixture", id === "practice" || id === "challenge" ? "practice" : undefined, id === "challenge" ? {workflow:"challenge",minutes:45} : undefined);
 	chatStore.saveMessages(chat.id, [{ role: "user", content: "first", timestamp: 1 }] as never);
 	console.log(chat.id);
 } else if (mode === "crash") {

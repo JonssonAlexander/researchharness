@@ -1,6 +1,7 @@
+import {writeFileAtomicSync} from "./atomic-write.ts";
 import fs from "node:fs";
 import path from "node:path";
-import {createHash,randomUUID} from "node:crypto";
+import {createHash} from "node:crypto";
 import {inflateSync} from "node:zlib";
 import {AtlasError} from "../core/atlas.ts";
 import {scratchKey,attemptId,scratchScene,scratchTarget,SCRATCH_LIMITS,type ScratchDraft,type ScratchAttempt,type ScratchpadStore,type ScratchNote,type RetainedScratchwork} from "../core/scratchpad.ts";
@@ -18,7 +19,7 @@ export function checkScratchPng(b:Uint8Array){
 export function createScratchpadStore(root:string):ScratchpadStore{
  function dir(...keys:string[]){if(fs.existsSync(root)&&!fs.lstatSync(root).isDirectory())throw new AtlasError("Scratchpad root must be a regular directory.",409);let current=root;for(const key of keys){scratchKey.parse(key);current=path.join(current,key);if(fs.existsSync(current)&&!fs.lstatSync(current).isDirectory())throw new AtlasError("Scratchpad path must be a regular directory.",409);}return current;}
  function readJson(file:string){if(!fs.existsSync(file))return null;if(!fs.lstatSync(file).isFile())throw new AtlasError("Scratchpad must be a regular file.",409);return JSON.parse(fs.readFileSync(file,"utf8"));}
- function atomic(file:string,value:unknown){fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});const tmp=path.join(path.dirname(file),`.${randomUUID()}.tmp`);try{fs.writeFileSync(tmp,JSON.stringify(value),{flag:"wx",mode:0o600});fs.renameSync(tmp,file);}finally{fs.rmSync(tmp,{force:true});}}
+ function atomic(file:string,value:unknown){fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});writeFileAtomicSync(file,JSON.stringify(value),{mode:0o600});}
  function draft(value:ScratchDraft):ScratchDraft{if(typeof value.text!=="string"||value.text.length>SCRATCH_LIMITS.text||value.schemaVersion!==1||!Number.isSafeInteger(value.revision)||value.revision<1)throw new AtlasError("Unsupported scratchpad revision.",409);scratchScene.parse(value.scene);scratchTarget.parse(value.target);return value;}
  const read=(chat:string,pad:string)=>{const v=readJson(path.join(dir(chat,pad),"current.json"));return v?draft(v):null;};
  const attempt=(chat:string,id:string):ScratchAttempt|null=>{attemptId.parse(id);const a=readJson(path.join(dir(chat,"attempts"),`${id}.json`)) as ScratchAttempt|null;if(a&&(a.schemaVersion!==1||a.id!==id||a.chatId!==chat||hash(JSON.stringify(draft(a.draft)))!==a.sceneHash))throw new AtlasError("Submitted attempt is unsupported or corrupt.",409);return a;};

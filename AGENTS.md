@@ -947,3 +947,16 @@ apply; no background model checks or Atlas note writes.
 90–100%, gold from 30% up to 90%, vivid red below 30%; unknown remains grey.
 Gold covers the otherwise unspecified 80–90% interval. Edges still use endpoint
 mean recall before applying the same palette; main Atlas is unchanged.
+
+### Selective upstream batch 1 (6 November 2026)
+
+File-backed chat/job/settings/source/render/prompt writes now use the shared
+fsynced temp-and-rename helper. Strict replacement is the default; only the named
+previously in-place upstream writers retain the explicit Windows compatibility
+fallback. Atlas lesson heads, scratchpad manifests, source metadata and Problems
+use mode 0600 without fallback. Preserve immutable original/image publication,
+SQLite transactions, revision checks and integration recovery receipts. Matching
+crash temps are cleared with record deletion/purge. Auth and Keychain storage stay
+unchanged. Canonical adoption and wake replay deduplicate by durable message ID
+without dropping unrelated live assistant output. No new UI or provider features.
+See [donor provenance, boundaries and validation](docs/upstream-batch-1.md).

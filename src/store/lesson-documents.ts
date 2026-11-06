@@ -1,6 +1,7 @@
+import {writeFileAtomicSync} from "./atomic-write.ts";
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {lessonDocument,type LessonDocumentStore} from '../core/lesson-documents.ts';
 import {AtlasError} from '../core/atlas.ts';
 const hash=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex');
@@ -13,6 +14,6 @@ export function createLessonDocumentStore(root:string):LessonDocumentStore{
   const digest=hash(bytes),id=`ls_${digest}`,folder=dir(chat),old=list(chat).find(d=>d.id===id);if(old)return old;if(list(chat).length>=8)throw new AtlasError('Use up to eight sources per lesson.');
   const document=lessonDocument.parse({version:1,id,name:name.replace(/[\x00-\x1f/\\]/g,'_').slice(0,180),hash:digest,kind,size:bytes.length,pages,createdAt:new Date().toISOString()});fs.mkdirSync(folder,{recursive:true,mode:0o700});
   const original=path.join(folder,`${id}.original`);if(fs.existsSync(original)){regular(original);if(hash(fs.readFileSync(original))!==digest)throw new AtlasError('Source original changed.',409);}else fs.writeFileSync(original,bytes,{flag:'wx',mode:0o600});
-  const temporary=path.join(folder,`.${randomUUID()}.tmp`);try{fs.writeFileSync(temporary,JSON.stringify(document),{flag:'wx',mode:0o600});fs.renameSync(temporary,path.join(folder,`${id}.json`));}finally{fs.rmSync(temporary,{force:true});}return document;
+  writeFileAtomicSync(path.join(folder,`${id}.json`),JSON.stringify(document),{mode:0o600});return document;
  },asset:(chat,id)=>{const document=list(chat).find(d=>d.id===id);if(!document)throw new AtlasError('Source not found in this lesson.',404);const file=path.join(dir(chat),`${document.id}.original`);if(!fs.existsSync(file))throw new AtlasError('Source original is missing. Restore it from backup.',404);regular(file);if(fs.statSync(file).size!==document.size)throw new AtlasError('Source original changed. Restore it from backup.',409);const bytes=fs.readFileSync(file);if(hash(bytes)!==document.hash||bytes.length!==document.size)throw new AtlasError('Source original changed. Restore it from backup.',409);return {document,path:file,bytes};}};
 }

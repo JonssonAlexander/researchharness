@@ -1,3 +1,4 @@
+import {writeFileAtomicSync} from "./atomic-write.ts";
 import {emit} from "../core/events.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,7 +9,7 @@ import {problemKey,savedProblem,problemSubmission,type SavedProblem,type Problem
 export function createProblemStore(root:string):ProblemStore{
  function file(id:string){problemKey.parse(id);return path.join(root,`${id}.json`);}
  function read(id:string):SavedProblem|null{const f=file(id);if(!fs.existsSync(f))return null;if(!fs.lstatSync(f).isFile())throw new AtlasError("Problem must be a regular file.",409);return savedProblem.parse(JSON.parse(fs.readFileSync(f,"utf8")));}
- function put(p:SavedProblem){savedProblem.parse(p);fs.mkdirSync(root,{recursive:true,mode:0o700});const tmp=path.join(root,`.${randomUUID()}.tmp`);try{fs.writeFileSync(tmp,JSON.stringify(p),{flag:"wx",mode:0o600});fs.renameSync(tmp,file(p.id));}finally{fs.rmSync(tmp,{force:true});}emit("problems-changed",{});return p;}
+ function put(p:SavedProblem){savedProblem.parse(p);fs.mkdirSync(root,{recursive:true,mode:0o700});writeFileAtomicSync(file(p.id),JSON.stringify(p),{mode:0o600});emit("problems-changed",{});return p;}
  function list(){if(!fs.existsSync(root))return [];return fs.readdirSync(root).filter(n=>/^pb_[0-9a-f-]{36}\.json$/.test(n)).map(n=>read(n.slice(0,-5))!).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
  function byChat(chatId:string){return list().flatMap(p=>p.attempts.filter(a=>a.chatId===chatId).map(a=>({problem:p,attempt:a})));}
  function create(input:ProblemSubmission,chatId:string,callId:string,minutes:number){const old=byChat(chatId).find(x=>x.attempt.callId===callId);if(old)return old;const now=new Date().toISOString(),attempt:ProblemAttempt={id:`pa_${randomUUID()}`,chatId,callId,minutes,createdAt:now,events:[]},problem=put({...problemSubmission.parse(input),schemaVersion:1,id:`pb_${randomUUID()}`,createdAt:now,attempts:[attempt],integrationReviewIds:[]});return {problem,attempt};}
