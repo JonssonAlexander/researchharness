@@ -65,3 +65,13 @@ describe("pdf-ops — the pdfjs text layer", () => {
 		assert.deepEqual(parsePageSpec(" 2 , 1 ", 3), [1, 2]);
 	});
 });
+it("search line numbers agree with selected-page extraction", async () => {
+ const result=await pdfSearch(FIXTURE,"force",{literal:true});
+ for(const hit of result.hits){
+  const extracted=await pdfExtract(FIXTURE,String(hit.page));
+  const body=extracted.slice(extracted.indexOf("\n")+1);
+  assert.equal(body,result.pageTexts.get(hit.page));
+  assert.match(body.split("\n")[hit.line-1]!,/force/i);
+ }
+ assert.equal(await pdfExtract(FIXTURE,"999"),"No pages selected — page spec matched nothing.");
+});

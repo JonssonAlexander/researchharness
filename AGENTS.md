@@ -960,3 +960,18 @@ crash temps are cleared with record deletion/purge. Auth and Keychain storage st
 unchanged. Canonical adoption and wake replay deduplicate by durable message ID
 without dropping unrelated live assistant output. No new UI or provider features.
 See [donor provenance, boundaries and validation](docs/upstream-batch-1.md).
+
+### Selective upstream batch 2 (6 November 2026)
+
+PDF reads/searches share a conservative page-local Markdown converter. Keep full
+source lines, immutable originals and bounded image inspection; text conversion
+is not OCR or equation verification. Dense pages bypass expensive column inference
+without dropping text. Always release PDF tasks on success/failure.
+Read-only lexical claim ranking and per-audit query-bound pagination replace the
+legacy auditor's glob tour. Capture findings and graph together; repeated queries
+stay repeatable. Similarity never establishes identity. Preserve whole assertions,
+conditions, domains, quantifiers and joint premises; do not adopt upstream's relaxed
+automatic matching policy. Reviewed lessons use ranked bounded claim context with
+explicit omissions, while identity choices, exact-match defaults and explicit
+integration approval remain unchanged. No extra UI, provider or embedding service.
+See [scope, donor provenance and validation](docs/upstream-batch-2.md).

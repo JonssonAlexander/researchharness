@@ -160,3 +160,19 @@ test('Atlas-aware lessons retrieve reviewed rationale and gaps without sending s
  const argument=value.arguments.items.find(a=>a.key==='joint')!;assert.deepEqual(argument.premises,r.plan!.chains[0]!.premises);assert.equal(argument.canonicalId,r.plan!.chains[0]!.id);
  const focused=readLessonAtlas({read:()=>({atlas:stores.atlasStore.read(),propositions:[],chains:[]}),lesson:id=>stores.atlasStore.lessonReviews.read(id)},'lesson',r.id,argument.canonicalId!);assert(focused.kind==='lesson');assert.equal(focused.arguments.items.length,1);assert.equal(focused.arguments.items[0]!.rationale,'Both assumptions are required together.');
 });
+
+test('lesson review ranks relevant full claims into bounded context without integrating them',async()=>{
+ const f=fixture(false);
+ for(let i=0;i<100;i++)stores.graphStore.appendNode({id:`n_filler_${i}`,name:`Unrelated label ${i}`,statement:`Irrelevant combinatorial filler ${i}.`,aliases:[],createdAt:new Date().toISOString(),provenance:[]});
+ const target={id:'n_ranked_target',name:'Different terminology',statement:'Anisotropic elliptic operators admit resolvents under coercivity.',aliases:[],createdAt:new Date().toISOString(),provenance:[]};
+ stores.graphStore.appendNode(target);
+ stores.chatStore.saveMessages(f.chat.id,[...stores.chatStore.getChat(f.chat.id)!.messages,{...fauxAssistantMessage([fauxText(target.statement)]),id:'message_context'}]);
+ const before=JSON.stringify([stores.graphStore.readNodes(),stores.graphStore.readChains(),stores.atlasStore.read()]);let seen=false;
+ const service=createLessonIntegrationService(()=>engine,async(_engine,input)=>{
+  seen=true;assert(input.graph.nodes.some(n=>n.id===target.id));assert(input.graph.nodes.length<=80);assert(JSON.stringify(input.graph.nodes).length<=61000);
+  return structuredClone(f.draft);
+ });
+ const r=await service.generate({action:'generate',id:`lr_${randomUUID()}`,chatId:f.chat.id,subjectId:f.subject,expectedModel:`${engine.model.provider}:${engine.model.id}`,consent:true},signal());
+ assert(seen);assert.equal(r.status,'prepared');assert.equal(JSON.stringify([stores.graphStore.readNodes(),stores.graphStore.readChains(),stores.atlasStore.read()]),before);
+ assert.equal(r.plan!.chains[0]!.premises.length,2,'retrieval leaves joint inference semantics intact');
+});

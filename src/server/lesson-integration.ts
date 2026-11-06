@@ -1,3 +1,4 @@
+import {createPropositionCandidateSearch} from "../core/proposition-candidates.ts";
 import {currentChallenge} from "./problems.ts";
 import {challengeLesson,attemptStatus} from "../core/problems.ts";
 import {createRetrievalService} from "./retrieval.ts";
@@ -65,11 +66,29 @@ export function createLessonIntegrationService(engine=engineFor,distill=distillL
   if(running)reviews.put({...running,status:"failed",error:"Review was interrupted. Retry explicitly; recorded usage may be incomplete."},running.digest);
   const e=engine(c.chatId),model=`${e.model.provider}:${e.model.id}`;if(model!==c.expectedModel)throw new AtlasError("The review model changed. Reopen the review.",409);
   const boundIds=captured.lesson.plan.nodes.flatMap(n=>n.conceptId?[n.conceptId]:[]),context=syncContext(atlas,captured.transcript,boundIds);
-  let budget=60000;const picked=graph.nodes.map(n=>({n,score:(context.concepts.some(c=>c.propositionIds.includes(n.id))?10000:0)+(captured.transcript.toLowerCase().includes(n.name.toLowerCase())?100:0)})).sort((a,b)=>b.score-a.score).flatMap(({n})=>{const size=n.statement.length+n.aliases.join("").length;if(size>budget)return [];budget-=size;return [n];}).slice(0,80),known=new Set(picked.map(n=>n.id));
+  const ranked = createPropositionCandidateSearch(graph.nodes)({
+   id: "lesson", name: captured.lesson.plan.objective, statement: captured.transcript,
+   aliases: captured.lesson.plan.nodes.map(n => n.title),
+  });
+  const scores = new Map(ranked.map(h => [h.node.id, h.score]));
+  const boundClaims = new Set(context.concepts.flatMap(c => c.propositionIds));
+  const ordered = [...graph.nodes].sort((a, b) =>
+   Number(boundClaims.has(b.id)) - Number(boundClaims.has(a.id)) ||
+   (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) || a.id.localeCompare(b.id));
+  let budget = 60000;
+  const picked: typeof graph.nodes = [];
+  for (const node of ordered) {
+   if (picked.length >= 80) break;
+   const size = JSON.stringify(node).length;
+   if (size > budget) continue;
+   budget -= size;
+   picked.push(node);
+  }
+  const known = new Set(picked.map(n => n.id));
   let r:LessonReview={schemaVersion:1,id:c.id,chatId:c.chatId,revision:0,status:"running",source:captured,sourceHash,baseAtlasRevision:atlas.layoutRevision??0,baseGraphHash:lessonHash(graph),model,createdAt:new Date().toISOString(),draft:null,decisions:{},subjectId:c.subjectId,context:{concepts:context.concepts,propositions:picked},plan:null,problems:[],error:null,digest:""};
   r=reviews.put(r,null);
   try{
-   const bounded=AbortSignal.any([signal,AbortSignal.timeout(20*60*1000)]),draft=lessonSummary.parse(await distill(e,{source:captured,atlas:context,graph:{nodes:picked,chains:graph.chains.filter(a=>known.has(a.conclusion)&&a.premises.every(p=>known.has(p)))}},bounded,u=>{r=reviews.put({...r,usage:accumulateJobUsage(r.usage,model,piUsageToStep(u))},r.digest);}));bounded.throwIfAborted();
+   const bounded=AbortSignal.any([signal,AbortSignal.timeout(20*60*1000)]),draft=lessonSummary.parse(await distill(e,{source:captured,atlas:context,graph:{nodes:picked,omittedNodes:graph.nodes.length-picked.length,chains:graph.chains.filter(a=>known.has(a.conclusion)&&a.premises.every(p=>known.has(p)))}},bounded,u=>{r=reviews.put({...r,usage:accumulateJobUsage(r.usage,model,piUsageToStep(u))},r.digest);}));bounded.throwIfAborted();
    const problem=validateLessonSummary(draft,captured);if(problem)throw new AtlasError(problem);
    r=reviews.put(complete({...r,status:"prepared",revision:1,draft,decisions:initialLessonDecisions(draft,captured,atlas,graph.nodes)},atlas,graph),r.digest);
   }catch(e){r=reviews.put({...r,status:signal.aborted?"cancelled":"failed",error:e instanceof AtlasError||e instanceof SubmitProposalError?e.message:"Lesson review failed or timed out. Saved work is unchanged; recorded usage may be incomplete."},r.digest);}
