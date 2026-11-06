@@ -11,6 +11,8 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import path from "node:path";
+import { parseFileAccessSettings } from "../core/file-access.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
@@ -196,6 +198,14 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "graphTools.enabled must be a boolean" };
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
+	}
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		if (!parsed.ok) return parsed;
+		if (parsed.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+			return { ok: false, error: "fileAccess.folders must be absolute on the server filesystem (or start with ~/)" };
+		}
+		settings.fileAccess = parsed.settings;
 	}
 	return { ok: true, settings };
 }

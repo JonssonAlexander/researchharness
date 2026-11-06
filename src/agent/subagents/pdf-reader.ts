@@ -167,7 +167,13 @@ export async function runPdfReaderAgent(
 ): Promise<PdfResult> {
 	const headless = opts.headless ?? getHeadless();
 	const maxIterations = opts.maxIterations ?? MAX_ITERATIONS;
-	const pdfPath = resolveSourcePath(input.path);
+	let pdfPath: string;
+	try { pdfPath = resolveSourcePath(input.path); }
+	catch (error) {
+		return { path: input.path, question: input.question,
+			brief: `PDF failed: ${error instanceof Error ? error.message : "Source access was refused."}`,
+			pagesRead: [], pagesConsulted: [] };
+	}
 
 	// Deterministic upfront failure: unreadable / unparseable
 	// for renders — the brief never starts on a broken source.

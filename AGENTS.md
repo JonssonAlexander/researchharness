@@ -975,3 +975,17 @@ automatic matching policy. Reviewed lessons use ranked bounded claim context wit
 explicit omissions, while identity choices, exact-match defaults and explicit
 integration approval remain unchanged. No extra UI, provider or embedding service.
 See [scope, donor provenance and validation](docs/upstream-batch-2.md).
+
+### Selective upstream batch 3A (6 November 2026)
+
+Generic learner-file tools enforce mandatory credential/dotenv/sensitive-home
+path denials against named and canonical locations. Optional File access settings
+start OFF; ON with no available allowed roots stays closed. Resolve symlinks before
+containment, preserve host case semantics for allowed roots, and read fresh policy
+per operation. Corrupt existing settings block reads and surface an error; unrelated
+settings writes must not discard that boundary. Preserve raw queued PDF inputs and
+idempotent call IDs; admission and job start both check current access. Managed
+lesson sources/scratchwork retain their scoped ID/hash/image gates without granting
+generic access to the data directory. Auth/Keychain remain unchanged. This is not
+an OS sandbox or a content-redaction system. No attachment/picker feature is added.
+See [scope, provenance and validation](docs/upstream-batch-3a.md).

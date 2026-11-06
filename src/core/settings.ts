@@ -27,6 +27,7 @@
  * (fully concrete) view lives in settings-resolution.ts.
  */
 
+import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
@@ -243,6 +244,8 @@ export interface DictationSettings {
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
+	/** Optional boundary: absent is off; restricted + empty allows no learner files. */
+	fileAccess?: FileAccessSettings;
 	/** Background-role model/thinking overrides (absent role = config pin). */
 	models?: Partial<Record<BackgroundModelRole, RoleModelOverride>>;
 	/** Tool toggles keyed by tool id (absent key = enabled). User-level
@@ -536,6 +539,10 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		out.fileAccess = parsed.ok ? parsed.settings : { restricted: true, folders: [] };
 	}
 	return out;
 }

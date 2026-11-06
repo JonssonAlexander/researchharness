@@ -62,3 +62,5 @@ export {retrievalResponse} from "./retrieval.ts";
 export {lessonDocumentsResponse} from "./lesson-documents.ts";
 
 export {problemsResponse,challengeClientChat} from "./problems.ts";
+
+export {fileAccessConfigurationError} from "./file-access.ts";

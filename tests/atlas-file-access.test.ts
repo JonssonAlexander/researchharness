@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import test,{after} from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {Resvg} from '@resvg/resvg-js';
+import {initialLesson} from '../src/core/learning-session.ts';
+import {scratchAttemptMessage} from '../src/core/scratchpad.ts';
+import {asAgentMessages} from '../src/core/native-messages.ts';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'atlas-file-policy-'));
+process.env.LH_DATA_DIR=path.join(root,'data');process.env.LH_AUTH_FILE=path.join(root,'auth.json');
+after(()=>fs.rmSync(root,{recursive:true,force:true}));
+const {stores}=await import('../src/server/stores.ts');
+const {lessonDocumentReader}=await import('../src/server/lesson-documents.ts');
+const {scratchImages,scratchpadResponse}=await import('../src/server/scratchpad.ts');
+const {setFileAccessPolicy}=await import('../src/agent/tools/file-access.ts');
+const {readTool}=await import('../src/agent/tools/read.ts');
+test('restricted-empty generic access leaves scoped immutable lesson sources and scratchwork readable',async()=>{
+ const chat=stores.chatStore.createChat('Managed sources');stores.lessonStore.create(chat.id,initialLesson('Learn a result'));
+ const bytes=Buffer.from('A definition with its full conditions.');
+ const text=stores.lessonDocuments.put(chat.id,'paper.md',bytes,'text',null);
+ const pdfBytes=fs.readFileSync(path.join(import.meta.dirname,'fixtures/sample-3page.pdf'));
+ const pdf=stores.lessonDocuments.put(chat.id,'paper.pdf',pdfBytes,'pdf',3);
+ const target={id:'topic_0',title:'Result',start:'Assume A.',finish:'Show B.'};
+ const draft=stores.scratchpadStore.save(chat.id,'topic-topic_0',0,{scene:{type:'excalidraw',version:2,elements:[],appState:{},files:{}},text:'My reasoning',target});
+ const png=new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0L10 10"/></svg>').render().asPng();
+ const attempt=stores.scratchpadStore.capture(chat.id,'topic-topic_0',`sa_${randomUUID()}`,draft.revision,png);
+ const native=asAgentMessages([scratchAttemptMessage(attempt)]);
+ setFileAccessPolicy(()=>({restricted:true,folders:[]}));
+ try{
+  await assert.rejects(readTool.execute('raw',{path:stores.lessonDocuments.asset(chat.id,text.id).path}),/Access denied/);
+  assert.match(JSON.stringify(await lessonDocumentReader(chat.id,true).read(text.id,0,1)),/full conditions/);
+  assert.match(JSON.stringify(await lessonDocumentReader(chat.id,true).read(pdf.id,0,2)),/Page 2/);
+  assert(scratchImages(chat.id,native,true).some(m=>JSON.stringify(m).includes('image/png')));
+  assert.equal((await scratchpadResponse(new Request(`http://localhost/pad?image=${attempt.id}`),chat.id)).status,200);
+  const other=stores.chatStore.createChat('Other lesson');stores.lessonStore.create(other.id,initialLesson('Other'));
+  await assert.rejects(()=>lessonDocumentReader(other.id,true).read(text.id,0,1),/not found/i);
+  assert.throws(()=>scratchImages(other.id,native,true),/missing|not found/i);
+  assert.deepEqual(stores.lessonDocuments.asset(chat.id,text.id).bytes,bytes);
+  assert.deepEqual(stores.lessonDocuments.asset(chat.id,pdf.id).bytes,pdfBytes);
+ }finally{setFileAccessPolicy(()=>({restricted:false,folders:[]}));}
+});

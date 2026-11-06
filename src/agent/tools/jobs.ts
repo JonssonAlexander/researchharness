@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import type { JobRecord } from "../../core/contracts.ts";
 import type { JobStore } from "../../core/ports.ts";
+import { resolveSourcePath } from "./fs-shared.ts";
 
 /**
  * Async sub-agent job tools (vision §2.5; W2/W6 kinds + the pi-model
@@ -160,7 +161,11 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "pdf",
 			description: PDF_DESCRIPTION,
 			parameters: pdfInputSchema,
-			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => dispatch(ctx, "pdf", toolCallId, PDF_ACK, input)),
+			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => {
+				// Admission and queued execution both check current access; retain raw input for replay.
+				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId)) resolveSourcePath(input.path);
+				return dispatch(ctx, "pdf", toolCallId, PDF_ACK, input);
+			}),
 		},
 	};
 }

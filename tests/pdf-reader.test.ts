@@ -78,7 +78,7 @@ describe("pdf-reader source paths", () => {
 
 	for (const kind of ["absolute", "home-relative", "tilde"] as const) {
 		it(`${kind} path reaches text tools and rendering as the same absolute path`, async () => {
-			const absolutePath = path.join(home, relativePath);
+			const absolutePath = fs.realpathSync.native(path.join(home, relativePath));
 			const inputPath = { absolute: absolutePath, "home-relative": relativePath, tilde: `~/${relativePath}` }[kind];
 			assert.equal(os.homedir(), home);
 			assert.notEqual(path.resolve(relativePath), absolutePath, "cwd is not the learner's home");
@@ -118,7 +118,7 @@ describe("pdf-reader source paths", () => {
 		};
 		const missing = path.join("Course notes", "missing.pdf");
 		const result = await runPdfReaderAgent({ path: missing, question: "anything" }, { engine });
-		assert.equal(result.path, path.join(home, missing));
+		assert.equal(result.path, path.join(fs.realpathSync.native(home), missing));
 		assert.match(result.brief, /^PDF failed:.*ENOENT/);
 		assert.equal(modelCalls, 0);
 		assert.deepEqual(result.pagesRead, []);

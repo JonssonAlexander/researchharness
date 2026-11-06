@@ -1,3 +1,5 @@
+import { setFileAccessPolicy } from "../agent/tools/file-access.ts";
+import { fileAccessPolicy } from "./file-access.ts";
 import {challengeProjection,challengeScratchLesson,recoverChallengeHistory,reconcileChallengeCalls} from "./problems.ts";
 import {lessonDocumentReader} from "./lesson-documents.ts";
 import {graphView} from "./graph.ts";
@@ -137,6 +139,9 @@ export const extraction = createExtractionPipeline({
 		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
 });
 
+
+// File tools receive current settings at each operation, independently of model/tool toggles.
+setFileAccessPolicy(fileAccessPolicy);
 
 // Wake-pipeline wiring (contracts.ts "THE ASYNC PROTOCOL" §4): the pipeline
 // delivers its steers through THIS composition root (one event: the steer
