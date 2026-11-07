@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -58,10 +58,23 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.match(out.reason, /tavily/);
 		assert.match(out.reason, /API key is missing/);
 	});
+
+	it("auto-detects an Exa key, preserving existing engine priority", () => {
+		assert.equal(resolveSearchEngineFor(undefined, { exa: "exa-test-key" }).engine, "exa");
+		assert.equal(resolveSearchEngineFor(undefined, { exa: "exa-test-key", brave: "brave-key" }).engine, "brave");
+		assert.equal(resolveSearchEngineFor(undefined, { exa: "exa-test-key", brave: "brave-key", tavily: "tavily-key" }).engine, "tavily");
+	});
+
+	it("honors an Exa pin and refuses to silently fall back", () => {
+		assert.equal(resolveSearchEngineFor("exa", { exa: "exa-test-key", tavily: "tavily-key" }).engine, "exa");
+		const missing = resolveSearchEngineFor("exa", { tavily: "tavily-key" });
+		assert.equal(missing.available, false);
+		assert.match(missing.reason, /EXA_API_KEY/);
+	});
 });
 
 /** A one-shot stub fetch: asserts the request shape and returns the canned response. */
-function stubFetch(canned: unknown, expect: (url: string, init: RequestInit) => void) {
+function stubFetch(canned: unknown, expect: (url: string, init: RequestInit) => void = () => {}) {
 	return async (url: string, init: RequestInit): Promise<Response> => {
 		expect(url, init);
 		return new Response(JSON.stringify(canned), { status: 200 });
@@ -130,4 +143,75 @@ describe("braveProvider (wire shape per Brave's dashboard docs, verified 2026-09
 		);
 		await assert.rejects(provider.search("q", 5), /Brave search API 429/);
 	});
+});
+
+describe("exaProvider", () => {
+	it("sends the documented request and maps bounded highlights to search hits", async () => {
+		const provider = exaProvider("exa-secret-test-key", stubFetch({ results: [
+			{ title: "Example", url: "https://example.com/a", highlights: ["first\nline", "second"] },
+			{ url: "https://example.com/b", highlights: [], text: "x".repeat(600) },
+			{ title: "Missing URL" }, { url: "javascript:alert(1)" }, null,
+		] }, (url, init) => {
+			assert.equal(url, "https://api.exa.ai/search");
+			assert.equal(init.method, "POST");
+			assert.equal((init.headers as Record<string, string>)["x-api-key"], "exa-secret-test-key");
+			assert.deepEqual(JSON.parse(init.body as string), { query: "test query", type: "auto", numResults: 5, contents: { highlights: true } });
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("test query", 5), [
+			{ title: "Example", url: "https://example.com/a", snippet: "first line second" },
+			{ title: "https://example.com/b", url: "https://example.com/b", snippet: "x".repeat(500) },
+		]);
+	});
+
+	it("clamps counts to Exa's range", async () => {
+		const counts: number[] = [];
+		const provider = exaProvider("key", stubFetch({ results: [] }, (_url, init) => counts.push(JSON.parse(init.body as string).numResults)));
+		await provider.search("q", 0);
+		await provider.search("q", 200);
+		assert.deepEqual(counts, [1, 100]);
+	});
+
+	it("reports HTTP and malformed-response failures without exposing the key", async () => {
+		const key = "exa-secret-test-key";
+		const denied = exaProvider(key, async () => new Response(`bad ${key}`, { status: 429 }));
+		await assert.rejects(denied.search("q", 5), (error: Error) => /Exa search API 429/.test(error.message) && !error.message.includes(key));
+		const malformed = exaProvider(key, async () => new Response(JSON.stringify({ results: null }), { status: 200 }));
+		await assert.rejects(malformed.search("q", 5), /invalid response/);
+	});
+});
+
+describe('Exa response and transport hardening',()=>{
+ it('filters unsafe URLs and malformed fields without coercing provider objects',async()=>{
+  const provider=exaProvider('fixture',stubFetch({results:[
+   {url:''},{url:'not a URL'},{url:'file:///private/file'},{url:'data:text/plain,x'},false,
+   {url:'https://example.org',title:{bad:true},highlights:['one',null,42,'two'],text:{bad:true}},
+   {url:'http://example.net',title:'T'.repeat(800),highlights:{bad:true},text:'fallback\ntext'},
+  ]}));
+  assert.deepEqual(await provider.search('q',3),[
+   {url:'https://example.org',title:'https://example.org',snippet:'one two'},
+   {url:'http://example.net',title:'T'.repeat(300),snippet:'fallback text'},
+  ]);
+ });
+ it('bounds fractional/non-finite counts and actual returned rows',async()=>{
+  const counts:number[]=[];
+  const provider=exaProvider('fixture',stubFetch({results:Array.from({length:120},(_,i)=>({url:`https://example.org/${i}`}))},(_url,init)=>counts.push(JSON.parse(init.body as string).numResults)));
+  assert.equal((await provider.search('q',2.9)).length,2);
+  assert.equal((await provider.search('q',NaN)).length,5);
+  assert.equal((await provider.search('q',Infinity)).length,5);
+  assert.deepEqual(counts,[2,5,5]);
+ });
+ for(const status of [401,429,500])it(`redacts HTTP ${status} response bodies`,async()=>{
+  const provider=exaProvider('private-key',async()=>new Response('private-key secret response body',{status}));
+  await assert.rejects(provider.search('q',1),{message:`Exa search API ${status}`});
+ });
+ it('redacts malformed JSON and unexpected response shapes',async()=>{
+  for(const body of ['private-key not json','null','[]','{"results":{}}']){
+   await assert.rejects(exaProvider('private-key',async()=>new Response(body)).search('q',1),{message:'Exa search API returned an invalid response'});
+  }
+ });
+ it('redacts transport errors and reports timeout separately',async()=>{
+  await assert.rejects(exaProvider('private-key',async()=>{throw Error('private-key transport body');}).search('q',1),{message:'Exa search request failed'});
+  await assert.rejects(exaProvider('private-key',async()=>{throw Object.assign(Error('private-key timeout body'),{name:'TimeoutError'});}).search('q',1),{message:'Exa search request timed out'});
+ });
 });

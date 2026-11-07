@@ -989,3 +989,15 @@ lesson sources/scratchwork retain their scoped ID/hash/image gates without grant
 generic access to the data directory. Auth/Keychain remain unchanged. This is not
 an OS sandbox or a content-redaction system. No attachment/picker feature is added.
 See [scope, provenance and validation](docs/upstream-batch-3a.md).
+
+### Selective upstream batch 4 (7 November 2026)
+
+Exa joins Tavily and Brave behind the existing search port and Settings controls.
+One browser-safe registry defines IDs, labels and automatic preference order:
+Tavily → Brave → Exa. A missing pinned key never silently falls back. Read current
+keys/settings for each operation; environment keys retain precedence. Exa requests
+bounded highlights, accepts only HTTP(S) hits and redacts response/transport errors.
+Keyless research tool composition and existing web fetching remain unchanged.
+No Firecrawl, hosted Ollama, SDK or new model routing is included. Validation uses
+dummy keys/mocked search, not a real paid account. See
+[scope, provenance and validation](docs/upstream-batch-4.md).

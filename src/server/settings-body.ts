@@ -11,6 +11,7 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import path from "node:path";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -181,8 +182,8 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (!isSearchEngineId(search.engine)) {
+				return { ok: false, error: `search.engine must be ${SEARCH_ENGINES.map(e => `"${e.id}"`).join(", ")}` };
 			}
 			settings.search = { engine: search.engine };
 		}
