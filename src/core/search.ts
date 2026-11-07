@@ -48,7 +48,7 @@ export function isSearchEngineId(value: unknown): value is SearchEngineId {
  *  errors to clear Error messages); the tool layer catches and reports. */
 export interface SearchProvider {
 	id: SearchEngineId;
-	search(query: string, count: number): Promise<SearchHit[]>;
+	search(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]>;
 }
 
 /** Why search is (un)available — the honest status the UI and the tool

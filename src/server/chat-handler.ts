@@ -118,6 +118,11 @@ const jobRunner = createJobRunner({
 	// injected port — resolved FRESH per job (key rotations land immediately).
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
 	// same signal so keyless servers never see the research tool at all.
+    researchSources:stores.researchSources,
+    researchAtlas:()=>graphToolsEnabled(effectiveSettings())?{
+        read:()=>{if(!graphToolsEnabled(effectiveSettings()))throw new Error("Atlas access is off.");const graph=graphView();return {atlas:stores.atlasStore.read(),propositions:graph.propositions,chains:graph.chains};},
+        lesson:id=>{if(!graphToolsEnabled(effectiveSettings()))throw new Error("Atlas access is off.");return stores.atlasStore.lessonReviews.read(id);},
+    }:undefined,
 	searchProvider,
 });
 /** The app's ONE extraction pipeline instance — both front doors share it:

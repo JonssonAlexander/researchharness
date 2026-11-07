@@ -121,3 +121,5 @@ export * from "./problems.ts";
 export {lessonTopicDetail} from "./lesson-topic.ts";
 
 export * from "./file-access.ts";
+
+export * from "./maths-companion.ts";

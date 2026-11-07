@@ -249,3 +249,30 @@ export function renderDir(filePath: string): string {
 }
 /** Bounded upload validation; no extraction/model call. */
 export async function pdfPageCount(filePath:string):Promise<number>{const { doc, task } = await openDocument(filePath);try{return doc.numPages;}finally{await task.destroy();}}
+
+/** Locate an unambiguous normalized quotation, retaining PDF page coordinates.
+ * Rectangles cover matching text items, not a model-invented theorem region. */
+export async function pdfLocatePassage(filePath:string,pageNumber:number,quote:string,reference="") {
+ const {doc,task}=await openDocument(filePath);
+ try {
+  if(!Number.isInteger(pageNumber)||pageNumber<1||pageNumber>doc.numPages||doc.numPages>500)throw new Error("Choose a valid PDF page (up to 500 pages).");
+  const page=await doc.getPage(pageNumber),viewport=page.getViewport({scale:1}),content=await page.getTextContent();
+  const pdfjs=await loadPdfjs();
+  const items=content.items.filter((item):item is import("pdfjs-dist/types/src/display/api").TextItem=>"str" in item);
+  const normalize=(text:string)=>text.normalize("NFKC").replace(/\s+/g," ").trim();
+  let body="";const spans=items.map(item=>{const start=body.length;body+=normalize(item.str);const end=body.length;body+=" ";return {item,start,end};});
+  const verifiedReference=reference&&body.includes(normalize(reference))?reference:"";
+  const needle=normalize(quote),start=needle.length>=12?body.indexOf(needle):-1;
+  if(start<0||body.indexOf(needle,start+1)>=0)return {pages:doc.numPages,reference:verifiedReference,location:"page-only" as const,rects:[]};
+  const selected=spans.filter(span=>span.end>start&&span.start<start+needle.length&&span.end>span.start);
+  const rects=selected.map(({item})=>{
+   const tx=pdfjs.Util.transform(viewport.transform,item.transform),height=Math.hypot(tx[2]!,tx[3]!);
+   // Rotated/vertical text needs a dedicated mapper; never guess its highlight.
+   if(Math.abs(tx[1]!)>0.01||Math.abs(tx[2]!)>0.01||height<=0)return null;
+   const x=Math.max(0,tx[4]!/viewport.width),y=Math.max(0,(tx[5]!-height)/viewport.height);
+   return {x,y,width:Math.min(item.width/viewport.width,1-x),height:Math.min(height/viewport.height,1-y)};
+  });
+  if(!rects.length||rects.length>100||rects.some(r=>!r||r.width<=0||r.height<=0))return {pages:doc.numPages,reference:verifiedReference,location:"page-only" as const,rects:[]};
+  return {pages:doc.numPages,reference:verifiedReference,location:"exact" as const,rects:rects.filter((r):r is NonNullable<typeof r>=>r!==null)};
+ } finally {await task.destroy();}
+}

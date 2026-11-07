@@ -52,11 +52,11 @@ function truncate(text: string): string {
 }
 
 /** Jina Reader fallback for JS-rendered pages (no deps — plain fetch). */
-async function fetchViaJina(url: string): Promise<string | null> {
+async function fetchViaJina(url: string, signal?: AbortSignal): Promise<string | null> {
 	try {
 		const res = await fetch(`https://r.jina.ai/${url}`, {
 			headers: { Accept: "text/markdown", "X-No-Cache": "true" },
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+			signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
 		});
 		if (!res.ok) return null;
 		const content = await res.text();
@@ -80,14 +80,14 @@ function htmlToMarkdown(html: string): { title: string; content: string } | null
 	return { title: article.title ?? "", content: markdown };
 }
 
-async function fetchAndExtract(url: string): Promise<string> {
+async function fetchAndExtract(url: string, signal?: AbortSignal): Promise<string> {
 	const resp = await fetch(url, {
 		headers: {
 			"User-Agent": USER_AGENT,
 			Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language": "en-US,en;q=0.9",
 		},
-		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+		signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
 	});
 	if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
 
@@ -117,7 +117,7 @@ async function fetchAndExtract(url: string): Promise<string> {
 		return header + truncate(extracted.content);
 	}
 	// Readability failed — likely JS-rendered. Try Jina Reader.
-	const jina = await fetchViaJina(url);
+	const jina = await fetchViaJina(url, signal);
 	if (jina) return truncate(jina);
 	throw new Error("Could not extract readable content (the page may be JavaScript-rendered)");
 }
@@ -135,7 +135,7 @@ const webFetchInput = Type.Object({
 	url: Type.String({ description: "The URL to fetch" }),
 });
 
-export function createWebTools(search: () => SearchProvider | null): Record<string, AgentTool<any>> {
+export function createWebTools(search: () => SearchProvider | null, signal?: AbortSignal): Record<string, AgentTool<any>> {
 	return {
 		web_search: {
 			name: "web_search",
@@ -143,7 +143,8 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 			description: "Search the web. One search per call — use one call per search angle. " +
 				"Returns an array of results with title, url, and snippet.",
 			parameters: webSearchInput,
-			execute: serverExecute("web_search", webSearchInput, async ({ query, count }): Promise<WebSearchResult[] | string> => {
+			execute: serverExecute("web_search", webSearchInput, async ({ query, count }, ctx): Promise<WebSearchResult[] | string> => {
+                const requestSignal = AbortSignal.any([...(signal ? [signal] : []), ...(ctx.signal ? [ctx.signal] : [])]);
 				const provider = search();
 				if (!provider) {
 					return (
@@ -152,7 +153,8 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 					);
 				}
 				try {
-					return await provider.search(query, count ?? 5);
+					signal?.throwIfAborted();
+                    return await provider.search(query, count ?? 5, requestSignal);
 				} catch (err) {
 					return `web_search failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
@@ -166,7 +168,8 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 				"Fetch a web page and extract its readable content as markdown (Readability). " +
 				"Handles HTML pages and plain text; JS-rendered pages fall back to a reader service.",
 			parameters: webFetchInput,
-			execute: serverExecute("web_fetch", webFetchInput, async ({ url }): Promise<string> => {
+			execute: serverExecute("web_fetch", webFetchInput, async ({ url }, ctx): Promise<string> => {
+                const requestSignal = AbortSignal.any([...(signal ? [signal] : []), ...(ctx.signal ? [ctx.signal] : [])]);
 				try {
 					const parsed = new URL(url);
 					// URL.protocol carries a TRAILING COLON ("https:", WHATWG) — the
@@ -179,7 +182,8 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 					return `web_fetch failed: invalid URL "${url}"`;
 				}
 				try {
-					return await fetchAndExtract(url);
+					signal?.throwIfAborted();
+                    return await fetchAndExtract(url, requestSignal);
 				} catch (err) {
 					return `web_fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`;
 				}

@@ -1001,3 +1001,29 @@ Keyless research tool composition and existing web fetching remain unchanged.
 No Firecrawl, hosted Ollama, SDK or new model routing is included. Validation uses
 dummy keys/mocked search, not a real paid account. See
 [scope, provenance and validation](docs/upstream-batch-4.md).
+
+### Mathematical literature companion (7 November 2026; implemented slice)
+
+`research` has an optional mathematical mode, using the existing jobs, researcher
+model slot, background consent, cancellation, accounting and native delivery. The
+teacher may invoke it for substantive mathematical questions; the compact
+Investigate action requests this through the normal conversation path. Generic
+research remains unchanged. Reconstruct objects/constraints/assumptions and search
+alternate formulations, other fields and counterexamples; never infer novelty from
+search failure. Bounded read-only Atlas lookup respects the graph-access gate.
+
+Structured findings distinguish source reading, interpretation, assumptions and
+assessment. Only investigation-observed PDF downloads can be cited. Persist original
+bytes and source/passages before publishing findings; source IDs use content hashes.
+Exact normalized unambiguous quotations receive PDF-coordinate highlights. Unmatched,
+ambiguous or unsupported geometry is page-only and the finding remains unresolved.
+A text match is not theorem/applicability verification. Omit unlocated section/theorem
+references. No canonical graph writes or automatic integration occur.
+
+Read passage opens the original in a side reader (overlay on narrow screens) with
+page navigation/zoom and an explicit conversational follow-up. Sources live in
+`research-sources/<chatId>/` under the data root and require inclusion in backups.
+Reopening validates session ownership, IDs and content hashes. Exact question/context
+repeats reuse running/completed jobs; changed context or failed jobs can start anew.
+No embeddings, paper crawler, Python execution, notebook or new agent hierarchy.
+See [implementation, limits and validation](docs/maths-companion.md).

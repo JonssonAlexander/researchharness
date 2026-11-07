@@ -22,3 +22,6 @@ xai-credentials.json*
 
 # Generated from the pinned Excalidraw package by postinstall/prebuild.
 /public/excalidraw/
+
+# Generated browser PDF reader assets from the installed pdfjs package.
+/public/pdfjs/

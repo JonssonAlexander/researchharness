@@ -1,4 +1,5 @@
 "use client";
+import {ResearchFindings} from "../research-findings";
 
 import { CheckIcon, CircleX } from "lucide-react";
 import type { PdfResult, ResearchResult, SubagentArtifactData } from "@/src/core";
@@ -44,6 +45,7 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	}
 	switch (data.kind) {
 		case "research":
+            if ((data.result as ResearchResult).investigation) return <ResearchFindings report={(data.result as ResearchResult).investigation!}/>;
 			return isSubagentFailure("research", data.result as ResearchResult) ? (
 				<ResearchBriefCard output={data.result} />
 			) : (

@@ -1,3 +1,4 @@
+import {createResearchSourceStore} from "../store/research-sources.ts";
 import {createProblemStore} from "../store/problems.ts";
 import {createLessonDocumentStore} from "../store/lesson-documents.ts";
 /**
@@ -20,6 +21,7 @@ import { createAtlasStore } from "../store/atlas.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
+ researchSources:createResearchSourceStore(path.join(PATHS.data,"research-sources")),
  problemStore:createProblemStore(path.join(PATHS.data,"problems")),
  lessonDocuments:createLessonDocumentStore(path.join(PATHS.data,"lesson-sources")),
  scratchpadStore:createScratchpadStore(path.join(PATHS.data,"scratchpads")),

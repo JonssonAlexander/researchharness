@@ -1,3 +1,6 @@
+import {runMathsCompanion} from "./maths-companion.ts";
+import type {ResearchSourceStore} from "../../core/maths-companion.ts";
+import type {AtlasLessonReader} from "../../core/atlas-lesson-context.ts";
 import type { PiEngine } from "../models.ts";
 import type { SearchProvider } from "../../core/search.ts";
 import {
@@ -65,6 +68,8 @@ export const pdfModelOverride: { current?: PiEngine } = {};
 type JobToolInput = ResearchToolInput | DemoToolInput | VisualToolInput | PdfToolInput;
 
 export interface JobRunnerDeps {
+ researchSources?:ResearchSourceStore;
+ researchAtlas?:(chatId:string)=>AtlasLessonReader|undefined;
 	chatStore: ChatStore;
 	jobStore: JobStore;
 	/**
@@ -351,6 +356,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			await finishJob(jobId, { brief: "Research failed: the research question is unavailable.", sources: [] });
 			return;
 		}
+        if(input.mode === "mathematical" && (input.question.length > 4000 || (input.context?.length ?? 0) > 12000)) {
+            jobStore.updateJob(jobId,{error:"Mathematical investigation context exceeds its bounded input budget."});
+            await finishJob(jobId,{brief:"Research failed: use a question up to 4,000 characters and context up to 12,000 characters.",sources:[]});return;
+        }
 		const question = input.question;
 		const context = typeof input?.context === "string" && input.context.trim() ? input.context : undefined;
 
@@ -370,6 +379,21 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 
 		try {
 			jobStore.updateJob(jobId, { activity: "researching" });
+            if (input.mode === "mathematical") {
+                if (!deps.researchSources) throw new Error("Mathematical source storage is unavailable.");
+                const investigation = await runMathsCompanion(prompt, {
+                    engine:model,search:deps.searchProvider,pdfDir,chatId:job.chatId,
+                    sources:deps.researchSources,atlas:deps.researchAtlas?.(job.chatId),
+                    abortSignal:loop.abortSignal,onUsage:usage=>loop.onUsage(piUsageToStep(usage)),
+                    onToolStart:(name,args)=>jobStore.updateJob(jobId,{activity:activityLine(name,args as {query?:string;url?:string})}),
+                });
+                const brief = [investigation.summary,...investigation.findings.map(f=>{
+                    const p=investigation.passages.find(p=>p.id===f.passageId)!;
+                    return `${f.title} (${f.assessment})\nSource statement: ${f.claim}\nInterpretation: ${f.relationship}\nAssumptions: ${f.assumptions}\nRead: ${p.source.title}, PDF page ${p.page}, ${p.reference} (${p.source.url}); quotation ${p.location}: ${p.quote}\nNext: ${f.nextStep}`;
+                }),`Limitations: ${investigation.limitations}`].join("\n\n");
+                await finishJob(jobId,{brief,investigation,sources:[...new Map(investigation.passages.map(p=>[p.source.id,{title:p.source.title,url:p.source.url}])).values()]});
+                return;
+            }
 			const brief = await runResearcherAgent(prompt, {
 				engine: model,
 				search: deps.searchProvider,

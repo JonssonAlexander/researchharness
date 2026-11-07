@@ -75,7 +75,13 @@ export interface PdfFetchSummary {
 	flagged_pages: number[];
 }
 
-export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> {
+export interface PdfReadOptions {
+ signal?: AbortSignal;
+ onDownloaded?: (source: PdfFetchSummary) => void;
+ maxDownloads?: number;
+}
+export function createPdfReadTools(dir: string, options: PdfReadOptions = {}): Record<string, AgentTool<any>> {
+ let downloads = 0;
 	const pdfFetchInput = Type.Object({
 		url: Type.String({ description: "The PDF URL to download" }),
 	});
@@ -102,7 +108,7 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 				"(short ≤10 pages, medium ≤40, long), and flagged (math/image-heavy) pages. " +
 				"Then read it with pdf_extract / pdf_search. Use when web_fetch reports a URL is a PDF.",
 			parameters: pdfFetchInput,
-			execute: serverExecute("web_fetch_pdf", pdfFetchInput, async ({ url }): Promise<PdfFetchSummary | string> => {
+			execute: serverExecute("web_fetch_pdf", pdfFetchInput, async ({ url }, { signal }): Promise<PdfFetchSummary | string> => {
 				try {
 					const parsed = new URL(url);
 					if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
@@ -111,12 +117,15 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					return `web_fetch_pdf failed: invalid URL "${url}"`;
 				}
 				try {
+                    signal?.throwIfAborted();options.signal?.throwIfAborted();
+                    if (downloads >= (options.maxDownloads ?? Infinity)) throw new Error("PDF download budget reached");
+                    downloads++;
 					const resp = await fetch(url, {
 						headers: {
 							"User-Agent": USER_AGENT,
 							Accept: "application/pdf,application/octet-stream,*/*",
 						},
-						signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+						signal: AbortSignal.any([...(signal ? [signal] : []), ...(options.signal ? [options.signal] : []), AbortSignal.timeout(FETCH_TIMEOUT_MS)]),
 					});
 					if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
 					const contentType = resp.headers.get("content-type") ?? "";
@@ -125,7 +134,18 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					}
 					const declared = Number(resp.headers.get("content-length") ?? 0);
 					if (declared > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
-					const bytes = new Uint8Array(await resp.arrayBuffer());
+					const chunks: Uint8Array[] = []; let total = 0;
+                    if (!resp.body) throw new Error("Empty response");
+                    const reader = resp.body.getReader();
+                    try { for (;;) {
+                        signal?.throwIfAborted();options.signal?.throwIfAborted();
+                        const {value, done} = await reader.read(); if (done) break;
+                        total += value.length;
+                        if (total > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
+                        chunks.push(value);
+                    }} finally { await reader.cancel(); reader.releaseLock(); }
+                    const bytes = new Uint8Array(total); let offset = 0;
+                    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
 					if (bytes.length === 0) throw new Error("Empty response");
 					if (bytes.length > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
 					const filePath = path.join(dir, pdfFileName(url));
@@ -139,12 +159,14 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					const info = await pdfInfo(filePath);
 					const summary: PdfFetchSummary = {
 						path: filePath,
-						url,
+						url: resp.url || url,
 						page_count: info.page_count,
 						size_class: sizeClass(info.page_count),
 						mean_text_length: info.mean_text_length,
 						flagged_pages: flaggedPages(info),
 					};
+                    signal?.throwIfAborted();options.signal?.throwIfAborted();
+                    options.onDownloaded?.(summary);
 					return summary;
 				} catch (err) {
 					return `web_fetch_pdf failed for ${url}: ${err instanceof Error ? err.message : String(err)}`;

@@ -35,7 +35,7 @@ type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 export function tavilyProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "tavily",
-		async search(query: string, count: number): Promise<SearchHit[]> {
+		async search(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]> {
 			const resp = await fetchFn("https://api.tavily.com/search", {
 				method: "POST",
 				headers: {
@@ -43,7 +43,7 @@ export function tavilyProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 					authorization: `Bearer ${apiKey}`,
 				},
 				body: JSON.stringify({ query, max_results: Math.min(count, 20) }),
-				signal: AbortSignal.timeout(30_000),
+				signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
 			});
 			if (!resp.ok) {
 				const body = await resp.text();
@@ -79,7 +79,7 @@ export function tavilyProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "brave",
-		async search(query: string, count: number): Promise<SearchHit[]> {
+		async search(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]> {
 			const url = new URL("https://api.search.brave.com/res/v1/web/search");
 			url.searchParams.set("q", query);
 			url.searchParams.set("count", String(Math.min(count, 20)));
@@ -88,7 +88,7 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
 					accept: "application/json",
 					"x-subscription-token": apiKey,
 				},
-				signal: AbortSignal.timeout(30_000),
+				signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
 			});
 			if (!resp.ok) {
 				const body = await resp.text();
@@ -123,7 +123,7 @@ async function searchJson(response: Response, label: string): Promise<unknown> {
 export function exaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "exa",
-		async search(query: string, count: number): Promise<SearchHit[]> {
+		async search(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]> {
 			const limit = Number.isFinite(count) ? Math.min(100, Math.max(1, Math.floor(count))) : 5;
 			let resp: Response;
 			try {
@@ -131,7 +131,7 @@ export function exaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchP
 					method: "POST",
 					headers: { "content-type": "application/json", "x-api-key": apiKey },
 					body: JSON.stringify({ query, type: "auto", numResults: limit, contents: { highlights: true } }),
-					signal: AbortSignal.timeout(30_000),
+					signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
 				});
 			} catch (error) {
 				throw new Error(error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)

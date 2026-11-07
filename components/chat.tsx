@@ -1,4 +1,5 @@
 "use client";
+import {ResearchReader} from "./research-reader";
 import {ChallengeWorkspace} from "./challenge-workspace";
 import {problemRequest} from "./problems";
 import {challengeLesson,type ChallengeSettings,type PublicProblem} from "@/src/core";
@@ -131,6 +132,7 @@ const EXPAND_DIST = 16;
  * (contracts.ts "THE ASYNC PROTOCOL" §4.)
  */
 export const ChatActionsContext = createContext<{
+ openPassage?: (id:string)=>void;
 	chatId: string;
 	syncFromServer: () => Promise<void>;
 	/** Send a user message into the session (demo error-fix loop, W6). */
@@ -264,6 +266,7 @@ export function Chat({
  const [lesson,setLesson]=useState<LearningSession|null>(initialLearning);
  const [lessonReviewOpen,setLessonReviewOpen]=useState(false);
  const [scratchpadOpen,setScratchpadOpen]=useState(false);
+ const [researchPassage,setResearchPassage]=useState<string|null>(null);
 	const reattachSettledRef = useRef<() => void>(() => {});
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
@@ -1273,6 +1276,7 @@ export function Chat({
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
+                openPassage:setResearchPassage,
 				syncFromServer,
 				sendText: (t: string) => {
 					void send({ type: "text", text: t });
@@ -1293,8 +1297,8 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-        <div className={scratchTarget&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
- {lesson&&!scratchpadOpen&&<LessonWorkspace chatId={chatId} lesson={lesson} onExplain={(id,title)=>{void send({type:"text",text:`Briefly clarify what “${title}” means in this lesson: one plain-language explanation and the key equation with its symbols defined, if relevant. Save the concise explanation in the notes of lesson node ${id}. Keep our current topic and lesson route unchanged.`});}} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
+        <div className={scratchTarget&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":researchPassage?"flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
+ {lesson&&!scratchpadOpen&&!researchPassage&&<LessonWorkspace chatId={chatId} lesson={lesson} onExplain={(id,title)=>{void send({type:"text",text:`Briefly clarify what “${title}” means in this lesson: one plain-language explanation and the key equation with its symbols defined, if relevant. Save the concise explanation in the notes of lesson node ${id}. Keep our current topic and lesson route unchanged.`});}} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1746,7 +1750,7 @@ export function Chat({
 						)
 					}
 					composer={<>
- {lesson&&<div className="px-2 pt-1"><LessonSources chatId={chatId} disabled={busy} onUploading={setSourceUploading} onAttached={()=>{if(!textRef.current.trim())applyText("Teach me from the attached source. Connect its ideas to my Atlas and adapt the lesson to our prior work.");}}/></div>}
+ {kind!=="practice"&&<div className="flex items-center gap-2 px-2 pt-1"><button type="button" className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={busy} title="Investigate the mathematical question in the background using the configured research model and search provider" onClick={()=>{const question=textRef.current.trim();if(question)applyText("");void send({type:"text",text:`Start a mathematical literature and critique investigation with the research tool (mode: mathematical). ${question?`Question: ${question}`:"Investigate the substantive mathematical question or claim we are currently discussing."} Include the relevant assumptions and concise conversation context, consult my Atlas if access is enabled, and return source-linked findings. Continue our discussion while it runs.`});}}>Investigate</button>{lesson&&<LessonSources chatId={chatId} disabled={busy} onUploading={setSourceUploading} onAttached={()=>{if(!textRef.current.trim())applyText("Teach me from the attached source. Connect its ideas to my Atlas and adapt the lesson to our prior work.");}}/>}</div>}
 						<Composer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -1805,6 +1809,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+		{researchPassage&&!scratchpadOpen&&<ResearchReader chatId={chatId} passageId={researchPassage} onClose={()=>setResearchPassage(null)} onAsk={text=>{void send({type:"text",text});}}/>}
 		{scratchTarget&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${scratchTarget.id}`} chatId={chatId} targetOverride={scratchTarget} busy={busy} onClose={()=>setScratchpadOpen(false)} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
 		</div>
 		</JobsContext.Provider>

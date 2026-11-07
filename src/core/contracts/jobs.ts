@@ -188,12 +188,14 @@ export function accumulateJobUsage(
  */
 
 export interface ResearchToolInput {
+ mode?: "mathematical";
 	question: string;
 	/** What the teacher needs it for — focuses the research brief. */
 	context?: string;
 }
 
 export interface ResearchResult {
+ investigation?: import("../maths-companion.ts").MathematicalInvestigation;
 	brief: string;
 	sources: { title: string; url: string }[];
 }

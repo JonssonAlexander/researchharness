@@ -1,3 +1,4 @@
+import {sameInvestigation} from "../../core/maths-companion.ts";
 import { Type, type Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
@@ -31,6 +32,7 @@ export interface JobToolContext {
 }
 
 export const researchInputSchema = Type.Object({
+ mode: Type.Optional(Type.Literal("mathematical", {description:"Mathematical literature/critique with saved PDF passages. Use for substantive mathematical questions, not routine calculations."})),
 	question: Type.String({
 		description: "The single research question to answer. Make it specific — the researcher sees nothing else of the lesson.",
 	}),
@@ -78,7 +80,13 @@ function dispatch(
 	ack: string,
 	input: ResearchInput | DemoInput | VisualInput | PdfInput,
 ): string {
-	const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
+    const researchInput = input as ResearchInput;
+    if (kind === "research" && researchInput.mode === "mathematical" &&
+        (researchInput.question.length > 4000 || (researchInput.context?.length ?? 0) > 12000))
+        return "Investigation not started: use a question up to 4,000 characters and context up to 12,000 characters.";
+	const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId) ??
+        (kind === "research" ? ctx.jobStore.listJobs(ctx.chatId).find(job =>
+            job.kind === "research" && job.status !== "error" && sameInvestigation(job.input, input)) : undefined);
 	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId, input });
 	if (!existing) ctx.spawn(job, input);
 	return `Dispatched (job ${job.id}). ${ack}`;
@@ -101,7 +109,9 @@ const RESEARCH_DESCRIPTION =
 	"Dispatch a background web-research agent: fact verification, current data, or niche specifics you are not certain about. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the research brief arrives later " +
 	"as a new message and the lesson resumes from it. Cite the brief's sources when you use them. " +
-	"NEVER use it for things you know cold, internal reasoning, or math.";
+	"For substantial mathematical literature or critique, set mode to mathematical; include the precise claim, assumptions and relevant context. " +
+    "Use mathematical structure and alternate fields, seek counterexamples and exact PDF passages. Never dispatch on every message or for routine calculations. " +
+    "Do not use generic research for internal mathematical reasoning.";
 const DEMO_DESCRIPTION =
 	"Dispatch a background sub-agent that BUILDS and headlessly TESTS an interactive teaching instrument — a single-file HTML " +
 	"demo (parameter sweep, simulation, animation, sampling) rendered live in the lesson. Use it when the concept is DYNAMIC: " +
