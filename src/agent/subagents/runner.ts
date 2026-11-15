@@ -1,3 +1,5 @@
+import type {PythonInput} from "../tools/jobs.ts";
+import { pythonInput, type PythonResult, type PythonWorkbench } from "../../core/python-workbench.ts";
 import {runMathsCompanion} from "./maths-companion.ts";
 import type {ResearchSourceStore} from "../../core/maths-companion.ts";
 import type {AtlasLessonReader} from "../../core/atlas-lesson-context.ts";
@@ -65,9 +67,10 @@ export const visualModelOverride: { current?: PiEngine } = {};
 export const pdfModelOverride: { current?: PiEngine } = {};
 
 /** The dispatch-time tool input (from src/agent/tools/jobs.ts schemas). */
-type JobToolInput = ResearchToolInput | DemoToolInput | VisualToolInput | PdfToolInput;
+type JobToolInput = ResearchToolInput | DemoToolInput | VisualToolInput | PdfToolInput | PythonInput;
 
 export interface JobRunnerDeps {
+ pythonWorkbench?: PythonWorkbench;
  researchSources?:ResearchSourceStore;
  researchAtlas?:(chatId:string)=>AtlasLessonReader|undefined;
 	chatStore: ChatStore;
@@ -123,7 +126,7 @@ interface LoopContext {
 
 /** The kind→role table (model slots wave, 2026-09-20): which ModelRole's
  * engine each sub-agent kind runs — the engineFor injection key. */
-const KIND_ROLE: Record<JobKind, ModelRole> = {
+const KIND_ROLE: Record<Exclude<JobKind,"python">, ModelRole> = {
 	research: "researcher",
 	demo: "demoBuilder",
 	visual: "visualMaker",
@@ -173,7 +176,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	 *  tests swap scripted engines without touching deps), then the injected
 	 *  settings-resolved engineFor. undefined = the BYOK chain came up
 	 *  empty (owner, 2026-09-22) — runJob refuses below, honestly. */
-	function pickEngine(kind: JobKind): PiEngine | undefined {
+	function pickEngine(kind: Exclude<JobKind,"python">): PiEngine | undefined {
 		const testOverride: Record<string, { current?: PiEngine } | undefined> = {
 			researcher: researchModelOverride,
 			demoBuilder: demoModelOverride,
@@ -184,7 +187,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	}
 
 	const KIND_RUNNERS: Record<
-		JobKind,
+		Exclude<JobKind,"python">,
 		(jobId: string, engine: PiEngine, input: JobToolInput | undefined, loop: LoopContext) => Promise<void>
 	> = {
 		research: (jobId, engine, input, loop) => runResearchJob(jobId, engine, input, loop),
@@ -200,6 +203,21 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			return;
 		}
 		if (job.status !== "running") return; // already finished / re-run after crash recovery
+  if (job.kind === "python") {
+   const controller=new AbortController();registerJobAbort(jobId,controller);
+   try {
+    if(!deps.pythonWorkbench)throw new Error("Python workbench unavailable.");
+    if(!input&&!deps.pythonWorkbench.list(job.chatId).some(r=>r.id===jobId))throw new Error("Python was interrupted before startup. Rerun explicitly; queued code is never replayed automatically.");
+    const raw=resolveInput(job,input) as unknown as {title:string;code:string;parameters?:Record<string,string|number|boolean|null>;seed?:number;timeout?:number};
+    const parsed=pythonInput.parse(raw);
+    jobStore.updateJob(jobId,{activity:"running Python locally"});
+    const result=await deps.pythonWorkbench.run(job.chatId,jobId,parsed,controller.signal);
+    await finishJob(jobId,{...result,stdout:result.stdout.slice(-8000),stderr:result.stderr.slice(-4000)});
+   } catch(error) {
+    await finishJob(jobId,{runId:jobId,title:"Python experiment",status:"error",stdout:"",stderr:error instanceof Error?error.message:"Execution failed.",outputs:[]});
+   } finally {unregisterJobAbort(jobId);}
+   return;
+  }
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {
 			console.error(`[job ${jobId}] unknown kind: ${job.kind}`);
@@ -224,7 +242,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				| PdfToolInput
 				| undefined;
 			const pdf = resolved as PdfToolInput | undefined;
-			const failure: ResearchResult | DemoResult | VisualResult | PdfResult =
+			const failure: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult =
 				job.kind === "research"
 					? { brief: `Research failed: ${reason}`, sources: [] }
 					: job.kind === "demo"
@@ -305,7 +323,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	 * Save the computation outcome and session delivery obligation together.
 	 * Worker liveness ends after cleanup, not after a lesson consumes the result.
 	 */
-	async function finishJob(jobId: string, result: ResearchResult | DemoResult | VisualResult | PdfResult): Promise<void> {
+	async function finishJob(jobId: string, result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult): Promise<void> {
 		const job = jobStore.getJob(jobId);
 		if (!job) return;
 		// Aborted mid-run (abortJob flips the record before

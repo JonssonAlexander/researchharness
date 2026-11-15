@@ -154,3 +154,36 @@ prior history. A deferred/untaught topic can be paused instead, preserving its
 schedule. These explicit model calls use the configured teaching model (up to two
 calls, twenty-minute limit), retain usage and never choose your FSRS rating. This
 is model feedback, not formal mathematical verification.
+
+Question bank, 10 November: single cards already persist as retrieval targets.
+Connected questions now form a reusable bank projected from durable review activity
+records, including existing history. No database migration or duplicate answer
+store is needed. Daily review tries saved connected groups first and reuses the
+exact question/reference/criteria without a model call, including after restart
+and with no teaching model configured. New generation retains its existing consent
+and accounting path only when no compatible question exists.
+
+After revealing a connected answer, Keep question pins it for priority. Review map
+→ Question bank lists saved cards and connected questions; selecting a graph node
+filters the bank by its canonical concept ID. Due saved questions can be started
+directly there. The bank listing conceals reference answers; each new attempt still
+reveals its saved answer through the ordinary review action. Individual cards are
+already saved and edited through the node's existing card form.
+
+Reuse requires identical target versions, source hashes and card fronts/backs,
+all targets due/unpaused, and actual current Atlas connectivity. Stale questions
+remain in history but do not enter the current bank. Card checks that mark a
+question flawed/not-covered/uncertain exclude matching templates. Reused attempts
+retain original question provenance but start with no previous answer, drawing,
+rating or model usage. Pinning and bank selection never rate recall or change FSRS.
+Changing a source/target requires its existing explicit confirmation/edit flow.
+
+Work through in chat: after revealing an answer, open a linked learning lesson
+with the full question, reference solution and saved written attempt. It uses
+normal teaching, Atlas context and the small/half/full lesson scratchpad. Send
+attempt explicitly to obtain image feedback; existing review drawings are not
+silently uploaded to a model. The opening prompt asks for concise step feedback,
+not a full solution dump or checkpoints. Continue discussion resumes the linked
+chat; the review and its independent schedule remain unchanged. Rate only what
+was recalled before the assisted discussion. No model is called merely to create
+the lesson; normal teaching requests retain their existing consent/model gates.

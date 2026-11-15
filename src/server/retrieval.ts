@@ -1,8 +1,9 @@
+import {openReviewDiscussion} from "./review-discussion.ts";
 import {checkReviewCard,reviewHelpInput} from "../agent/subagents/review-help.ts";
 import {z} from "zod";
 import {createHash} from "node:crypto";
 import {AtlasError} from "../core/atlas.ts";
-import {reviewCommand,reviewSource,reviewDeck,studyDay,publicReviewActivity,REVIEW_LIMIT,reviewActivityProposal,reviewHelpProposal,nextReviewChange,type ReviewItem,type ReviewActivity,type ReviewStore} from "../core/retrieval.ts";
+import {reviewQuestionBank,matchingReviewQuestion,reviewCommand,reviewSource,reviewDeck,studyDay,publicReviewActivity,REVIEW_LIMIT,reviewActivityProposal,reviewHelpProposal,nextReviewChange,type ReviewItem,type ReviewActivity,type ReviewStore} from "../core/retrieval.ts";
 import {accumulateJobUsage,piUsageToStep} from "../core/index.ts";
 import {resolveSlot} from "../core/settings-resolution.ts";
 import {piEngineForSpec,type PiEngine} from "../agent/models.ts";
@@ -13,7 +14,7 @@ import {readSourceBody} from "./mindmaps.ts";
 import {emit} from "../core/events.ts";
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function engineFor(){const spec=resolveSlot(stores.settingsStore.readSettings()?.models?.strong);if(!spec)throw new AtlasError('Choose a teaching model in Settings for AI checks and connected questions. Individual cards work locally.',503);return piEngineForSpec(spec,false);}
-export function createRetrievalService(store:ReviewStore=stores.atlasStore.retrieval,atlas=()=>stores.atlasStore.read(),clock=()=>new Date(),engine:()=>PiEngine=engineFor,generate=makeReviewQuestion,assist=checkReviewCard){
+export function createRetrievalService(store:ReviewStore=stores.atlasStore.retrieval,atlas=()=>stores.atlasStore.read(),clock=()=>new Date(),engine:()=>PiEngine=engineFor,generate=makeReviewQuestion,assist=checkReviewCard,discuss=openReviewDiscussion){
  // Local, idempotent catch-up also repairs an interrupted post-integration enrolment.
  async function autoEnrol(){
   const view=atlas(),known=new Set(store.items().map(i=>i.conceptId)),lessons=new Set(view.lessonMaps?.flatMap(m=>m.conceptIds)??[]);
@@ -33,13 +34,14 @@ export function createRetrievalService(store:ReviewStore=stores.atlasStore.retri
   const used=today.reduce((n,a)=>n+Math.min(900,Math.max(a.items.length>1?180:45,(Date.parse(a.revealedAt??a.ratedAt??a.createdAt)-Date.parse(a.readyAt??a.createdAt))/1000)),0),valid=items.filter(i=>hashes.get(i.conceptId)===i.sourceHash);
   const statuses=await Promise.all(items.map(async item=>{const s=await reviewScheduler(item.config),card=cardInput(item.card),probability=card.reps>0?s.model.forgettingCurve(card,Math.max(0,s.chrono.difference(card.lastReviewAt??new Date(item.createdAt),now))):null;return {item,retrievability:probability,stale:hashes.get(item.conceptId)!==item.sourceHash};}));
   let model:string|null=null;try{const e=engine();model=`${e.model.provider}:${e.model.id}`;}catch{}
-  const deck=reviewDeck(view,valid,now,Math.max(0,settings.minutes*60-used)),count=deck.groups.length;deck.groups=deck.groups.slice(0,Math.max(0,Math.min(REVIEW_LIMIT,settings.dailyGoal)-today.length));deck.deferred+=count-deck.groups.length;
+  const questions=reviewQuestionBank(store.activities(),valid),deck=reviewDeck(view,valid,now,Math.max(0,settings.minutes*60-used),questions),count=deck.groups.length;deck.groups=deck.groups.slice(0,Math.max(0,Math.min(REVIEW_LIMIT,settings.dailyGoal)-today.length));deck.deferred+=count-deck.groups.length;
   const intervals:Record<string,string[]>={};
   if(active?.status==='revealed'){
    const scheduler=await reviewScheduler(active.config),at=new Date(active.revealedAt!);
    for(const item of active.items)intervals[item.id]=[1,2,3,4].map(grade=>scheduler.review({card:cardInput(item.card),grade:grade as 1|2|3|4,now:at}).card.dueAt.toISOString());
   }
-  return {intervals,now:now.toISOString(),refreshAt:nextReviewChange(now,settings.timeZone,valid),day,settings,model,items:statuses,deck,used:today.length,remaining:Math.max(0,Math.min(REVIEW_LIMIT,settings.dailyGoal)-today.length),active:active?publicReviewActivity(active):null,last:last?publicReviewActivity(last):null};
+  const questionBank=questions.map(q=>({id:q.id,front:q.front,itemIds:q.items.map(i=>i.id),conceptIds:q.items.map(i=>i.conceptId),titles:q.items.map(i=>i.title),saved:!!q.savedForReuse,available:q.items.every(i=>valid.some(current=>current.id===i.id&&!current.paused&&Date.parse(current.card.dueAt)<=now.getTime()))}));
+  return {questionBank,intervals,now:now.toISOString(),refreshAt:nextReviewChange(now,settings.timeZone,valid),day,settings,model,items:statuses,deck,used:today.length,remaining:Math.max(0,Math.min(REVIEW_LIMIT,settings.dailyGoal)-today.length),active:active?publicReviewActivity(active):null,last:last?publicReviewActivity(last):null};
  }
  async function command(raw:unknown,signal:AbortSignal){const c=reviewCommand.parse(raw),now=clock(),settings=store.settings(),scheduler=await reviewScheduler(undefined,settings.retention);
   if(c.action==='settings')return store.saveSettings(c.settings);
@@ -56,9 +58,12 @@ export function createRetrievalService(store:ReviewStore=stores.atlasStore.retri
    const picked=items as ReviewItem[];
    if(picked.length===2)throw new AtlasError('Choose one card or a connected group of 3–4 targets.');
    if(picked.length>1&&!reviewDeck(atlas(),picked,now,3600).groups.some(g=>g.length===picked.length&&g.every(id=>c.itemIds.includes(id))))throw new AtlasError('Choose concepts connected by actual Atlas links.');
-   const e=picked.length>1?engine():null,model=e?`${e.model.provider}:${e.model.id}`:undefined;
+   const bank=reviewQuestionBank(store.activities(),allItems.filter(i=>hashes.get(i.conceptId)===i.sourceHash));
+   const saved=c.questionId?bank.find(q=>q.id===c.questionId&&matchingReviewQuestion([q],c.itemIds)):matchingReviewQuestion(bank,c.itemIds);
+   if(c.questionId&&!saved)throw new AtlasError('This saved question is no longer current for these targets. Reload.',409);
+   const e=picked.length>1&&!saved?engine():null,model=e?`${e.model.provider}:${e.model.id}`:saved?.model;
    if(e&&(!c.consent||c.expectedModel!==model))throw new AtlasError('Confirm the current model before preparing a connected question.',409);
-   let activity:ReviewActivity={id:c.id,revision:1,day:studyDay(now,settings.timeZone),timeZone:settings.timeZone,createdAt:now.toISOString(),readyAt:e?undefined:now.toISOString(),status:e?'preparing':'ready',items:picked,front:e?'':picked[0]!.front,back:e?'':picked[0]!.back,criteria:picked.map(i=>({itemId:i.id,text:i.front})),answer:'',attempted:false,config:schedulerConfig(scheduler),model};
+   let activity:ReviewActivity={id:c.id,revision:1,day:studyDay(now,settings.timeZone),timeZone:settings.timeZone,createdAt:now.toISOString(),readyAt:e?undefined:now.toISOString(),status:e?'preparing':'ready',items:picked,front:saved?.front??(e?'':picked[0]!.front),back:saved?.back??(e?'':picked[0]!.back),criteria:saved?.criteria??picked.map(i=>({itemId:i.id,text:i.front})),...(saved?{questionId:saved.questionId??saved.id,savedForReuse:saved.savedForReuse}:{} ),answer:'',attempted:false,config:schedulerConfig(scheduler),model};
    const reserved=store.reserve(activity);if(reserved!==activity)return publicReviewActivity(reserved);emit('review-changed',{});
    if(e)try{const proposal=reviewActivityProposal.parse(await generate(e,picked,AbortSignal.any([signal,AbortSignal.timeout(20*60*1000)]),usage=>{const next={...activity,revision:activity.revision+1,usage:accumulateJobUsage(activity.usage,model!,piUsageToStep(usage))};activity=store.update(next,activity.revision);}));
     if(proposal.criteria.length!==picked.length||new Set(proposal.criteria.map(c=>c.itemId)).size!==picked.length||proposal.criteria.some(c=>!picked.some(i=>i.id===c.itemId)))throw new AtlasError('The question did not cover the selected targets. Use individual cards.');
@@ -67,6 +72,19 @@ export function createRetrievalService(store:ReviewStore=stores.atlasStore.retri
    return publicReviewActivity(activity);
   }
   const a=store.activity(c.id);if(!a)throw new AtlasError('Review not found.',404);
+  if(c.action==='discuss'){
+   if(!['revealed','rated'].includes(a.status)||!a.back)throw new AtlasError('Reveal the answer before opening a learning discussion.',409);
+   if(!a.discussionChatId&&a.revision!==c.revision)throw new AtlasError('The review changed. Reload before opening its discussion.',409);
+   const discussionChatId=discuss(a);
+   return publicReviewActivity(discussionChatId===a.discussionChatId?a:store.update({...a,discussionChatId,revision:a.revision+1},a.revision));
+  }
+  if(c.action==='keep-question'){
+   if(a.savedForReuse)return publicReviewActivity(a);
+   if(a.revision!==c.revision||!['revealed','rated'].includes(a.status)||a.items.length<3)throw new AtlasError('Reveal this connected question before keeping it.',409);
+   const hashes=sourceHashes();
+   if(!reviewQuestionBank([a],store.items().filter(i=>hashes.get(i.conceptId)===i.sourceHash)).length)throw new AtlasError('The question or its source targets changed. Check it before keeping it.',409);
+   return publicReviewActivity(store.update({...a,savedForReuse:true,revision:a.revision+1},a.revision));
+  }
   if(c.action==='assist'){
    if(a.help?.requestRevision===c.revision&&a.help.mode===c.mode&&a.help.model===c.expectedModel&&a.help.state!=='running')return publicReviewActivity(a);
    if(a.revision!==c.revision||!['revealed','rated'].includes(a.status))throw new AtlasError('Reveal your attempt before checking the card.',409);

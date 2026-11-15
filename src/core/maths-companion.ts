@@ -28,6 +28,7 @@ export interface MathematicalInvestigation extends MathematicalReport {
     passages: ResearchPassage[];
 }
 export interface ResearchSourceStore {
+ list?:(chatId:string)=>ResearchSource[];
     retain: (chatId: string, input: {
         title: string;
         authors: string;

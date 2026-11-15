@@ -1027,3 +1027,185 @@ Reopening validates session ownership, IDs and content hashes. Exact question/co
 repeats reuse running/completed jobs; changed context or failed jobs can start anew.
 No embeddings, paper crawler, Python execution, notebook or new agent hierarchy.
 See [implementation, limits and validation](docs/maths-companion.md).
+
+### Python Workbench (9 November 2026; implemented slice, R13–R16)
+
+Conversations now have a shared `python` tool and compact Workbench panel. Explicit
+per-session project/interpreter selection starts off; network is separate opt-in.
+Use the existing jobs, native result markers, cancellation, notifications and
+session ownership. Local execution is deterministic infrastructure, not a new
+agent/model role. Preserve ordinary editable project scripts and fresh run folders;
+never overwrite unrelated source files or run paper/log instructions as commands.
+
+The macOS adapter fails closed without Seatbelt. Bound wall/CPU time, file/log/figure
+sizes and subprocess lifetime; never silently execute without the adapter policy.
+Keep provider credentials out of the subprocess environment. Recheck selected
+roots, reject symlink escapes, and retain code, parameters, seeds, environment,
+input references, outputs and useful failures. Interrupted Python must not replay
+automatically, even if the process died before startup. Saving/delivery remains
+idempotent by job/request ID. Retained figures survive edits to ordinary files.
+
+Opening VS Code and loading edited script files are explicit learner actions.
+Numerical observations are not proofs; this slice has no autonomous experiment
+agent, package installer, dedicated financial-data service, automatic Atlas writes
+or FSRS effects. Memory/total-disk hard quotas and non-macOS adapters remain future
+work. See [implementation, use, limits and validation](docs/python-workbench.md).
+
+10 November review question bank (R07, R12, R16): connected questions reuse their
+persisted question, answer and per-target criteria from review activities. Existing
+history is included without a migration or model call. Keep question pins a useful
+revealed question; Daily review prefers compatible saved groups before generating
+new ones. The collapsed bank filters through selected review-map concept IDs.
+Target versions, exact fronts/backs, source hashes and actual current connectivity
+must still match. Exclude questions flagged unsound by card checks. Reuse creates
+an independent attempt with a concealed answer and fresh response/scratchpad;
+never copy old ratings, assistance or model usage, or alter FSRS by saving/reusing.
+Individual cards retain their existing persistent question/answer targets. Keep
+Atlas styling and the daily workload limits unchanged.
+
+Review learning discussions (10 November, R05, R10–R12): after revealing a review
+answer, Work through in chat creates/resumes a linked normal learning lesson,
+with the question as its visible derivation target and the shared scratchpad.
+Use the existing opening-prompt handoff and native teaching pipeline for concise
+step feedback; never upload autosaved strokes implicitly. Retain the question,
+reference and written attempt as fallible source context. Opening or discussing
+never rates/closes the original review or asserts independent recall. Preserve its
+FSRS schedule and let the learner return to explicitly rate prior unaided recall.
+
+### Article reading workspace (implemented 10 November 2026)
+
+R10–R11/R16 addition: session PDFs (uploaded lesson sources and retained research
+PDFs) open the same reading workspace through source chips, Read passage, or Read.
+The adjustable article/map split restores per-article page, zoom, divider, and the
+editable Excalidraw canvas/viewport. Each session/content hash owns one canvas;
+changing source bytes never silently relocates its annotations.
+
+Text selections and boxed equations support small editable/removable margin
+comments, explicit lesson-note links, retained handwriting snapshots and links to
+native conversation exchanges. Article questions and fresh quick derivations use
+the existing immutable scratch-attempt/native chat pipeline. Quick pads remain
+independent of the article canvas and lesson derivation target. Drawings autosave
+locally; only explicit question/submission actions send snapshots to the teacher.
+Opening, drawing and commenting never advance a lesson or integrate Atlas data.
+An explicit question in a research chat without a lesson initializes the existing
+learning-session shell so it receives conversational teaching rather than a probe.
+
+Reading metadata uses atomic, revision-checked local JSON beside the existing
+scratchpad store; it is not a second conversation or canonical graph. Preserve
+source ownership, stable request IDs, immutable snapshots, and conflict errors.
+See [article reading](docs/article-reading.md) for access, storage and checks.
+
+Article follow-up: Atlas and the reading header expose a searchable PDF library
+across sessions. Entries navigate to their owning session/canvas; identical sources
+in different sessions keep separate reading notes. Reader pages scroll continuously
+with nearby-only rendering, page-relative comments and a compact direct page jump.
+Editable display titles are revision-checked reading metadata, leaving original
+filenames, bytes and canonical scratchpad IDs untouched.
+
+### Guided PDF reading (implemented 13 November 2026)
+
+R05/R10–R11/R16 addition: explicitly requested conceptual overviews can save a
+small AI reading guide in the existing PDF workspace. The teacher uses the lesson
+objective/map and actual source tools to choose about 5–8 passages; only the server's
+existing unique text locator may produce coordinates. Unreliable matches remain
+page references. Never accept model-supplied rectangles or infer equation positions
+from captions. Guide explanations are AI interpretations, not the learner's own
+comments or certified mathematical claims.
+
+Keep guides separate in optional reading metadata; append rather than replacing
+prior highlights or linked discussion. Preserve source hashes, native attempts,
+request idempotency and user comments across asynchronous location. The reader
+exposes Overview/Guide, a visibility toggle and a small extension action. Clicking
+opens explanations in place with existing chat/quick scratchwork. Ordinary questions
+must not generate highlights. No automatic Atlas integration, progress, mastery or
+FSRS changes. Scope is conceptual overview only; see docs/article-reading.md.
+
+Guided-reading design correction: Overview is a result-first teaching route beside
+the PDF, never a floating guide text box over it. A short problem/answer/intuition
+orientation and 4–6 concise stops replace the flat annotation tour. Teach from the
+main result through needed setup, mechanism and consequences, using actual central
+statements/equations and the learner's confirmed background. Put secondary caveats
+and discussion behind expansion. The teacher saves source anchors first, then a
+validated route over those IDs; preserve previous anchors and linked work. Cached
+Overview opens immediately without model calls and frames the first verified result;
+Next/Back follows teaching order. Page-only references remain explicit. The right
+panel toggles Overview/Map while retaining the mounted canvas and pending work.
+Legacy flat guides need an explicit Overview request to generate a structured route;
+never invent an orientation from old labels or silently spend on migration.
+
+Lesson-map interaction repair (13 November, R01–R05): reuse the shared renderer
+with label-aware initial settling, direct node dragging, pan/pinch zoom and compact
+Fit/enlarge controls. Preserve node positions and camera across note/progress/focus
+updates; inspection and geometry never advance lessons or write Atlas. Manual node
+movement is opt-in and must not reheat neighbouring nodes. Current positions last
+for the mounted map; reload uses deterministic layout. Teacher read/targeted-edit
+tools were added in the follow-up below. See
+[workspace details](docs/atlas-learning-workspace.md).
+
+Lesson-map teacher ergonomics (13 November, implemented; R01–R05, R08, R15–R16):
+read_lesson exposes fresh bounded topology/route/revision and complete requested
+topic notes/neighbours/targets. edit_lesson applies revision-checked local topic,
+association, order or focus changes, preserving omitted fields, stable identities
+and retained derivations. Reuse the full-plan tool for initial planning, deliberate
+restructuring and derivation targets. Preserve shared Atlas-ID checks, owner-only
+completion, atomic lesson persistence and native turn history. Read before revising
+notes; stale edits must read/rebase rather than overwrite unseen changes.
+
+Display the non-tangent topic order as a numbered solid teaching path, with quieter
+dotted ordinary associations and separate tangent branches. Route edges are view
+metadata only, never new associations, prerequisite/proof claims or mastery. Initial
+layout follows that route; preserve manual positions during live metadata updates.
+No schema migration, automatic model run, canonical integration or FSRS change.
+See [as-built tools and route](docs/atlas-learning-workspace.md).
+
+Lesson-map family correction (14 November; R01–R05/R11/R16): supersede the grid,
+numbered labels and global right-side branch columns. Keep the solid lesson thread
+between main topics, arranged as compact families with supporting ideas nearby.
+Optional topic kind/parentId/formula fields distinguish main topics, supporting
+details and genuine tangents; validate existing acyclic parents. Keep legacy
+records readable and preserve omitted hierarchy/formulas in full-plan updates.
+
+Show complete concise mathematical titles and separately rendered saved equations;
+never hard-cut titles after 32 characters. Supporting nodes must actually be smaller.
+Overview unfolds a selected family; All details is explicit. Preserve inspection,
+coverage, identities, source notes and reviewed integration boundaries. Equations
+must be grounded in the lesson, not invented for presentation. Read/edit tools
+expose the hierarchy/formula fields and teach their use.
+
+The release-only dragging described in this slice was superseded by live local
+D3 springs in the logical-flow follow-up below. Keep distant families stable and
+do not recenter the camera during a drag. Retain the existing main-Atlas physics. Layout/branch visibility
+remain local view state, never mathematical writes or mastery/FSRS events. See
+[as-built family layout and limits](docs/atlas-learning-workspace.md).
+
+Lesson-map logical flow and cost correction (14 November; current, R01–R05/R15–R16):
+main topics retain optional question and section fields alongside mathematical
+names/formulas. Use meaningful stages progressing left-to-right with local families,
+not a clock/ring or arbitrary route folding. Keep the solid running thread and
+quiet non-logical cross-references. Show an explicit current ring/label and a Now
+question; follow the saved current topic and its actual nearby nodes by default.
+Browsing another branch suspends following until Now is selected. Node growth
+remains incremental, grounded in discussion, never auto-generated by viewing.
+
+Use the shared D3 force engine live during dragging and release. Warm-start from
+view positions, locally unpin the family/neighbours, preserve distant anchors and
+stop ticking at rest. No fixed release animation or constant wandering. Question,
+section, parent and formula metadata survive omitted fields in full-plan saves.
+The current lesson's questions/stages were restored without changing notes, math,
+IDs, progress or canonical records.
+
+Keep the teaching system-prompt prefix stable across map/revision/focus changes:
+include the objective, retrieve fresh state through read_lesson(scope=current),
+and batch up to eight topic reads. Batch related edits and return compact revision/
+ID receipts, not the whole map or repeated notes after every write. Preserve native
+history and compaction; do not silently discard old conversation. Model/provider
+selection remains explicit. Local inspection, physics and read/edit tools invoke
+no model; this is not a newly added cheap-worker hierarchy. Dedicated model routing
+for large map drafting remains separate work. See docs/atlas-learning-workspace.md.
+
+Organic lesson layout follow-up (14 November, R01–R03): stage rows/columns are
+initial seeds only. Settle the initial diagram with the existing D3 springs,
+repulsion, label collision and weak stage-centred gravity. Stage names still give
+logical orientation, without pinning nodes to a grid or a circle. Preserve the
+running thread, question/formula labels and local drag physics. No model call or
+saved lesson-content change is needed; refreshed views recompute geometry.

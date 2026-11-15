@@ -1,3 +1,5 @@
+import type { PythonResult } from "../python-workbench.ts";
+export type { PythonInput, PythonResult } from "../python-workbench.ts";
 /**
  * Sub-agent job contracts — the async ack-and-steer protocol
  *
@@ -12,7 +14,7 @@ import { newHandoffMessage } from "../native-messages.ts";
 
 // ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
 
-export type JobKind = "research" | "demo" | "visual" | "pdf";
+export type JobKind = "research" | "demo" | "visual" | "pdf" | "python";
 export type JobStatus = "running" | "done" | "error";
 
 export interface JobRecord {
@@ -279,7 +281,7 @@ export interface SubagentResultMeta {
 /** The data-subagent-artifact part payload: what the UI renders. */
 export interface SubagentArtifactData {
 	kind: JobKind;
-	result: ResearchResult | DemoResult | VisualResult | PdfResult;
+	result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult;
 	/** The learner's pinned UI state (invert switch) riding the record. */
 	ui?: { inverted?: boolean };
 }
@@ -287,7 +289,7 @@ export interface SubagentArtifactData {
 /** A result steer's marker details: the UI's meta + artifact in one
  *  payload (the projection splits it into metadata + data part). */
 export interface SteerDetails extends SubagentResultMeta {
-	result: ResearchResult | DemoResult | VisualResult | PdfResult;
+	result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult;
 	/** LEARNER UI state pinned onto the artifact (owner, 2026-10-07): the
 	 *  invert switch's position, persisted so navigating away and back (or
 	 *  restarting) keeps it. A VIEW preference — never enters the teacher's
@@ -318,8 +320,9 @@ export type SteerMessage = LhMarkerMessage;
 /** Whether a result is the failure shape (html/svg empty, failure brief). */
 export function isSubagentFailure(
 	kind: JobKind,
-	result: ResearchResult | DemoResult | VisualResult | PdfResult,
+	result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult,
 ): boolean {
+	if (kind === "python") return (result as PythonResult).status !== "done";
 	if (kind === "research") {
 		const r = result as ResearchResult;
 		return r.sources.length === 0 && /^Research failed:/i.test(r.brief);
@@ -337,7 +340,8 @@ export function isSubagentFailure(
 }
 
 /** The model-facing text of a steer: what the result IS, what to do with it. */
-function steerText(kind: JobKind, result: ResearchResult | DemoResult | VisualResult | PdfResult): string {
+function steerText(kind: JobKind, result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult): string {
+	if (kind === "python") { const r=result as PythonResult; return `Python experiment ${r.title}: ${r.status}. Run ${r.runId}. Numerical evidence is not proof.\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}\nOutputs: ${r.outputs.map(o=>o.name).join(", ")}. Use python(action: read, runId) to inspect saved code, parameters and provenance before revising.`; }
 	if (isSubagentFailure(kind, result)) {
 		if (kind === "research")
 			return `${(result as ResearchResult).brief}\n\nContinue with what you can establish and flag the uncertainty to the learner.`;
@@ -369,7 +373,7 @@ function steerText(kind: JobKind, result: ResearchResult | DemoResult | VisualRe
  */
 export function buildSubagentSteer(
 	job: Pick<JobRecord, "id" | "kind" | "toolCallId">,
-	result: ResearchResult | DemoResult | VisualResult | PdfResult,
+	result: ResearchResult | DemoResult | VisualResult | PdfResult | PythonResult,
 ): SteerMessage {
 	return {
 		id: `steer_${job.id}`,
@@ -408,6 +412,7 @@ export function buildAbortSteer(
 /** What the teacher reads: one line telling it the result is not coming,
  * how to acknowledge, and that re-dispatching is allowed. */
 function abortText(kind: JobKind): string {
+ if(kind === "python") return "Python execution cancelled by learner. Do not rerun without their request.";
 	if (kind === "research")
 		return "Research aborted — the learner aborted the research job, so no brief is coming. Acknowledge it in one line and continue teaching without it (or offer to re-dispatch it).";
 	if (kind === "demo")

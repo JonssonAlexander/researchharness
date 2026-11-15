@@ -123,3 +123,9 @@ export {lessonTopicDetail} from "./lesson-topic.ts";
 export * from "./file-access.ts";
 
 export * from "./maths-companion.ts";
+
+export * from "./python-workbench.ts";
+
+export * from "./article-reading.ts";
+
+export * from "./reading-guide.ts";

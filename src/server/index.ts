@@ -66,3 +66,6 @@ export {problemsResponse,challengeClientChat} from "./problems.ts";
 export {fileAccessConfigurationError} from "./file-access.ts";
 
 export {researchSourceResponse} from "./research-sources.ts";
+
+export {pythonWorkbenchResponse} from "./python-workbench.ts";
+export {readingResponse} from './article-reading.ts';

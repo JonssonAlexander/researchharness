@@ -952,3 +952,50 @@ test('Review offers answer checking and an explicit repair preview without autom
  const press=async(label:string)=>act(async()=>{const b=[...ui.document.querySelectorAll('button')].find(b=>b.textContent===label);assert(b,label);b.dispatchEvent(new window.Event('click',{bubbles:true}));});
  try{await act(async()=>{});await press('Check my answer');assert(ui.document.body.textContent.includes('The key does not answer'));assert.equal(calls.length,1);assert(!ui.document.body.textContent.includes('Save repaired card'));assert.equal(calls[0]!.mode,'check');await press('Fix card');assert(ui.document.body.textContent.includes('A precise repaired question.'));assert(ui.document.body.textContent.includes('AI-authored content; not evidence of prior learning.'));assert.equal(calls[1]!.mode,'repair');await press('Save repaired card');assert.deepEqual(calls.map(c=>c.action),['assist','assist','apply-help']);assert.equal(calls[2]!.approve,true);assert.equal(calls[2]!.revision,4);}finally{await ui.close();globalThis.fetch=old;}
 });
+
+test('Review question bank starts a saved question and keeps its revealed answer without rating',async()=>{
+ const {AtlasReview}=await import('../components/atlas-review.tsx'),{DEFAULT_REVIEW_SETTINGS}=await import('../src/core/retrieval.ts');
+ const now=new Date().toISOString(),questionId='ra_00000000-0000-4000-8000-000000000099',items=[1,2,3].map(n=>({id:`ri_00000000-0000-4000-8000-00000000000${n}`,conceptId:id,title:`Topic ${n}`,revision:1,targetVersion:1}));
+ let active:Record<string,unknown>|null=null;const calls:Record<string,unknown>[]=[],old=globalThis.fetch;
+ const state=()=>({now,refreshAt:new Date(Date.now()+3600000).toISOString(),day:'2026-11-10',settings:DEFAULT_REVIEW_SETTINGS,items:[],model:null,used:0,remaining:6,deck:{groups:[items.map(i=>i.id)],due:3,deferred:0,estimatedSeconds:180},active,last:null,questionBank:[{id:questionId,front:'A saved connected question.',itemIds:items.map(i=>i.id),conceptIds:[id],titles:items.map(i=>i.title),saved:false,available:true}]});
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('drawing='))return Response.json({draft:null});if(!init?.body)return Response.json(state());const c=JSON.parse(String(init.body));calls.push(c);
+  if(c.action==='start')active={id:c.id,revision:1,status:'ready',items,questionId,front:'A saved connected question.',answer:'',attempted:false};
+  if(c.action==='reveal')active={...active,revision:2,status:'revealed',back:'The saved reference solution.'};
+  if(c.action==='keep-question')active={...active,revision:3,savedForReuse:true};
+  return Response.json({result:active,snapshot:state()});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><AtlasReview atlas={snapshot} onClose={()=>{}}/></ServerEventsProvider>);
+ const press=async(label:string)=>act(async()=>{const b=[...ui.document.querySelectorAll('button')].find(b=>b.textContent===label);assert(b,label);b.dispatchEvent(new window.Event('click',{bubbles:true}));});
+ try{
+  await act(async()=>{});assert(ui.document.body.textContent.includes('Question bank'));assert(!ui.document.body.textContent.includes('The saved reference solution.'));
+  await press('Review saved question');assert.equal(calls[0]!.questionId,questionId);assert(!ui.document.body.textContent.includes('The saved reference solution.'));
+  await press('I tried · show answer');assert(ui.document.body.textContent.includes('The saved reference solution.'));assert(ui.document.body.textContent.includes('no new generation'));
+  await press('Keep question');assert(ui.document.body.textContent.includes('Kept in question bank'));assert.deepEqual(calls.map(c=>c.action),['start','reveal','keep-question']);
+ }finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('Daily review reuses a bank group with no configured model instead of splitting or sending null model consent',async()=>{
+ const {AtlasReview}=await import('../components/atlas-review.tsx'),{DEFAULT_REVIEW_SETTINGS}=await import('../src/core/retrieval.ts');
+ const now=new Date().toISOString(),ids=[1,2,3].map(n=>`ri_00000000-0000-4000-8000-00000000000${n}`),calls:Record<string,unknown>[]=[],old=globalThis.fetch;
+ let active:Record<string,unknown>|null=null;
+ const state=()=>({now,refreshAt:new Date(Date.now()+3600000).toISOString(),day:'2026-11-10',settings:DEFAULT_REVIEW_SETTINGS,items:ids.map(itemId=>({item:{id:itemId,paused:false,card:{dueAt:now}},stale:false})),model:null,used:0,remaining:6,deck:{groups:[ids],due:3,deferred:0,estimatedSeconds:180},active,last:null,questionBank:[{id:'ra_00000000-0000-4000-8000-000000000099',front:'Cached question',itemIds:ids,conceptIds:[id],titles:['Three topics'],saved:true,available:true}]});
+ globalThis.fetch=async(url,init)=>{if(String(url).includes('drawing='))return Response.json({draft:null});if(!init?.body)return Response.json(state());const c=JSON.parse(String(init.body));calls.push(c);active={id:c.id,revision:1,status:'ready',items:ids.map(id=>({id,title:id})),front:'Cached question',answer:'',attempted:false};return Response.json({result:active,snapshot:state()});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><AtlasReview atlas={snapshot} onClose={()=>{}}/></ServerEventsProvider>);
+ try{await act(async()=>{});await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Daily review')!.dispatchEvent(new window.Event('click',{bubbles:true}));});assert.equal(calls.length,1);assert.deepEqual(calls[0]!.itemIds,ids);assert.equal(calls[0]!.expectedModel,undefined);}finally{await ui.close();globalThis.fetch=old;}
+});
+
+test('revealed review opens a linked learning conversation with full solution context and no rating',async()=>{
+ const {AtlasReview}=await import('../components/atlas-review.tsx'),{DEFAULT_REVIEW_SETTINGS}=await import('../src/core/retrieval.ts');
+ const now=new Date().toISOString(),oldFetch=globalThis.fetch,storageDescriptor=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage'),memory=new Map<string,string>(),navigations:string[]=[],calls:Record<string,unknown>[]=[];
+ Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{setItem:(key:string,value:string)=>memory.set(key,value),getItem:(key:string)=>memory.get(key)??null}});
+ let active={id:'ra_00000000-0000-4000-8000-000000000001',revision:2,status:'revealed',items:[{id:'ri_00000000-0000-4000-8000-000000000001',conceptId:id,title:'Brownian motion'}],front:'Prove the stated identity.',back:'A longer reference solution with several steps.',answer:'My partial proof',attempted:true} as Record<string,unknown>;
+ const state=()=>({now,refreshAt:new Date(Date.now()+3600000).toISOString(),day:'2026-11-10',settings:DEFAULT_REVIEW_SETTINGS,items:[],model:null,used:1,remaining:5,deck:{groups:[],due:0,deferred:0,estimatedSeconds:0},active,last:null});
+ globalThis.fetch=async(_url,init)=>{if(!init?.body)return Response.json(state());const c=JSON.parse(String(init.body));calls.push(c);active={...active,revision:3,discussionChatId:'chat_discussion'};return Response.json({result:active,snapshot:state()});};
+ const ui=await mount(()=><ServerEventsProvider connect={()=>({close(){},onOpen(){},onEvent(){}})}><AtlasReview atlas={snapshot} onClose={()=>{}}/></ServerEventsProvider>);
+ Object.defineProperty(window,'location',{configurable:true,value:{assign:(url:string)=>navigations.push(url)}});
+ try{
+  await act(async()=>{});await act(async()=>{[...ui.document.querySelectorAll('button')].find(b=>b.textContent==='Work through in chat')!.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.deepEqual(calls.map(c=>c.action),['discuss']);assert.deepEqual(navigations,['/chat/chat_discussion']);
+  const opening=JSON.parse(memory.get('lh.openingPrompt.chat_discussion')!);assert(opening.text.includes(active.back));assert(opening.text.includes(active.answer));assert.equal(opening.attempted,false);
+  assert(ui.document.body.textContent.includes('Continue discussion'));
+ }finally{await ui.close();globalThis.fetch=oldFetch;if(storageDescriptor)Object.defineProperty(globalThis,'sessionStorage',storageDescriptor);else delete (globalThis as Record<string,unknown>).sessionStorage;}
+});

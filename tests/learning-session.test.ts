@@ -160,3 +160,21 @@ test('short topic notes take precedence, survive plan updates and old nodes need
  await lessonTools('notes',store,()=>{}).update_lesson!.execute('preserve',{expectedRevision:1,plan:update},undefined);assert.equal(store.read('notes')!.plan.nodes[0]!.notes,plan.nodes[0]!.notes);
  const legacy=store.create('legacy',initialLesson('An unexplored topic'));assert.equal(lessonTopicDetail(legacy,[],'topic_0')?.text,'');assert.equal(lessonTopicDetail(legacy,[],'missing'),null);
 });
+
+test('a native lesson reads fresh topic notes and saves a focused edit without replacing its map',async()=>{
+ process.env.OPENROUTER_API_KEY='test-key-presence-gate';
+ const {createLearningAgent}=await import('../src/agent/teacher-agent.ts'),{createFauxCore,fauxAssistantMessage,fauxToolCall,fauxText}=await import('@earendil-works/pi-ai');
+ const {handleChatInput}=await import('../src/server/chat-handler.ts');
+ const chat=stores.chatStore.createChat('Live map edit');stores.chatStore.saveSettings(chat.id,{model:{provider:'openrouter',id:'z-ai/glm-5.3-flash'}});
+ const plan=initialLesson('Understand the covariance blocks');plan.nodes[0]!.notes='The covariance is $B\\otimes A$.';plan.nodes.push({id:'next',title:'Estimate covariance',conceptId:null,tangent:false,notes:'Keep this next topic intact.'});plan.connections=[{from:'topic_0',to:'next'}];stores.lessonStore.create(chat.id,plan);
+ const notes=plan.nodes[0]!.notes+' In our sensor-time example, $B_{11}A$ is the sensor covariance pattern scaled to its strength within time step 1.';
+ const faux=createFauxCore({});faux.setResponses([
+  ()=>fauxAssistantMessage([fauxToolCall('read_lesson',{}, {id:'live-map'})],{stopReason:'toolUse'}),
+  ()=>fauxAssistantMessage([fauxToolCall('read_lesson',{topicId:'topic_0'},{id:'live-notes'})],{stopReason:'toolUse'}),
+  context=>{assert(JSON.stringify(context.messages).includes('The covariance is'));assert(JSON.stringify(context.messages).includes('otimes'));return fauxAssistantMessage([fauxToolCall('edit_lesson',{expectedRevision:1,topics:[{id:'topic_0',notes}]},{id:'save-intuition'})],{stopReason:'toolUse'});},
+  ()=>fauxAssistantMessage([fauxText('Saved the sensor-time intuition in this topic.')])]);
+ const response=await handleChatInput(chat.id,{type:'text',text:'Keep the sensor-time interpretation in the node.'},opts=>createLearningAgent({chatId:chat.id,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},stores.lessonStore,()=>{},{...opts,engine:{model:faux.getModel(),streamFn:faux.streamSimple}}));
+ assert.equal(response.status,200);const {runningTurn}=await import('../src/server/turn-runs.ts'),handle=runningTurn(chat.id);if(handle)await new Response(handle.subscribe()).text();
+ const saved=stores.lessonStore.read(chat.id)!;assert.equal(saved.revision,2,JSON.stringify(stores.chatStore.getChat(chat.id)!.messages));assert.equal(saved.plan.nodes[0]!.notes,notes);assert.deepEqual(saved.plan.nodes[1],plan.nodes[1]);assert.deepEqual(saved.plan.connections,plan.connections);assert.equal(saved.plan.currentNodeId,'topic_0');
+ const messages=stores.chatStore.getChat(chat.id)!.messages;for(const name of ['read_lesson','edit_lesson'])assert(messages.some(m=>m.role==='toolResult'&&m.toolName===name));
+});

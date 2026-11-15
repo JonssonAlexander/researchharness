@@ -131,6 +131,7 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 	if (stores.chatStore.deleteChat(chatId)) {
 		stores.lessonStore.remove(chatId);
         stores.scratchpadStore.remove(chatId);
+        stores.readingStore.remove(chatId);
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
 	}

@@ -169,3 +169,81 @@ test('Fix card can propose untaught AI-authored content, preserving provenance w
  await f.command({action:'apply-help',id:a.id,revision:checked.revision,mode:'repair',approve:true});const next=f.atlas.retrieval.items()[0]!;
  assert.equal(next.repairProvenance?.basis,'ai-authored');assert.equal(next.repairProvenance?.model,f.model);assert.equal(next.repairProvenance?.notes,proposal.feedback);assert.equal(next.card.reps,0);assert.equal(f.atlas.retrieval.events(item.id).length,0);assert.equal(f.atlas.retrieval.activity(a.id)!.answer,'Original attempt');
 });
+
+async function connectedBankFixture(){
+ const f=fixture(3);await f.enrol();
+ for(let i=1;i<3;i++)f.atlas.save({kind:'drawing-link',expectedRevision:f.atlas.read().layoutRevision??0,id:`dl_${randomUUID()}`,sourceId:f.ids[0]!,targetId:f.ids[i]!,label:'Related',direction:'unclear',notes:'Association',replaces:null,removed:false});
+ return f;
+}
+test('connected question bank reuses durable Q/A across restart without generation or old answers',async()=>{
+ const f=await connectedBankFixture(),ids=f.atlas.retrieval.items().map(i=>i.id);
+ const first=await f.start(ids) as ReturnType<typeof publicReviewActivity>;
+ const shown=await f.command({action:'reveal',id:first.id,revision:first.revision,answer:'My old answer must not reappear',attempted:true}) as typeof first;
+ const kept=await f.command({action:'keep-question',id:shown.id,revision:shown.revision}) as typeof first;
+ assert.equal(kept.savedForReuse,true);assert.deepEqual(f.atlas.retrieval.events(ids[0]!),[]);
+ const before=f.atlas.retrieval.items().map(i=>i.card);
+ await f.command({action:'skip',id:kept.id,revision:kept.revision});f.advance(24*3600000);
+ const store=createAtlasStore(f.file),service=createRetrievalService(store.retrieval,()=>store.read(),()=>new Date('2026-11-01T10:00:00Z'),()=>{throw new Error('A saved question must not need a model');},async()=>{throw new Error('Do not regenerate');});
+ const snapshot=await service.snapshot();assert.equal(snapshot.questionBank.length,1);assert.equal(snapshot.questionBank[0]!.saved,true);assert(!JSON.stringify(snapshot.questionBank).includes('A concise symbolic explanation'));
+ const reused=await service.command({action:'start',id:`ra_${randomUUID()}`,itemIds:[...ids].reverse()},new AbortController().signal) as typeof first;
+ assert.equal(reused.questionId,first.id);assert.equal(reused.front,first.front);assert.equal(reused.back,undefined);assert.equal(reused.answer,'');assert.equal(reused.scratchwork,undefined);assert.equal(reused.usage,undefined);assert.equal(reused.attempted,false);assert.equal(f.calls(),1);
+ assert.deepEqual(store.retrieval.items().map(i=>i.card),before);
+ const answer=await service.command({action:'reveal',id:reused.id,revision:reused.revision,answer:'Fresh attempt',attempted:true},new AbortController().signal) as typeof first;
+ assert.equal(answer.back,shown.back);
+});
+test('bank includes older generated questions automatically; changed targets cannot reuse them',async()=>{
+ const f=await connectedBankFixture(),ids=f.atlas.retrieval.items().map(i=>i.id);
+ const first=await f.start(ids) as ReturnType<typeof publicReviewActivity>;
+ assert.equal((await f.service.snapshot()).questionBank.length,1);
+ await f.command({action:'skip',id:first.id,revision:first.revision});
+ const item=f.atlas.retrieval.items()[0]!;
+ await f.command({action:'enrol',conceptId:item.conceptId,expectedRevision:item.revision,front:item.front,back:'Changed mathematical target.',paused:false});
+ assert.equal((await f.service.snapshot()).questionBank.length,0);
+ await assert.rejects(()=>f.command({action:'start',id:`ra_${randomUUID()}`,itemIds:ids,questionId:first.id}),/no longer current/);
+ await f.start(ids);assert.equal(f.calls(),2);
+});
+test('a flawed bank question is excluded, and keeping requires a revealed current question',async()=>{
+ const f=await connectedBankFixture(),ids=f.atlas.retrieval.items().map(i=>i.id),first=await f.start(ids) as ReturnType<typeof publicReviewActivity>;
+ await assert.rejects(()=>f.command({action:'keep-question',id:first.id,revision:first.revision}),/Reveal/);
+ const stored=f.atlas.retrieval.activity(first.id)!;
+ f.atlas.retrieval.update({...stored,revision:stored.revision+1,help:{state:'ready',mode:'check',model:f.model,at:stored.createdAt,requestRevision:stored.revision,sourceHash:'test',itemRevision:1,result:{cardStatus:'flawed',answerStatus:'not-assessable',feedback:'Question has a false premise.',replacement:null}}},stored.revision);
+ assert.equal((await f.service.snapshot()).questionBank.length,0);
+});
+test('daily review keeps a saved connected question together when another related target joins',async()=>{
+ const f=await connectedBankFixture(),ids=f.atlas.retrieval.items().map(i=>i.id),first=await f.start(ids) as ReturnType<typeof publicReviewActivity>;
+ await f.command({action:'skip',id:first.id,revision:first.revision});
+ const id=`ac_${randomUUID()}`;f.atlas.save({kind:'concept',id,expectedRevision:0,title:'New related topic',aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[],markdown:'Another basic definition with its conditions.'});
+ await f.command({action:'enrol',conceptId:id,expectedRevision:0,front:'Recall the new idea.',back:'The new definition.',paused:false});
+ f.atlas.save({kind:'drawing-link',expectedRevision:f.atlas.read().layoutRevision??0,id:`dl_${randomUUID()}`,sourceId:f.ids[0]!,targetId:id,label:'Related',direction:'unclear',notes:'Association',replaces:null,removed:false});
+ f.advance(24*3600000);
+ const snapshot=await f.service.snapshot();assert.deepEqual(new Set(snapshot.deck.groups[0]),new Set(ids));assert.equal(snapshot.deck.groups[1]!.length,1);
+ await f.start(snapshot.deck.groups[0]);assert.equal(f.calls(),1);
+});
+
+test('review discussion is explicit, durable and never grades or consumes the review',async()=>{
+ const f=fixture();await f.enrol();const started=await f.start() as ReturnType<typeof publicReviewActivity>;
+ let created=0;
+ const service=createRetrievalService(f.atlas.retrieval,()=>f.atlas.read(),()=>new Date('2026-11-10T10:00:00Z'),undefined,undefined,undefined,a=>a.discussionChatId??(created++,'chat_review_discussion'));
+ const command=(raw:unknown)=>service.command(raw,new AbortController().signal);
+ await assert.rejects(()=>command({action:'discuss',id:started.id,revision:started.revision}),/Reveal/);assert.equal(created,0);
+ const shown=await f.command({action:'reveal',id:started.id,revision:started.revision,answer:'I am stuck on the second step.',attempted:true}) as typeof started;
+ const schedules=f.atlas.retrieval.items().map(i=>i.card);
+ const discussion=await command({action:'discuss',id:shown.id,revision:shown.revision}) as typeof started;
+ assert.equal(discussion.discussionChatId,'chat_review_discussion');assert.equal(discussion.status,'revealed');assert.equal(discussion.answer,shown.answer);
+ await command({action:'discuss',id:shown.id,revision:shown.revision});assert.equal(created,1);
+ assert.equal(createAtlasStore(f.file).retrieval.activity(shown.id)!.discussionChatId,'chat_review_discussion');
+ assert.deepEqual(f.atlas.retrieval.items().map(i=>i.card),schedules);assert.equal(f.atlas.retrieval.events(shown.items[0]!.id).length,0);
+ const {reviewDiscussionPrompt}=await import('../src/core/retrieval.ts');assert.throws(()=>reviewDiscussionPrompt(started),/Reveal/);
+ const prompt=reviewDiscussionPrompt(discussion);assert(prompt.includes(shown.front));assert(prompt.includes(shown.back!));assert(prompt.includes(shown.answer));assert.match(prompt,/not an independent retrieval result/);
+});
+test('review handoff creates a normal Atlas-linked lesson with a scratchpad target and resumes it',async()=>{
+ const f=fixture();await f.enrol();const c=f.atlas.read().concepts[0]!;
+ stores.atlasStore.save({kind:'concept',id:c.id,expectedRevision:0,title:c.title,aliases:[],subjectIds:[],preferredSubjectId:null,propositionIds:[],markdown:c.markdown??''});
+ const started=await f.start() as ReturnType<typeof publicReviewActivity>;
+ const shown=await f.command({action:'reveal',id:started.id,revision:started.revision,answer:'My first step',attempted:true}) as typeof started;
+ const {openReviewDiscussion}=await import('../src/server/review-discussion.ts');const activity=f.atlas.retrieval.activity(shown.id)!;
+ const chatId=openReviewDiscussion(activity),lesson=stores.lessonStore.read(chatId)!;
+ assert.equal(lesson.status,'active');assert.equal(lesson.plan.nodes[0]!.conceptId,c.id);assert.equal(lesson.plan.derivations[0]!.finish,shown.front);assert.equal(lesson.plan.activeDerivationId,'review_solution');
+ assert(stores.chatStore.getChat(chatId));assert.equal(openReviewDiscussion({...activity,discussionChatId:chatId}),chatId);
+ assert(!stores.chatStore.getChat(chatId)!.messages.some(m=>m.role==='assistant'));assert.equal(f.atlas.retrieval.events(activity.items[0]!.id).length,0);
+});

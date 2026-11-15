@@ -1,5 +1,7 @@
 "use client";
-import {ResearchReader} from "./research-reader";
+import {PythonWorkbenchPanel} from "./python-workbench";
+import {ArticleReading,ReadingAccess} from "./article-reading";
+import type {ScratchTarget} from "@/src/core";
 import {ChallengeWorkspace} from "./challenge-workspace";
 import {problemRequest} from "./problems";
 import {challengeLesson,type ChallengeSettings,type PublicProblem} from "@/src/core";
@@ -133,6 +135,7 @@ const EXPAND_DIST = 16;
  */
 export const ChatActionsContext = createContext<{
  openPassage?: (id:string)=>void;
+ openWorkbench?: (id:string)=>void;
 	chatId: string;
 	syncFromServer: () => Promise<void>;
 	/** Send a user message into the session (demo error-fix loop, W6). */
@@ -231,11 +234,13 @@ export function Chat({
 	initialConfigured = false,
  initialLearning=null,
  initialChallenge,
+ initialArticle,
 	kind = "teach",
 }: {
 	chatId: string;
  initialLearning?:LearningSession|null;
  initialChallenge?:ChallengeSettings;
+ initialArticle?:string;
 	title: string;
 	initialMessages: LhMessage[];
 	/** Memory-only settlement notice supplied on reopening. */
@@ -266,7 +271,11 @@ export function Chat({
  const [lesson,setLesson]=useState<LearningSession|null>(initialLearning);
  const [lessonReviewOpen,setLessonReviewOpen]=useState(false);
  const [scratchpadOpen,setScratchpadOpen]=useState(false);
+ const [workbench,setWorkbench]=useState<{runId:string|null}|null>(null);
  const [researchPassage,setResearchPassage]=useState<string|null>(null);
+ const [readingOpen,setReadingOpen]=useState(!!initialArticle),[readingSource,setReadingSource]=useState<string|undefined>(initialArticle),[readingTarget,setReadingTarget]=useState<ScratchTarget|null>(null);
+ useServerEvent('lesson-changed',event=>{if(event.chatId===chatId&&!lesson)void fetch(`/api/chats/${chatId}/lesson`,{cache:'no-store'}).then(r=>r.json()).then(v=>{if(v.lesson)setLesson(v.lesson);}).catch(()=>{});});
+ const exitReading=()=>{setReadingOpen(false);setReadingSource(undefined);setResearchPassage(null);const url=new URL(window.location.href);url.searchParams.delete('article');window.history.replaceState(null,'',url);};
 	const reattachSettledRef = useRef<() => void>(() => {});
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
@@ -478,7 +487,7 @@ export function Chat({
 	// replaces the composer. Computed from the NATIVE record (the fold is
 	// the gate the tools themselves read), not the projected view.
 	const challengeAttempt=challengeProblem?.attempts.find(a=>a.id===challengeProblem.selectedAttemptId);
- const scratchTarget=lesson?lessonScratchTarget(lesson):challengeLayout?lessonScratchTarget(challengeLayout):kind==="practice"?practiceScratchTarget(nativeMessages):null;
+ const scratchTarget=readingTarget??(lesson?lessonScratchTarget(lesson):challengeLayout?lessonScratchTarget(challengeLayout):kind==="practice"?practiceScratchTarget(nativeMessages):null);
  const activeProblem = initialChallenge&&challengeAttempt&&challengeAttempt.status!=="inProgress"?null:activeProblemOf(nativeMessages);
 	const activeProblemRef = useRef(activeProblem);
 	activeProblemRef.current = activeProblem;
@@ -1276,7 +1285,8 @@ export function Chat({
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
-                openPassage:setResearchPassage,
+                openPassage:id=>{setResearchPassage(id);setReadingSource(undefined);setReadingOpen(true);setWorkbench(null);},
+ openWorkbench:id=>setWorkbench({runId:id}),
 				syncFromServer,
 				sendText: (t: string) => {
 					void send({ type: "text", text: t });
@@ -1297,8 +1307,8 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-        <div className={scratchTarget&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":researchPassage?"flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh"}>
- {lesson&&!scratchpadOpen&&!researchPassage&&<LessonWorkspace chatId={chatId} lesson={lesson} onExplain={(id,title)=>{void send({type:"text",text:`Briefly clarify what “${title}” means in this lesson: one plain-language explanation and the key equation with its symbols defined, if relevant. Save the concise explanation in the notes of lesson node ${id}. Keep our current topic and lesson route unchanged.`});}} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
+        <div className={(scratchTarget&&scratchpadOpen?"lesson-with-scratchpad flex h-dvh min-w-0":researchPassage?"flex h-dvh min-w-0":lesson?"flex h-dvh flex-col md:flex-row":"flex h-dvh")+(workbench?" xl:pr-[36rem]":"")}>
+ {lesson&&!scratchpadOpen&&!researchPassage&&!workbench&&<LessonWorkspace chatId={chatId} lesson={lesson} onExplain={(id,title)=>{void send({type:"text",text:`Briefly clarify what “${title}” means in this lesson: one plain-language explanation and the key equation with its symbols defined, if relevant. Save the concise explanation in the notes of lesson node ${id}. Keep our current topic and lesson route unchanged.`});}} onContinue={title=>{void send({type:"text",text:`Continue the lesson from ${title}. Connect it to our objective and pick up from what we have already discussed.`});}} onReview={()=>setLessonReviewOpen(true)} onChange={next=>setLesson(previous=>!previous||next.revision>=previous.revision?next:previous)} busy={busy}/>}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1528,6 +1538,7 @@ export function Chat({
 										    Rendered WITHOUT the Message wrapper — that is the bubble. */
 											<div
 										data-testid="user-message"
+                                        id={m.id?messageAnchorId(m.id):undefined}
 										/* THE DOCUMENT, ALL-IN (owner rounds two+three, 2026-10-07):
 										    no chat side — the user message is a full-width card-color
 										    BAND, the IDENTICAL geometry as the thinking rows: 5px band
@@ -1750,7 +1761,7 @@ export function Chat({
 						)
 					}
 					composer={<>
- {kind!=="practice"&&<div className="flex items-center gap-2 px-2 pt-1"><button type="button" className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={busy} title="Investigate the mathematical question in the background using the configured research model and search provider" onClick={()=>{const question=textRef.current.trim();if(question)applyText("");void send({type:"text",text:`Start a mathematical literature and critique investigation with the research tool (mode: mathematical). ${question?`Question: ${question}`:"Investigate the substantive mathematical question or claim we are currently discussing."} Include the relevant assumptions and concise conversation context, consult my Atlas if access is enabled, and return source-linked findings. Continue our discussion while it runs.`});}}>Investigate</button>{lesson&&<LessonSources chatId={chatId} disabled={busy} onUploading={setSourceUploading} onAttached={()=>{if(!textRef.current.trim())applyText("Teach me from the attached source. Connect its ideas to my Atlas and adapt the lesson to our prior work.");}}/>}</div>}
+ {kind!=="practice"&&<div className="flex items-center gap-2 px-2 pt-1"><ReadingAccess chatId={chatId} onRead={()=>{setReadingOpen(true);setWorkbench(null);}}/><button type="button" className="rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground" onClick={()=>setWorkbench({runId:null})}>Workbench</button><button type="button" className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40" disabled={busy} title="Investigate the mathematical question in the background using the configured research model and search provider" onClick={()=>{const question=textRef.current.trim();if(question)applyText("");void send({type:"text",text:`Start a mathematical literature and critique investigation with the research tool (mode: mathematical). ${question?`Question: ${question}`:"Investigate the substantive mathematical question or claim we are currently discussing."} Include the relevant assumptions and concise conversation context, consult my Atlas if access is enabled, and return source-linked findings. Continue our discussion while it runs.`});}}>Investigate</button>{lesson&&<LessonSources chatId={chatId} onRead={id=>{setReadingSource(id);setResearchPassage(null);setReadingOpen(true);}} disabled={busy} onUploading={setSourceUploading} onAttached={()=>{if(!textRef.current.trim())applyText("Teach me from the attached source. Connect its ideas to my Atlas and adapt the lesson to our prior work.");}}/>}</div>}
 						<Composer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -1809,8 +1820,9 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
-		{researchPassage&&!scratchpadOpen&&<ResearchReader chatId={chatId} passageId={researchPassage} onClose={()=>setResearchPassage(null)} onAsk={text=>{void send({type:"text",text});}}/>}
-		{scratchTarget&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${scratchTarget.id}`} chatId={chatId} targetOverride={scratchTarget} busy={busy} onClose={()=>setScratchpadOpen(false)} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
+		{workbench&&<PythonWorkbenchPanel chatId={chatId} runId={workbench.runId} onClose={()=>setWorkbench(null)}/>}
+ {readingOpen&&<ArticleReading chatId={chatId} sourceId={readingSource} passageId={researchPassage??undefined} busy={busy} onChat={exitReading} onQuick={target=>{exitReading();setReadingTarget(target);setScratchpadOpen(true);}} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} onMessage={id=>{exitReading();setTimeout(()=>{const element=document.getElementById(`message-${id}`);if(element)element.scrollIntoView({block:"center"});else window.location.hash=`message-${id}`;},0);}}/>}
+		{scratchTarget&&scratchpadOpen&&<LessonScratchpad key={`${chatId}:${scratchTarget.id}`} chatId={chatId} targetOverride={scratchTarget} busy={busy} onClose={()=>{setScratchpadOpen(false);setReadingTarget(null);}} onSend={id=>new Promise(resolve=>{void send({type:"scratchpad",attemptId:id},()=>resolve(true)).then(resolve);})} deliveryError={error?.message} onResume={id=>new Promise(resolve=>{void send({type:"continue",scratchpadAttemptId:id},()=>resolve(true)).then(resolve);})} dictation={<DictationBar dictation={dictation}/>} finishDictation={finishDictation} feedback={messages.filter(m=>m.role==="assistant").at(-1)?.parts.filter(p=>p.type==="text").map(p=>p.text??"").join("\n")??""}/>}
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>

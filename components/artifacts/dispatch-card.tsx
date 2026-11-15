@@ -20,6 +20,7 @@ import { BrailleSpinner } from "@/components/braille-spinner";
  *                 box must not duplicate it.
  */
 const KIND_LABEL: Record<JobKind, string> = {
+ python:"Python",
 	research: "Research agent",
 	demo: "Demo agent",
 	visual: "Figure agent",

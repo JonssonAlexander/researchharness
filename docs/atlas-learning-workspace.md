@@ -119,3 +119,154 @@ an active exercise belonging to a different current topic and preserve previousl
 recorded progress when omitted. Editing controls are under one disclosure.
 No SQLite migration, canonical graph write or new provider call is introduced by
 inspection or status display; schemaVersion 1 reads the optional field compatibly.
+
+## Lesson map interaction repair (13 November 2026; R01–R05)
+
+The lesson map retains the shared canvas renderer. A bounded D3 settle now includes
+label collision clearance before the final rectangle check. Topics keep their
+positions and camera while notes, progress or current focus change; dragging uses
+an opt-in manual-node callback rather than reheating unrelated nodes. Tapping still
+inspects without progressing the lesson. Background pan, wheel/pinch zoom, Fit and
+one enlarge/shrink control are available; Escape closes the enlarged map.
+Enlarging explicitly fits the available space. Positions are local to the mounted
+map, not canonical Atlas coordinates or saved lesson content. Reloading starts from
+the deterministic layout. The existing integration approval and lesson revision
+contracts are unchanged.
+
+## Live lesson tools and teaching route (13 November 2026; implemented)
+
+`read_lesson` returns a fresh compact map: revision, current topic, ordered main
+route, topic identities/coverage, ordinary associations and derivation summaries.
+An optional topic ID returns its complete saved notes, actual neighbours and
+Start/Finish targets. Reads never change focus or progress. The teacher is
+instructed to read the topic before revising its notes.
+
+`edit_lesson` applies a bounded change against one exact revision: edit topic
+labels/notes/coverage/tangent flags, add topics, add/remove ordinary associations,
+reorder all topic IDs, or change focus/objective. Omitted fields and unrelated
+notes, identities and derivations remain intact. It cannot delete topics, reassign
+an existing Atlas identity, finish a derivation or finish the lesson. The existing
+Atlas-ID checks, retained derivations, atomic store write and post-save notification
+are shared with `update_lesson`. A stale edit must read and rebase; no silent retry.
+The result confirms the saved revision/topology and complete changed topics.
+`update_lesson` remains for initial plans, deliberate restructuring and derivation
+targets. Both tools stay within native history and the existing active turn.
+
+The main teaching route is existing topic array order excluding tangents. The map
+shows numbered topics and a solid path, with secondary associations dotted and
+quieter. This path is derived only for display; it never creates an association or
+asserts a prerequisite, implication, proof or mastery. Tangents remain separate
+branches. Initial positions follow a compact reading path with a bounded D3 settle;
+secondary associations cannot scramble teaching order. Manual node placement and
+camera still survive note/progress/focus updates in the mounted map.
+
+Existing schemaVersion 1 lessons need no migration or model-generated rewrite.
+The lesson-topic fallback reader recognises successful `edit_lesson` focus changes;
+inspection/failed edits never reattribute teaching. No new UI button row, model
+role, automatic Atlas integration or FSRS event is added.
+
+Validation: focused tests cover read-only snapshots, complete topic equations,
+revision conflicts, restart, atomic failure, retained unrelated notes/derivations,
+identity guards, route projection and a scripted native read → topic read → edit →
+prose turn. No paid model run or real pen-hardware test was performed.
+
+## Topic families and visible mathematics (14 November 2026; current design)
+
+This supersedes the numbered snake/grid and separate two-column branch placement.
+Keep the solid running thread between main topics in teaching order. Heads form a
+compact open ring; supporting ideas occupy bounded local families near their head.
+The thread is navigation, not a mathematical implication. Existing associations
+remain dotted, with distant cross-references quieter.
+
+Topics accept optional `kind: topic | detail | tangent`, `parentId` and `formula`
+(one complete bare LaTeX expression, up to 800 characters). Parents must exist and
+be acyclic; details require a parent, main topics cannot have one. Legacy `tangent`
+remains compatible; non-route nodes keep it true. Old records without these fields
+still load; an unambiguous saved main-topic association can provide a display parent
+without rewriting history. The explicit current-lesson repair classified the
+owner-requested supporting nodes as details and copied complete formulas from their
+saved notes, preserving IDs, notes, coverage, connections and derivations through
+normal revision-checked saves. Prior revisions remain archived.
+
+Visible labels now show full titles and a separate KaTeX equation, without the
+32-character cutoff. Longer equations scale to their label width, never receive
+invented line breaks or truncation. Main discs are larger, details smaller; genuine
+tangents retain their purple distinction. Variable label rectangles reserve space.
+The teacher sees these fields through read_lesson, can edit them through edit_lesson,
+and is instructed to use concise mathematical labels plus established equations.
+Full-plan updates preserve omitted hierarchy/formula metadata.
+
+Overview starts with main topics. Tapping a head unfolds and frames its local
+branch; tapping it again collapses it. All details shows the complete map. The
+existing Fit/enlarge controls, pan/pinch and inspection remain. All lesson topics
+stay accessible in a collapsed text list. Inspection/unfolding/geometry do not
+change saved focus, progress, Atlas or FSRS.
+
+Dragging remains directly under pointer control. On release, a bounded D3 local
+settle moves a head's branch with it and clears neighbouring labels; distant
+families stay fixed. The shared renderer eases the resulting positions over 220 ms,
+without recentering the camera. A new drag cancels an in-flight animation. Position
+arrangements are retained separately for overview/branch/all-detail views while
+mounted; reload recomputes the deterministic family layout. Main Atlas physics
+are unchanged.
+
+Validation includes the expanded 9-head/24-detail constellation, label separation,
+parent/cycle validation, exact title/equation rendering, safe KaTeX, local movement,
+metadata preservation and existing native teacher/graph/integration checks. Browser
+checks on the repaired lesson covered overview, all 29 formula labels, branch
+expansion, branch movement and no ellipses or runtime errors. No paid model call
+or real pen/tablet acceptance test was performed.
+
+## Logical stages, live motion and lean context (14 November; current)
+
+This supersedes the open-ring placement and release-only animation above. Main
+nodes carry optional `question` (up to 300 characters) and `section` (up to 80),
+with the existing mathematical title/formula retained underneath. The current
+lesson's nine questions and three stages were restored through the normal API;
+notes, equations, IDs and coverage stayed unchanged. Other legacy lessons remain
+readable; the teacher supplies meaningful questions/stages as the lesson develops.
+
+Stages progress left to right; families sit locally within their stage. These are
+teaching organization, not inferred mathematical prerequisites. The solid lesson
+thread remains. Section headings stay visible at overview scale. The current
+node has a distinct ring and You are here label. A compact Now question identifies
+the route position and restores follow mode. Initially the graph frames the current
+family and includes saved one-hop neighbours and any required ancestors. Selecting
+another topic or All details suspends automatic following. Physics/inspection do
+not change focus or progress. New nodes seed near the parent's current position.
+
+The renderer now drives an injected browser-local `createLessonMotion` using the
+same stopped/ticked D3 engine as Atlas. Springs, collision and weak anchors respond
+while the pointer is down, then decay after release; distant nodes stay pinned.
+Moving a head moves its family's anchors, without teleporting children. Cancellation
+restores the drag snapshot. No RAF runs permanently at rest. This replaces the
+220 ms end-position interpolation, rather than layering another animation on it.
+
+Map tools have always been deterministic local code; no separate model runs for
+inspection, layout or each node write. The expensive teacher still decides what
+to teach/change. Its stable system prompt now contains the objective rather than
+the entire mutable map. The teacher checks live focus/targets via scope=current,
+reads up to eight needed topics with topicIds, and batches writes. Edit receipts
+return revision/current IDs and changed IDs/counts without duplicating all notes.
+Full notes and complete equations remain available through explicit reads. Existing
+native conversation and compaction semantics are unchanged; nothing is silently
+removed from history. Prompt budgeting uses the actual smaller instructions.
+
+On the current saved lesson, removing the mutable map reduced this instruction
+payload from about 31k to 7.3k characters (76%, not a claim of 76% total token/cost
+savings). Stable-prefix behaviour is covered locally; actual provider caching and
+quota savings need observation in subsequent real turns. No paid model test or
+model/provider switch was performed. A cheap model dedicated to large map drafts
+has not been introduced; the existing model settings remain authoritative.
+
+Validation covers logical stage ordering, the expanded 33-node map, live motion
+before release, distant anchors, settling/cancellation, questions with formulas,
+current/related-node visibility, batched reads, compact receipts and prompt stability
+across note/revision changes. Browser checks cover live branch motion, current
+focus, questions and All details without changing the saved lesson revision.
+
+Organic layout follow-up: stage coordinates now seed a bounded D3 force settle,
+not fixed rows/columns. Relationship springs, repulsion and label clearance shape
+the map around weak stage gravity; main-thread and supporting links retain their
+styles. Existing live drag physics and current-topic navigation remain unchanged.
+This is view geometry only. Reloading recomputes it without editing lesson data.

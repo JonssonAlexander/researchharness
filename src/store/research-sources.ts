@@ -31,6 +31,7 @@ export function createResearchSourceStore(root: string): ResearchSourceStore {
         return result;
     };
     const store: ResearchSourceStore = {
+ list(chat){const folder=dir(chat);return fs.existsSync(folder)?fs.readdirSync(folder).filter(n=>/^rs_[a-f0-9]{64}\.json$/.test(n)).map(n=>source(chat,n.slice(0,-5))):[];},
         retain(chat, input) {
             const digest = hash(input.bytes), id = `rs_${digest}`, folder = dir(chat);
             const record = researchSource.parse({ version: 1, id, hash: digest, title: input.title, authors: input.authors, url: input.url, pages: input.pages, size: input.bytes.length, retrievedAt: new Date().toISOString() });

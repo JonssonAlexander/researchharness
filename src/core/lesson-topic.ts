@@ -5,12 +5,13 @@ import {failedOutputCallIds,userFacingTextOf} from "./native-messages.ts";
 export function lessonTopicDetail(lesson:LearningSession,messages:readonly LhMessage[],id:string,atlasNotes=""){
  const node=lesson.plan.nodes.find(n=>n.id===id);if(!node)return null;
  if(node.notes?.trim())return {text:node.notes,source:"Lesson note"};
- const successful=new Set(messages.flatMap(m=>m.role==="toolResult"&&m.toolName==="update_lesson"&&!m.isError?[m.toolCallId]:[])),failed=failedOutputCallIds(messages);
+ const successful=new Set(messages.flatMap(m=>m.role==="toolResult"&&["update_lesson","edit_lesson"].includes(m.toolName)&&!m.isError?[m.toolCallId]:[])),failed=failedOutputCallIds(messages);
  const excerpts:string[]=[];let current:string|null=null;
  for(const m of messages){if(m.role!=="assistant"||["error","aborted"].includes(m.stopReason))continue;
   for(const block of m.content){
-   if(block.type==="toolCall"&&block.name==="update_lesson"&&successful.has(block.id)){
-    const plan=block.arguments.plan as {currentNodeId?:unknown}|undefined;if(typeof plan?.currentNodeId==="string")current=plan.currentNodeId;
+   if(block.type==="toolCall"&&["update_lesson","edit_lesson"].includes(block.name)&&successful.has(block.id)){
+    const change=(block.name==="update_lesson"?block.arguments.plan:block.arguments) as {currentNodeId?:unknown}|undefined;
+    if(typeof change?.currentNodeId==="string"||change?.currentNodeId===null)current=change.currentNodeId;
    }
    if(current===id)excerpts.push(...userFacingTextOf([block],failed));
   }

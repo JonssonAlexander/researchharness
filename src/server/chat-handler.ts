@@ -1,3 +1,5 @@
+import {readingGuideService} from './reading-guide.ts';
+import {pythonWorkbench} from "./python-workbench.ts";
 import { setFileAccessPolicy } from "../agent/tools/file-access.ts";
 import { fileAccessPolicy } from "./file-access.ts";
 import {challengeProjection,challengeScratchLesson,recoverChallengeHistory,reconcileChallengeCalls} from "./problems.ts";
@@ -99,6 +101,7 @@ function settlementErrorText(error: unknown): string {
 }
 
 const jobRunner = createJobRunner({
+ pythonWorkbench,
 	chatStore: stores.chatStore,
 	jobStore: stores.jobStore,
 	deliver: deliverJobResult,
@@ -220,7 +223,7 @@ export async function handleChatInput(
 
  if(input.type==="scratchpad"){
   if(record.messages.some(m=>m.id===input.attemptId))return settledTurnResponse();
-  try{if(!stores.lessonStore.read(chatId)&&!challengeScratchLesson(chatId)&&record.kind!=="practice")return Response.json({error:"Open a learning session first."},{status:409});scratchMessage(chatId,input.attemptId);}catch(e){return Response.json({error:e instanceof Error?e.message:"Attempt unavailable"},{status:400});}
+  try{if(!stores.lessonStore.read(chatId)&&!challengeScratchLesson(chatId)&&record.kind!=="practice"&&!stores.readingStore.target(chatId,stores.scratchpadStore.attempt(chatId,input.attemptId)?.padId??""))return Response.json({error:"Open a learning session first."},{status:409});scratchMessage(chatId,input.attemptId);}catch(e){return Response.json({error:e instanceof Error?e.message:"Attempt unavailable"},{status:400});}
  }
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
@@ -463,6 +466,7 @@ export async function handleChatInput(
 	});
 	const agentOpts: AgentBuildOptions = {
  learning:lesson??undefined,
+ readingGuide:lesson?readingGuideService(chatId):undefined,
  lessonSources:lesson?lessonDocumentReader(chatId,engine.model.input.includes("image")):undefined,
  challenge:record.challenge?{store:stores.problemStore,minutes:record.challenge.minutes}:undefined,
  atlasLookup:(lesson||record.challenge)&&graphToolsEnabled(effective)?{read:()=>{const graph=graphView();return {atlas:stores.atlasStore.read(),propositions:graph.propositions,chains:graph.chains};},lesson:id=>stores.atlasStore.lessonReviews.read(id)}:undefined,
@@ -506,14 +510,14 @@ export async function handleChatInput(
 							chatId,
 							jobStore: stores.jobStore,
 							spawn: (job, input) => void jobRunner.runJob(job.id, input),
-							searchAvailable,
+							searchAvailable, pythonWorkbench,
 						},
 						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
 					},
 					agentOpts,
 				)
 			: lesson
-            ? createLearningAgent({chatId,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:(job,input)=>void jobRunner.runJob(job.id,input),searchAvailable},stores.lessonStore,()=>emit("lesson-changed",{chatId}),agentOpts)
+            ? createLearningAgent({chatId,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:(job,input)=>void jobRunner.runJob(job.id,input),searchAvailable,pythonWorkbench},stores.lessonStore,()=>emit("lesson-changed",{chatId}),agentOpts)
             : teaching
 			? createTeacherAgent(
 					{
@@ -523,7 +527,7 @@ export async function handleChatInput(
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
-						searchAvailable,
+						searchAvailable, pythonWorkbench,
 					},
 					agentOpts,
 				)
@@ -537,7 +541,7 @@ export async function handleChatInput(
 						// needs the same job wiring as the teacher's.
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
-						searchAvailable,
+						searchAvailable, pythonWorkbench,
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.

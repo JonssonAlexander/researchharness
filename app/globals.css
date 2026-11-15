@@ -1,4 +1,5 @@
 @import "tailwindcss" source(none);
+@import "../components/article-reading.css";
 @source "../app";
 @source "../components";
 @source "../src";

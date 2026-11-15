@@ -76,6 +76,7 @@ import {
 	type GraphRenderSettings,
 	type LayoutNode,
 	type Position,
+ type LessonMapMotion,
 } from "@/src/core";
 
 export type { GraphRenderSettings };
@@ -89,9 +90,13 @@ export interface CanvasNode {
 	y: number;
 	label: string;
 	badgeColor?: string;
+ focusRing?:string;
 	derivationCount?:number;
 	studyBadgeColor?:string;
 	htmlLabel?: HTMLElement;
+	labelWidth?: number;
+	sizeScale?: number;
+	labelScale?: number;
 	/** Atlas concepts carry subject colour and explicit spatial locks. */
 	color?: string;
 	fixed?: boolean;
@@ -145,6 +150,11 @@ export interface CanvasData {
 	semanticEdges?: (CanvasEdge & { id?: string })[];
 	/** Source mind-map associations; dotted, no mathematical implication. */
 	mapEdges?: CanvasEdge[];
+	/** View-only teaching sequence. Never an association or inference edge. */
+	routeEdges?: CanvasEdge[];
+ /** Opt-in browser-local dynamics, independent of canonical Atlas positions. */
+ motion?:LessonMapMotion;
+ alwaysClusterLabels?:boolean;
 	atlas?: AtlasSnapshot;
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
@@ -161,6 +171,9 @@ export interface CanvasData {
 }
 
 export interface RendererCallbacks {
+	/** Opt-in manual maps: move one node without reheating its neighbours. */
+	onNodeMove?: (id: string, position: Pt) => void;
+ onPositions?: (positions:{id:string;x:number;y:number}[])=>void;
 	/** Opt-in draft editor gesture; ordinary canvases retain node dragging. */
 	onToggleConnection?: (sourceId: string, targetId: string) => void;
  onSelectConnection?: (sourceId:string,targetId:string)=>void;
@@ -643,6 +656,7 @@ export class GraphCanvasRenderer {
 	private simActive = false;
 	private dragId: string | null = null;
 	private dragOrigin: Pt | null = null;
+	private manualDrag: {x: number; y: number; moved: boolean} | null = null;
 	private simMoved = false; // any real movement since the last commit
 	private commitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -732,6 +746,7 @@ export class GraphCanvasRenderer {
 		// transform change just marks dirty (draws happen in OUR loop).
 		this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
 			.scaleExtent([0.02, 40])
+			.filter(e => (!e.ctrlKey || e.type === "wheel") && !e.button && !this.manualDrag)
 			.on("zoom", ({ transform }) => {
 				this.transform = transform;
 				this.markDirty();
@@ -817,7 +832,7 @@ export class GraphCanvasRenderer {
 		}
 		for(const n of this.data?.nodes??[])n.htmlLabel?.remove();
 		for(const n of data.nodes)if(n.htmlLabel){
-			Object.assign(n.htmlLabel.style,{position:"absolute",pointerEvents:"none",transformOrigin:"top center",textAlign:"center",width:`${data.labelWidth??170}px`,lineHeight:"1.35",left:"0",top:"0"});
+			Object.assign(n.htmlLabel.style,{position:"absolute",pointerEvents:"none",transformOrigin:"top center",textAlign:"center",width:`${n.labelWidth??data.labelWidth??170}px`,lineHeight:"1.35",left:"0",top:"0"});
 			this.canvas.parentElement?.append(n.htmlLabel);
 		}
 		const previousAtlas = this.data?.atlas;
@@ -867,7 +882,7 @@ export class GraphCanvasRenderer {
 
 	private emphasis:NodeEmphasis={};
     setNodeEmphasis(emphasis:NodeEmphasis):void {this.emphasis=emphasis;this.geoVersion++;this.markDirty();}
-    private nodeWorld(id:string):WorldSizes {const scale=emphasisScale(this.emphasis[id]);return {...this.world,nodeR:this.world.nodeR*scale,glowOuter:this.world.glowOuter*scale,labelSize:this.world.labelSize*(scale>1?1.15:1)};}
+    private nodeWorld(id:string):WorldSizes {const n=this.nodeById.get(id),scale=emphasisScale(this.emphasis[id])*(n?.sizeScale??1);return {...this.world,nodeR:this.world.nodeR*scale,glowOuter:this.world.glowOuter*scale,labelSize:this.world.labelSize*(n?.labelScale??(scale>1?1.15:1))};}
     private pickConnectionAt(pos:Pt):CanvasEdge|null {
         if(!this.data||!this.settings||this.settings.edgeWidth<=0)return null;
         const {x,y,k}=this.transform;
@@ -1085,6 +1100,16 @@ export class GraphCanvasRenderer {
 				const moved =
 					this.dragOrigin !== null &&
 					Math.hypot(pos.x - this.dragOrigin.x, pos.y - this.dragOrigin.y) > CLICK_SLOP;
+				if (this.manualDrag) {
+					if (moved || this.manualDrag.moved) {
+						this.manualDrag.moved = true;
+						n.x = n.fx = (pos.x-this.transform.x)/this.transform.k;
+						n.y = n.fy = (pos.y-this.transform.y)/this.transform.k;
+                        this.data?.motion?.move(this.dragId,{x:n.x,y:n.y});
+						this.geoVersion++; this.markDirty();
+					}
+					return;
+				}
 				const concept = this.data?.atlas?.concepts.find(c => c.id === this.dragId);
 				if (concept) {
 					if (moved || this.atlasLayout) {
@@ -1167,6 +1192,7 @@ export class GraphCanvasRenderer {
 			if (n) {
 				n.fx = n.x;
 				n.fy = n.y;
+				if (this.callbacks.onNodeMove||this.data?.motion) this.manualDrag = {x:n.x!, y:n.y!, moved:false};
 			}
 			this.canvas.style.cursor = "grabbing";
 			this.markDirty();
@@ -1197,6 +1223,10 @@ export class GraphCanvasRenderer {
 		}
 		if (!this.dragId) return;
 		const node = this.simById.get(this.dragId);
+		if (node && this.manualDrag) {
+			node.x = node.fx = this.manualDrag.x; node.y = node.fy = this.manualDrag.y;
+			this.manualDrag = null; this.data?.motion?.cancel();this.syncMotion();this.geoVersion++;
+		} else
 		if (node) { node.fx = null; node.fy = null; }
 		this.atlasLayout?.release();
 		this.sim?.alphaTarget(0);
@@ -1234,6 +1264,13 @@ export class GraphCanvasRenderer {
 				/* already released */
 			}
 			this.canvas.style.cursor = "";
+			if (this.manualDrag) {
+				const moved = this.manualDrag.moved, node = this.simById.get(id);
+				this.manualDrag = null;
+				if (moved && node) {this.data?.motion?.release();this.callbacks.onNodeMove?.(id,{x:node.x!,y:node.y!});this.markDirty();}
+				else this.callbacks.onSelect(id,this.eventPos(e));
+				return;
+			}
 			if (this.data?.atlas?.concepts.some(c => c.id === id)) {
 				if (this.atlasLayout) this.atlasLayout.release();
 				else this.callbacks.onSelect(id, this.eventPos(e));
@@ -1360,11 +1397,13 @@ export class GraphCanvasRenderer {
 			const zoomAnim = this.advanceZoom(dt);
 			const simAnim = this.advanceSim();
 			const atlasAnim = this.advanceAtlas();
+            const lessonAnim=this.data?.motion?.active?this.data.motion.step():false;
+            if(this.data?.motion)this.syncMotion();
 			this.draw();
 			// Keep frames coming ONLY while an animation is in motion (hover
 			// fade, zoom glide, or live physics); an idle graph schedules no
 			// rAF at all.
-			this.animating = hoverAnim || zoomAnim || simAnim || atlasAnim;
+			this.animating = hoverAnim || zoomAnim || simAnim || atlasAnim || lessonAnim;
 		} finally {
 			this.inTick = false;
 		}
@@ -1375,6 +1414,13 @@ export class GraphCanvasRenderer {
 			});
 		}
 	}
+
+    private syncMotion():void {
+        const motion=this.data?.motion;if(!motion)return;
+        const points=motion.positions();
+        for(const p of points){const node=this.nodeById.get(p.id);if(node){node.x=p.x;node.y=p.y;}const sim=this.simById.get(p.id);if(sim){sim.x=sim.fx=p.x;sim.y=sim.fy=p.y;}}
+        this.callbacks.onPositions?.(points);this.geoVersion++;
+    }
 
 	/** Explicit arrangement and dragging share the same local, warm-started engine. */
 	relaxAtlas(subjectId: string | null): void {
@@ -1613,7 +1659,7 @@ export class GraphCanvasRenderer {
 		ctx.font = this.worldLabelFont;
 		const maxW = data.labelWidth??LABEL_MAX_WIDTH * (settings.labelSize / LABEL_SIZE);
 		for (const n of data.nodes) {
-			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, maxW));
+			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, n.labelWidth??maxW));
 		}
 		ctx.font = prevFont;
 	}
@@ -2029,6 +2075,17 @@ export class GraphCanvasRenderer {
 			ctx.restore();
 		}
 
+		if (settings.edgeWidth > 0 && data.routeEdges?.length) {
+			ctx.save(); ctx.globalAlpha=.85; ctx.strokeStyle="#8bb7d9";
+			ctx.lineWidth=1.4/k; ctx.setLineDash([]); ctx.beginPath();
+			for (const e of data.routeEdges) {
+				if(this.visible&&(!this.visible.has(e.from)||!this.visible.has(e.to)))continue;
+				const a=this.nodeById.get(e.from),b=this.nodeById.get(e.to);if(!a||!b)continue;
+				ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+			}
+			ctx.stroke();ctx.restore();
+		}
+
 		// 4. Nodes: one cached Path2D, one fill.
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
@@ -2046,11 +2103,12 @@ export class GraphCanvasRenderer {
 		for(const n of data.nodes){
 			const shown=!this.visible||this.visible.has(n.id),radius=this.nodeWorld(n.id).nodeR;
 			if(n.derivationCount&&shown&&(!data.atlas||nodeAlpha>.8||this.hoverNode?.id===n.id)){ctx.save();ctx.fillStyle=n.color??"#999fa9";ctx.font=`${10/k}px sans-serif`;ctx.textAlign="right";ctx.fillText(String(n.derivationCount),n.x-radius-5/k,n.y+3/k);ctx.restore();}
-			if(n.badgeColor&&shown){ctx.fillStyle=n.badgeColor;ctx.beginPath();ctx.arc(n.x+radius,n.y-radius,Math.max(1.5/k,radius*.5),0,Math.PI*2);ctx.fill();}
+			if(n.focusRing&&shown){ctx.save();ctx.strokeStyle=n.focusRing;ctx.lineWidth=2/k;ctx.beginPath();ctx.arc(n.x,n.y,radius+5/k,0,Math.PI*2);ctx.stroke();ctx.restore();}
+            if(n.badgeColor&&shown){ctx.fillStyle=n.badgeColor;ctx.beginPath();ctx.arc(n.x+radius,n.y-radius,Math.max(1.5/k,radius*.5),0,Math.PI*2);ctx.fill();}
 			if(n.studyBadgeColor&&shown){ctx.fillStyle=n.studyBadgeColor;ctx.beginPath();ctx.arc(n.x+radius,n.y+radius,Math.max(1.5/k,radius*.5),0,Math.PI*2);ctx.fill();}
 			if(n.htmlLabel){const el=n.htmlLabel,alpha=this.hoverNode?.id===n.id?Math.max(nodeAlpha,this.hoverFade):nodeAlpha;
 				el.style.display=shown&&alpha>.01?"block":"none";el.style.opacity=String(alpha*(this.highlighted?.size&&!this.highlighted.has(n.id)?(this.subtleHighlight ? .55 : .2):1));el.style.color=data.colors.label;el.style.fontSize=`${this.nodeWorld(n.id).labelSize}px`;
-				el.style.transform=`translate(${n.x*k+this.transform.x-(data.labelWidth??170)/2}px,${(n.y+radius+this.world.labelGap)*k+this.transform.y}px) scale(${k})`;
+				el.style.transform=`translate(${n.x*k+this.transform.x-(n.labelWidth??data.labelWidth??170)/2}px,${(n.y+radius+this.world.labelGap)*k+this.transform.y}px) scale(${k})`;
 			}
 		}
 
@@ -2106,9 +2164,9 @@ export class GraphCanvasRenderer {
 		// Wave 7: labels are session names / file paths — pre-wrapped at
 		// the geometry build (cap + ellipsis), drawn centered on the
 		// centroid line by line.
-		if (settings.clusterLabels && regionAlpha > 0.01) {
+		if (settings.clusterLabels && (data.alwaysClusterLabels || regionAlpha > 0.01)) {
 			ctx.save();
-			ctx.globalAlpha = regionAlpha;
+			ctx.globalAlpha = data.alwaysClusterLabels?1:regionAlpha;
 			ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize / k}px ${data.fontFamily}`;
 			ctx.textAlign = "center";
 			ctx.textBaseline = "middle";
@@ -2117,7 +2175,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
-				ctx.fillStyle = rm.color ? rgbaFromHex(rm.color, 0.85) : `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				ctx.fillStyle = data.alwaysClusterLabels?data.colors.label:rm.color ? rgbaFromHex(rm.color, 0.85) : `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

@@ -279,6 +279,7 @@ function useNow(active: boolean): number {
 }
 
 const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
+ python:PlayIcon,
 	research: SearchIcon,
 	demo: PlayIcon,
 	visual: PenToolIcon,

@@ -1,4 +1,6 @@
 "use client";
+import {PythonRunCard} from "../python-workbench";
+import type {PythonResult} from "@/src/core";
 import {ResearchFindings} from "../research-findings";
 
 import { CheckIcon, CircleX } from "lucide-react";
@@ -44,6 +46,7 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 		);
 	}
 	switch (data.kind) {
+ case "python": return <PythonRunCard result={data.result as PythonResult}/>;
 		case "research":
             if ((data.result as ResearchResult).investigation) return <ResearchFindings report={(data.result as ResearchResult).investigation!}/>;
 			return isSubagentFailure("research", data.result as ResearchResult) ? (
