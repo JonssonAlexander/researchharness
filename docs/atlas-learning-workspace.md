@@ -20,7 +20,7 @@ The existing chat composer and dictation remain the answer surface.
 
 New learning turns bypass the prober and use a dedicated conversational policy:
 concepts first, selected proofs, targeted hints/explanations, no compulsory quizzes,
-prediction prompts or checkpoint gates. Quiz/probe/question/plan-init tools are
+or checkpoint gates. Selective prediction/reconstruction follows the evidence-aware [learning policy](learning-policy.md), rather than a fixed questioning cadence. Quiz/probe/question/plan-init tools are
 absent from this workflow's registry. Clarification can happen in ordinary prose.
 Existing native history, one-active-turn claims, model routing, usage, replay,
 interruptions, steers, job/read tools and practice retain their machinery. The
@@ -270,3 +270,10 @@ not fixed rows/columns. Relationship springs, repulsion and label clearance shap
 the map around weak stage gravity; main-thread and supporting links retain their
 styles. Existing live drag physics and current-topic navigation remain unchanged.
 This is view geometry only. Reloading recomputes it without editing lesson data.
+
+## Evidence-aware teaching
+
+The November 15 [learning policy](learning-policy.md) supersedes blanket bans on
+prediction as well as legacy every-step assessment. Coverage stays in this map;
+agent-only targets, submitted-work evidence, timing proxies and policy lineage
+are persisted separately. Existing workflows and reviewed integration remain intact.

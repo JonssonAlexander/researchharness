@@ -342,7 +342,7 @@ panels. The learner attempts the argument first; explicit submissions combine
 handwriting and dictated/typed explanation. Continue on the same saved scene,
 providing targeted hints, corrections or explanations. Aim for 2–4 substantial
 exchanges where appropriate. Neither teaching nor derivation uses compulsory
-intermediate quizzes, prediction/checkpoint gates or repeated permission to
+intermediate quiz/checkpoint gates or repeated permission to
 advance. Ask questions to resolve genuine ambiguity or support the learner's
 chosen direction; preserve control over pace, help and tangent depth.
 
@@ -1209,3 +1209,27 @@ repulsion, label collision and weak stage-centred gravity. Stage names still giv
 logical orientation, without pinning nodes to a grid or a circle. Preserve the
 running thread, question/formula labels and local drag physics. No model call or
 saved lesson-content change is needed; refreshed views recompute geometry.
+
+## Implemented learning-system policy — 15 November 2026
+
+The workspace `research_atlas_learning_policy.md` is the product specification.
+[docs/learning-policy.md](docs/learning-policy.md) describes the implementation and
+limits. It supersedes the legacy every-step checking/self-evidence doctrine and
+any blanket ban on selective prediction or retrieval in conversational lessons.
+Use transparent importance/prerequisite/evidence/effort-sensitive choices; no
+fixed question cadence or compulsory tests. Preserve fluent explanations, learner
+interruptions, Start/Finish reconstruction and existing PDF/scratchpad flows.
+
+Agent-only targets and append-only personal evidence are separate from lesson
+coverage and canonical mathematical truth. Do not render a target dashboard or
+infer mastery from graph presence, engagement, tutor prose or unsent handwriting.
+Tools validate native submitted-work references, source pages, target revisions
+and corrections. Existing FSRS/Challenge histories remain authoritative and are
+read by reference; never change schedules or solved status from these judgments.
+
+Policy version, effective prompt/tools snapshots/hashes, running app revision and
+actual model/thinking level are recorded per lesson turn and meaningful action.
+Content-free recent-interaction/wait/hidden/idle intervals are local time proxies,
+not measured cognition. Inspect with `/api/chats/<id>/learning` or `/api/learning`;
+no causal policy ranking or calibrated mastery/efficiency score is implemented.
+Future learning-rule changes must bump the semantic version and retain history.

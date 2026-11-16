@@ -10,6 +10,7 @@ import {MessageResponse} from "./ai-elements/message";
 import {DictationBar,useDictation,useDictationTarget,joinDictation} from "./dictation";
 import {useServerEvent,useServerResync} from "./server-events";
 import type {ScratchEditorHandle} from "./scratchpad-editor";
+import {useLearningActivity} from "./use-learning-activity";
 const Editor=dynamic(()=>{if(typeof window!=="undefined")Object.assign(window,{EXCALIDRAW_ASSET_PATH:"/excalidraw/"});return import('./scratchpad-editor');},{ssr:false});
 const button="rounded-lg border px-3 py-2 text-xs hover:bg-accent disabled:opacity-50",field="w-full rounded border bg-background px-2 py-1.5 text-sm";
 type Activity=ReturnType<typeof publicReviewActivity>;
@@ -40,6 +41,7 @@ function ReviewAttempt({activity,model,intervals,now,run,onDone,onReady}:{activi
  const [answer,setAnswer]=useState(activity.answer),[writing,setWriting]=useState(false),[drawingLoaded,setDrawingLoaded]=useState(activity.status!=='ready'),[initial,setInitial]=useState<ScratchScene|null>(null),[ratings,setRatings]=useState<Record<string,number|null>>(activity.ratings??{}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saveState,setSaveState]=useState('Saved');
  const latest=useRef({text:activity.answer,scene:null as ScratchScene|null}),saved=useRef({text:activity.answer,scene:''}),revision=useRef(activity.revision),drawingRevision=useRef(0),editor=useRef<ScratchEditorHandle|null>(null),queue=useRef(Promise.resolve()),timer=useRef<ReturnType<typeof setTimeout>|null>(null),locked=useRef(false);
  const revealed=activity.status==='revealed'||activity.status==='rated',help=activity.help,checking=busy||help?.state==='running'&&Date.now()-Date.parse(help.at)<20*60*1000;
+ useLearningActivity('review',checking,'review');
  useEffect(()=>{revision.current=Math.max(revision.current,activity.revision);},[activity.revision]);
  const flush=useCallback(async()=>{if(timer.current)clearTimeout(timer.current);const current={text:latest.current.text,scene:latest.current.scene},fingerprint=current.scene?JSON.stringify(current.scene):'';
   const next=queue.current.catch(()=>{}).then(async()=>{if(activity.status!=='ready')return;

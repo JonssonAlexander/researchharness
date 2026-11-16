@@ -1,6 +1,6 @@
 # The theory of learning and teaching
 
-*(Owner theory, formulated 2026-09-24. This document is the canonical theory layer — the system prompts are a compression of it. Scope: the theory itself, and what it demands of the implementation. Not an implementation spec.)*
+*(Owner theory, formulated 2026-09-24. Historical theory for the legacy probe/teach workflow. For conversational and article lessons, [the implemented learning policy](learning-policy.md) supersedes the self-evidence terminal condition and every-step checking requirements below. Feeling fluent is not evidence of retained capability. The historical theory is preserved to explain the legacy prompts, not to govern the new lesson tutor.)*
 
 ## 1. Two knowledge states
 

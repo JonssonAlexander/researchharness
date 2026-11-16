@@ -40,8 +40,12 @@ const snapshot: AtlasSnapshot = {
 async function mount(render: () => React.ReactNode) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	const previous = new Map<string, PropertyDescriptor | undefined>();
+ const fetchBeforeMount=globalThis.fetch;
 	for (const [key, value] of Object.entries({
 		React,
+  requestAnimationFrame:(callback:FrameRequestCallback)=>setTimeout(()=>callback(performance.now()),16),
+  cancelAnimationFrame:(id:ReturnType<typeof setTimeout>)=>clearTimeout(id),
+  fetch:(input:RequestInfo|URL,init?:RequestInit)=>String(input).endsWith('/learning')?Promise.resolve(Response.json({saved:true})):fetchBeforeMount(input,init),
 		window: dom.window,
 		document: dom.document,
 		IS_REACT_ACT_ENVIRONMENT: true,

@@ -1,3 +1,3 @@
-import {articleLibraryResponse} from '@/src/server/article-reading';
+import {articleLibraryResponse} from '@/src/server';
 export const dynamic='force-dynamic';
 export const GET=articleLibraryResponse;

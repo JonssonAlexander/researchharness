@@ -130,6 +130,7 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
 		stores.lessonStore.remove(chatId);
+ stores.learningPolicy.remove(chatId);
         stores.scratchpadStore.remove(chatId);
         stores.readingStore.remove(chatId);
 		discardChatDeliveries(chatId);

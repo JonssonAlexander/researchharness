@@ -1,3 +1,5 @@
+import {learningHistory} from './learning-policy-http.ts';
+import {createLearningPolicyService} from './learning-policy.ts';
 import {readingGuideService} from './reading-guide.ts';
 import {pythonWorkbench} from "./python-workbench.ts";
 import { setFileAccessPolicy } from "../agent/tools/file-access.ts";
@@ -466,6 +468,7 @@ export async function handleChatInput(
 	});
 	const agentOpts: AgentBuildOptions = {
  learning:lesson??undefined,
+ learningPolicy:lesson?createLearningPolicyService(chatId,turnUsageId,{provider:engine.model.provider,id:engine.model.id,thinking:engine.level??"default"},{store:stores.learningPolicy,messages:()=>stores.chatStore.getChat(chatId)?.messages??[],lesson:()=>stores.lessonStore.read(chatId),documents:()=>[...stores.lessonDocuments.list(chatId),...(stores.researchSources.list?.(chatId)??[])],scratchExists:id=>!!stores.scratchpadStore.attempt(chatId,id),conceptExists:id=>stores.atlasStore.read().concepts.some(c=>c.id===id),history:ids=>{const h=learningHistory(chatId,ids);return {...h,retrieval:h.retrieval.slice(-8),challenges:h.challenges.slice(-4)};}}):undefined,
  readingGuide:lesson?readingGuideService(chatId):undefined,
  lessonSources:lesson?lessonDocumentReader(chatId,engine.model.input.includes("image")):undefined,
  challenge:record.challenge?{store:stores.problemStore,minutes:record.challenge.minutes}:undefined,
@@ -490,7 +493,8 @@ export async function handleChatInput(
 	// split, no plan/question/job tools; the whole registry is
 	// problem + conclude. buildAgent stays honored (the test seam is
 	// uniform across kinds).
-	const constructed: TeachingAgent = buildAgent
+	let constructed:TeachingAgent;
+ try{constructed = buildAgent
 		? buildAgent({ ...agentOpts, teaching })
 		: record.kind === "practice"
 			? createPracticeAgent(
@@ -549,6 +553,11 @@ export async function handleChatInput(
 					},
 					agentOpts,
 				);
+ }catch(error){
+  endTurn(chatId);
+  console.error(`[chat ${chatId}] agent/policy initialization failed:`,error);
+  return Response.json({error:"The lesson could not be initialized. Your input is saved; retry after checking local storage."},{status:500});
+ }
 
 	// A test-injected agent gets no usage collector (tests assert the
 	// transcript, not the money channel); when it's ours, usage flows through

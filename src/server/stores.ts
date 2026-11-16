@@ -1,3 +1,4 @@
+import {createLearningPolicyStore} from '../store/learning-policy.ts';
 import {createReadingStore} from "../store/article-reading.ts";
 import {createPythonStore} from "../store/python-workbench.ts";
 import {createResearchSourceStore} from "../store/research-sources.ts";
@@ -23,6 +24,7 @@ import { createAtlasStore } from "../store/atlas.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
+ learningPolicy:createLearningPolicyStore(path.join(PATHS.data,"learning-policy")),
  readingStore:createReadingStore(path.join(PATHS.data,"article-reading")),
  pythonStore:createPythonStore(path.join(PATHS.data,"python-workbench")),
  researchSources:createResearchSourceStore(path.join(PATHS.data,"research-sources")),

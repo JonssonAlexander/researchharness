@@ -95,6 +95,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import {useLearningActivity} from "./use-learning-activity";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -495,6 +496,7 @@ export function Chat({
 	const localStream = status === "submitted" || status === "streaming";
 	const [sourceUploading,setSourceUploading]=useState(false);
  const busy = localStream || turnInFlight;
+ useLearningActivity(lesson?chatId:null,busy,readingOpen?'reading':scratchpadOpen?'scratchpad':'chat');
  const loadChallenge=useCallback(()=>{if(initialChallenge)void problemRequest(`chatId=${encodeURIComponent(chatId)}`).then(v=>setChallengeProblem(v.problems[0]??null)).catch(()=>{});},[chatId,initialChallenge]);
  useEffect(()=>{if(!busy)loadChallenge();},[busy,loadChallenge]);
  useServerEvent("problems-changed",loadChallenge);
