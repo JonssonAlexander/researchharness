@@ -1,0 +1,61 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'research-p1-http-'));
+process.env.LH_DATA_DIR=path.join(root,'data');
+const {stores}=await import('../src/server/stores.ts');
+const {researchIntegrationResponse:respond}=await import('../src/server/research-integration-http.ts');
+const {createResearchWorkspaceService}=await import('../src/server/research-workspaces.ts');
+const {createAtlasStore}=await import('../src/store/atlas.ts');
+const url='http://localhost/api/research/integration';
+const post=(body:unknown,origin='http://localhost')=>respond(new Request(url,{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify(body)}));
+const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
+const id=(p:string)=>`${p}_${randomUUID()}`;
+
+test('review approval is atomic, source-bound, retry-safe and durable',async()=>{
+ try{
+  const store=stores.atlasStore.research,trailId=id('rt'),nodeId=id('rn');
+  store.save({kind:'create',requestId:randomUUID(),id:trailId,rootNodeId:nodeId,title:'Test',question:'Why?',anchorConceptIds:[],primaryConceptId:null,origin:{kind:'manual'}});
+  const project=path.join(root,'project');fs.mkdirSync(project);fs.writeFileSync(path.join(project,'source.py'),'owner source');
+  const ws=createResearchWorkspaceService(store,path.join(root,'data'));
+  const w=ws.bindExisting({path:project,label:'Project',requestId:randomUUID()});
+  store.save({kind:'bind',trailId,workspaceId:w.id,expectedRevision:1,requestId:randomUUID()});ws.provision({workspaceId:w.id,trailId,requestId:randomUUID()});
+  const folder=path.join(project,'.research-atlas','trails',trailId);
+  const record=(value:number)=>JSON.stringify({schemaVersion:1,runId:'run_a',trailId,outcome:'failed',metrics:{error:value}});
+  const writeRun=(value:number)=>{const bytes=record(value);fs.writeFileSync(path.join(folder,'runs','run_a.json'),bytes);fs.writeFileSync(path.join(folder,'runs','index.jsonl'),JSON.stringify({schemaVersion:1,runId:'run_a',path:'run_a.json',hash:sha(bytes)})+'\n');};
+  writeRun(2);
+  assert.equal((await post({kind:'prepare',trailId},'https://elsewhere.example')).status,403);
+  assert.equal((await post({kind:'inspect',reviewId:randomUUID(),sourceId:'run_a'})).status,400);
+  const response=await post({kind:'prepare',trailId});assert.equal(response.status,200,await response.clone().text());
+  const review=await response.json();assert.equal(store.integration.checkpoint(trailId,w.id),null);assert.equal(store.integration.evidence(trailId).length,0);
+  const decisions=review.sources.map((s:{id:string;kind:string})=>({sourceId:s.id,nodeId:s.kind==='run'?null:nodeId,parentNodeId:nodeId,title:s.kind==='run'?'Failed approach':'Context',interpretation:s.kind==='run'?'Recorded error was 2; hypothesis still open.':'User assertion.',uncertainty:'Unverified external record.',included:true}));
+  const apply={kind:'apply',reviewId:review.id,digest:review.digest,decisions,dismiss:false};
+  assert.equal((await post({...apply,digest:'0'.repeat(64)})).status,409);
+  fs.appendFileSync(path.join(folder,'handoff.md'),'\nChanged during review');
+  assert.equal((await post(apply)).status,409);assert.equal(store.integration.checkpoint(trailId,w.id),null);
+  const fresh=await (await post({kind:'prepare',trailId})).json();
+  const approved={...apply,reviewId:fresh.id,digest:fresh.digest};
+  const invalid=approved.decisions.map((d:typeof decisions[number],i:number)=>i===1?{...d,nodeId:id('rn')}:d);
+  assert.equal((await post({...approved,decisions:invalid})).status,400);
+  assert.equal(store.integration.evidence(trailId).length,0);assert.equal(store.integration.checkpoint(trailId,w.id),null);
+  const first=await post(approved);assert.equal(first.status,200,await first.clone().text());const receipt=await first.json();
+  assert.equal((await post(approved)).status,200);assert.equal((await post({...approved,dismiss:true})).status,409);
+  const evidence=store.integration.evidence(trailId);assert.equal(evidence.length,decisions.length);assert.equal(evidence.filter(e=>e.source.kind==='run').length,1);
+  assert.equal(store.integration.evidence(trailId,evidence[0]!.id).length,evidence.length-1);
+  assert.notEqual(evidence.find(e=>e.source.kind==='run')!.nodeId,nodeId);assert.equal(store.detail(trailId).trail.status,'active');
+  const unchanged=await (await post({kind:'prepare',trailId})).json();assert.equal(unchanged.sources.length,0);
+  const reopened=createAtlasStore(path.join(root,'data','atlas.sqlite')).research;
+  assert.equal(reopened.integration.evidence(trailId).length,evidence.length);
+  assert.equal(reopened.integration.checkpoint(trailId,w.id)?.receipt,fresh.id);
+  assert.equal(store.integration.review(fresh.id).status,'applied');assert.ok(receipt.evidenceIds.length);
+  writeRun(3);const revised=await (await post({kind:'prepare',trailId})).json();assert.equal(revised.sources.length,1);
+  const runSource=revised.sources[0];assert.equal(runSource.run.metrics.error,3);
+  assert.equal((await post({kind:'apply',reviewId:revised.id,digest:revised.digest,decisions:[],dismiss:true})).status,200);
+  assert.equal(store.integration.evidence(trailId).length,evidence.length);assert.equal(store.integration.evidence(trailId).find(e=>e.source.kind==='run')!.source.run!.metrics!.error,2);
+  assert.equal(fs.readFileSync(path.join(project,'source.py'),'utf8'),'owner source');
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

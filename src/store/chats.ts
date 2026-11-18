@@ -57,6 +57,7 @@ function createChat(title: string, kind?: "practice", challenge?: import("../cor
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
+	summaryCache.delete(record.id);
 	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
 }
 
@@ -78,21 +79,27 @@ function getChat(id: string): ChatRecord | null {
 	return parsed as ChatRecord;
 }
 
+const summaryCache = new Map<string, { signature: string; summary: ChatSummary }>();
+
 function listChats(): ChatSummary[] {
 	try {
 		fs.mkdirSync(PATHS.chats, { recursive: true });
-		return fs
-			.readdirSync(PATHS.chats)
-			.filter((f) => f.endsWith(".json"))
-			.map((f) => getChat(f.slice(0, -5)))
-			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
-				// Per-record isolation (Wave B): a record whose messages fail the
-				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
-				// zero-back-compat wipe makes these "corrupt") must not blank the
-				// whole sidebar — same isolation getChat's per-file catch gives.
+		const files = fs.readdirSync(PATHS.chats).filter((f) => f.endsWith(".json"));
+		const ids = new Set(files.map((f) => f.slice(0, -5)));
+		for (const id of summaryCache.keys()) if (!ids.has(id)) summaryCache.delete(id);
+		const summaries: ChatSummary[] = [];
+		for (const id of ids) {
+			try {
+				const stat = fs.statSync(chatFile(id), { bigint: true });
+				const signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+				const cached = summaryCache.get(id);
+				if (cached?.signature === signature) { summaries.push(structuredClone(cached.summary)); continue; }
+				summaryCache.delete(id);
+				const record = getChat(id);
+				if (!record) continue;
+				const { messages, tree, turns, extractions, ...summary } = record;
 				try {
-					return {
+					const result = {
 						// turns and extractions stay out of the list payload (list =
 						// summaries; usage aggregates ride the full record, the picker
 						// never needs them).
@@ -109,14 +116,19 @@ function listChats(): ChatSummary[] {
 						// NOT record-derived — the API route merges it (ChatListItem).
 						phase: phaseAt3Lh(messages),
 						pendingQuestion: danglingQuestionOf(messages) !== null,
+						pendingProblem: activeProblemOf(messages) !== null,
 					};
+					summaryCache.set(id, { signature, summary: result });
+					summaries.push(structuredClone(result));
 				} catch (err) {
 					console.error(`[chat ${summary.id}] summary projection failed:`, err);
-					return null;
 				}
-			})
-			.filter((s): s is ChatSummary => s !== null)
-			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+			} catch {
+				// A disappearing or invalid file must not hide other sessions.
+				summaryCache.delete(id);
+			}
+		}
+		return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
 	}
@@ -190,6 +202,7 @@ function renameChat(id: string, title: string): ChatRecord {
 function deleteChat(id: string): boolean {
 	try {
 		fs.unlinkSync(chatFile(id));
+		summaryCache.delete(id);
 		removeLeftoverTemps(chatFile(id));
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;

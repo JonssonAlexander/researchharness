@@ -47,7 +47,7 @@ export function createLearningPolicyService(chatId: string, turnId: string, mode
     function observations() { const events = ledger().events.filter(e => e.type === 'evidence'), replaced = new Set(events.map(e => (e.data as LearningEvidenceInput).supersedes).filter(Boolean)); return events.filter(e => !replaced.has(e.id)); }
     return {
         registerPrompt(prompt, actualModel, tools = "") { if (actualModel)
-            model = actualModel; const promptHash = hash(prompt), toolsHash = hash(tools), app = appRevision(); policyId = `lp_${hash(LEARNING_POLICY_VERSION + promptHash + toolsHash + app).slice(0, 24)}`; const data = { id: policyId, version: LEARNING_POLICY_VERSION, promptHash, toolsHash, appRevision: app, effectivePrompt: prompt, toolConfiguration: tools, description: 'Evidence-aware fluent mathematical teaching; selective independent reconstruction; separate personal evidence and conservative time proxies.' }; append('policy', data, policyId); append('turn', { promptHash }, `turn_${turnId}`); },
+            model = actualModel; const promptHash = hash(prompt), toolsHash = hash(tools), app = appRevision(); policyId = `lp_${hash(LEARNING_POLICY_VERSION + promptHash + toolsHash + app).slice(0, 24)}`; const data = { id: policyId, version: LEARNING_POLICY_VERSION, promptHash, toolsHash, appRevision: app, effectivePrompt: prompt, toolConfiguration: tools, description: 'Coherent multi-concept delivery with fresh bounded lesson context; selective independent reconstruction; separate personal evidence and conservative time proxies.' }; append('policy', data, policyId); append('turn', { promptHash }, `turn_${turnId}`); },
         read(targetId) { const focus = deps.lesson()?.plan.currentNodeId, all = targets(), selected = targetId ? [known(targetId)] : all.filter(t => t.topicIds.includes(focus ?? "")).slice(-3); return { targetIndex: all.map(t => ({ id: t.id, revision: t.revision, task: t.task.slice(0, 140), importance: t.importance, topicIds: t.topicIds })), targets: selected, observations: observations().filter(e => !targetId || (e.data as LearningEvidenceInput).targetId === targetId).slice(-8).map(e => { const v = e.data as LearningEvidenceInput; return { id: e.id, at: e.at, model: e.model, targetId: v.targetId, kind: v.kind, outcome: v.outcome, assistance: v.assistance, delayed: v.delayed, finding: v.finding.slice(0, 600), messageIds: v.messageIds }; }), decisions: ledger().events.filter(e => e.type === 'decision').slice(-3), relatedHistory: deps.history?.([...new Set(selected.flatMap(t => t.conceptIds))]), eligibleSubmissions: eligible().slice(-20).map(m => ({ id: m.id, kind: m.role === 'custom' ? 'submitted-scratchpad' : 'learner-message', at: m.timestamp })), notice: 'Coverage is not understanding. No evidence means unknown; targets and AI assessments are agent planning data, not mathematical truth.' }; },
         target(raw) {
             const t = learningTarget.parse(raw);
@@ -64,9 +64,16 @@ export function createLearningPolicyService(chatId: string, turnId: string, mode
             if (t.prerequisites.includes(t.id) || t.prerequisites.some(id => !targets().some(v => v.id === id)))
                 throw new Error('Prerequisites must be other existing target IDs.');
             const all = [...targets().filter(v => v.id !== t.id), t], byId = new Map(all.map(v => [v.id, v]));
-            function cycle(id: string, seen: Set<string>): boolean { if (seen.has(id))
-                return true; return (byId.get(id)?.prerequisites ?? []).some(p => cycle(p, new Set([...seen, id]))); }
-            if (cycle(t.id, new Set()))
+            const visiting = new Set<string>(), completed = new Set<string>();
+            function cycle(id: string): boolean {
+                if (visiting.has(id)) return true;
+                if (completed.has(id)) return false;
+                visiting.add(id);
+                if ((byId.get(id)?.prerequisites ?? []).some(cycle)) return true;
+                visiting.delete(id); completed.add(id);
+                return false;
+            }
+            if (cycle(t.id))
                 throw new Error('Target prerequisites must be acyclic.');
             if (deps.conceptExists && t.conceptIds.some(id => !deps.conceptExists!(id)))
                 throw new Error('Use existing canonical concept IDs.');
@@ -138,15 +145,15 @@ export function saveLearningActivity(store: LearningPolicyStore, chatId: string,
     const data = activityInput.parse(raw);
     if (Math.abs(at.getTime() - data.end) > 120000)
         throw new Error('Activity interval is stale or clock is out of range.');
-    const old = store.read(chatId), id = `activity_${data.tabId}_${data.id}`, prior = old.events.find(e => e.id === id);
+    const id = `activity_${data.tabId}_${data.id}`, prior = store.event(chatId, id);
     if (prior) {
-        if (JSON.stringify(prior.data) !== JSON.stringify(data))
+        if (prior.type !== 'activity' || JSON.stringify(prior.data) !== JSON.stringify(data))
             throw new Error('Activity receipt conflict.');
         return;
     }
-    const turns = old.events.filter(e => e.type === 'turn').sort((a, b) => a.at.localeCompare(b.at)), cuts = [data.start, ...turns.map(e => Date.parse(e.at)).filter(t => t > data.start && t < data.end), data.end], policySpans = cuts.slice(1).map((end, i) => ({ start: cuts[i]!, end, policyId: turns.filter(e => Date.parse(e.at) <= cuts[i]!).at(-1)?.policyId ?? null }));
+    const turns = store.events(chatId, 'turn').sort((a, b) => a.at.localeCompare(b.at)), cuts = [data.start, ...turns.map(e => Date.parse(e.at)).filter(t => t > data.start && t < data.end), data.end], policySpans = cuts.slice(1).map((end, i) => ({ start: cuts[i]!, end, policyId: turns.filter(e => Date.parse(e.at) <= cuts[i]!).at(-1)?.policyId ?? null }));
     const policyId = new Set(policySpans.map(s => s.policyId)).size === 1 ? policySpans[0]!.policyId : null;
-    store.append(chatId, { id, at: at.toISOString(), type: 'activity', policyId, policySpans, context, data });
+    store.appendActivity(chatId, { id, at: at.toISOString(), type: 'activity', policyId, policySpans, context, data });
 }
 /** Descriptive timeline, grouped by actual action policy; never a causal ranking. */
 export function learningTimeline(store: LearningPolicyStore) {

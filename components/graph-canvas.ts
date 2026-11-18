@@ -51,6 +51,7 @@
  * DOM-free so the file imports cleanly under Node.
  */
 
+import type {ResearchNode, ResearchTrail, ResearchWorkspace} from "@/src/core";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import type { Simulation, SimulationLinkDatum } from "d3-force";
@@ -177,6 +178,8 @@ export interface RendererCallbacks {
 	/** Opt-in draft editor gesture; ordinary canvases retain node dragging. */
 	onToggleConnection?: (sourceId: string, targetId: string) => void;
  onSelectConnection?: (sourceId:string,targetId:string)=>void;
+ onSelectResearch?: (trailId:string,nodeId:string)=>void;
+ onSelectResearchAnchor?: (conceptId:string)=>void;
 	/** A node was clicked (screen position included for card anchoring). */
 	onSelect: (nodeId: string, screenPos: Pt) => void;
 	/** Right-click: the picked node (canvas-relative screen position) or
@@ -536,6 +539,18 @@ export function pickNearest<T extends { id: string; x: number; y: number }>(
 	return best;
 }
 
+/** View-only layout of the selected research tree; canonical graph data is untouched. */
+export function projectResearchNodes(nodes:ResearchNode[],rootId:string,anchor:Pt):{id:string;trailId:string;x:number;y:number;parent:string|null;title:string}[] {
+ const byId=new Map(nodes.map(n=>[n.id,n])), children=new Map<string,ResearchNode[]>();
+ for(const n of nodes)if(n.parentNodeId){const siblings=children.get(n.parentNodeId)??[];siblings.push(n);children.set(n.parentNodeId,siblings);}
+ for(const siblings of children.values())siblings.sort((a,b)=>a.id.localeCompare(b.id));
+ const spans=new Map<string,number>();
+ const span=(id:string):number=>{const cached=spans.get(id);if(cached!==undefined)return cached;const size=Math.max(1,(children.get(id)??[]).reduce((sum,n)=>sum+span(n.id),0));spans.set(id,size);return size;};
+ const result:{id:string;trailId:string;x:number;y:number;parent:string|null;title:string}[]=[];
+ const visit=(id:string,x:number,y:number)=>{const n=byId.get(id);if(!n)return;result.push({id:n.id,trailId:n.trailId,x,y,parent:n.parentNodeId,title:n.title});const kids=children.get(id)??[];let top=y-kids.reduce((sum,c)=>sum+span(c.id),0)*65/2;for(const child of kids){const h=span(child.id)*65;visit(child.id,x+110,top+h/2);top+=h;}};
+ visit(rootId,anchor.x+100,anchor.y-65);return result;
+}
+
 // ─── Canvas text helpers (ported verbatim) ─────────────────────────────────
 
 /** "#rrggbb" + alpha → "rgba(...)". */
@@ -823,7 +838,25 @@ export class GraphCanvasRenderer {
 		this.syncSize();
 	}
 
-	// ── Public API ──
+	// Research geometry is view-only and follows the live concept positions.
+ private researchTrails:ResearchTrail[]=[];
+ private researchDetail:{trail:ResearchTrail;nodes:ResearchNode[];workspace:ResearchWorkspace|null}|null=null;
+ setResearchOverlay(trails:ResearchTrail[],detail:{trail:ResearchTrail;nodes:ResearchNode[];workspace:ResearchWorkspace|null}|null):void {this.researchTrails=trails;this.researchDetail=detail;this.markDirty();}
+ private researchGeometry():{id:string;trailId:string;x:number;y:number;parent:string|null;title:string}[] {
+  const detail=this.researchDetail, anchor=detail?.trail.primaryConceptId && this.nodeById.get(detail.trail.primaryConceptId);
+  if(!detail||!anchor)return [];
+  return projectResearchNodes(detail.nodes,detail.trail.rootNodeId,anchor);
+ }
+ private drawResearch(ctx:CanvasRenderingContext2D,k:number):void {
+  ctx.save();ctx.globalAlpha=1;ctx.strokeStyle='#22a45d';ctx.fillStyle='#22a45d';ctx.lineWidth=2/k;
+  const anchors=new Set(this.researchTrails.flatMap(t=>t.linkedConceptIds??t.anchorConceptIds));
+  for(const id of anchors){const n=this.nodeById.get(id);if(!n||this.visible&&!this.visible.has(id))continue;const r=this.nodeWorld(id).nodeR;ctx.beginPath();ctx.arc(n.x+r*.8,n.y-r*.8,4/k,0,Math.PI*2);ctx.fill();}
+  const detail=this.researchDetail, nodes=this.researchGeometry(),anchor=detail?.trail.primaryConceptId&&this.nodeById.get(detail.trail.primaryConceptId);
+  for(const n of nodes){const parent=n.parent?nodes.find(p=>p.id===n.parent):anchor;if(parent){ctx.beginPath();ctx.moveTo(parent.x,parent.y);ctx.lineTo(n.x,n.y);ctx.stroke();}ctx.fillRect(n.x-5/k,n.y-5/k,10/k,10/k);if(zoomRatioOf(this.kFit,k)<=this.settings!.labelZoom){ctx.font=`${11/k}px ${this.data?.fontFamily??'sans-serif'}`;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(`? ${n.title.slice(0,40)}`,n.x+8/k,n.y);}}
+  if(detail&&nodes.length){ctx.setLineDash([4/k,4/k]);const root=nodes[0]!;for(const id of detail.trail.anchorConceptIds){if(id===detail.trail.primaryConceptId)continue;const a=this.nodeById.get(id);if(a){ctx.beginPath();ctx.moveTo(root.x,root.y);ctx.lineTo(a.x,a.y);ctx.stroke();}}for(const n of nodes){const source=detail.nodes.find(v=>v.id===n.id);for(const id of source?.relatedConceptIds??[]){const a=this.nodeById.get(id);if(a){ctx.beginPath();ctx.moveTo(n.x,n.y);ctx.lineTo(a.x,a.y);ctx.stroke();}}}}
+  ctx.restore();
+ }
+ // ── Public API ──
 
 	setData(data: CanvasData): void {
 		if(this.layoutPreview){
@@ -1149,7 +1182,12 @@ export class GraphCanvasRenderer {
 		// used to open under the menu).
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
-		const node = this.pickAt(pos.x, pos.y);
+        const {x:tx,y:ty,k}=this.transform;
+        const researchNode=pickNearest(this.researchGeometry(),(pos.x-tx)/k,(pos.y-ty)/k,10/k);
+        if(researchNode&&this.callbacks.onSelectResearch){e.preventDefault();this.downPos=null;this.callbacks.onSelectResearch(researchNode.trailId,researchNode.id);return;}
+        const marker=this.researchTrails.flatMap(t=>t.linkedConceptIds??t.anchorConceptIds).find(id=>{const n=this.nodeById.get(id);if(!n)return false;const r=this.nodeWorld(id).nodeR;return Math.hypot((n.x+r*.8)*k+tx-pos.x,(n.y-r*.8)*k+ty-pos.y)<8;});
+        if(marker&&this.callbacks.onSelectResearchAnchor){e.preventDefault();this.downPos=null;this.callbacks.onSelectResearchAnchor(marker);return;}
+        const node = this.pickAt(pos.x, pos.y);
 		if(e.shiftKey&&node&&this.callbacks.onToggleConnection){
 			e.preventDefault();this.downPos=null;this.zoomTarget=null;
 			this.connectionDrag={sourceId:node.id,pointerId:e.pointerId,position:pos};
@@ -2154,6 +2192,7 @@ export class GraphCanvasRenderer {
 			}
 		}
 
+        this.drawResearch?.(ctx,k);
 		// 8. Cluster region labels — THE TOPMOST layer (user 2026-09-16:
 		// node labels and hover names drew over them before; region labels
 		// must never be occluded by content). Inverse-gated on THE zoom

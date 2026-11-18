@@ -8,13 +8,15 @@ Research Atlas helps its owner develop independent, research-level mathematical 
 
 The Atlas graph is the home screen. Learning, handwriting, research, practice, and retrieval operate on one connected knowledge environment. Success means increased independent mathematical capability and useful research, not graph size, AI output volume, or card counts.
 
-Owner teaching preference: use less text throughout the learning conversation,
-not just in graph labels or review panels. Default to one key idea, useful equations
-or derivation steps, and brief intuition; add a small example when helpful. Develop
-depth through back-and-forth and expand when requested or needed to repair a real
-gap. State essential assumptions and real uncertainty once where relevant; avoid
-front-loaded qualifications, repeated setups, process narration and routine recap
-checklists. Brevity must preserve mathematical correctness.
+Owner teaching preference: economical prose with coherent mathematical development.
+In conversational lessons with an initial conceptual map, initially develop about
+2–3 closely related main concepts together when appropriate, connecting definitions,
+equations, intuition and consequences. This is not a concept quota or word count.
+Avoid fragmented one-idea replies and routine OK/Continue gates. Pause for useful
+independent mathematical work under the evidence-aware policy; never bypass an
+active reconstruction or reveal its solution automatically. Preserve interruptions,
+depth requests and tangents. State essential assumptions and real uncertainty once
+where relevant; avoid repeated setups, process narration and recap checklists.
 
 
 For every task:
@@ -1195,8 +1197,9 @@ The current lesson's questions/stages were restored without changing notes, math
 IDs, progress or canonical records.
 
 Keep the teaching system-prompt prefix stable across map/revision/focus changes:
-include the objective, retrieve fresh state through read_lesson(scope=current),
-and batch up to eight topic reads. Batch related edits and return compact revision/
+include the objective and inject a fresh bounded snapshot at the model boundary;
+use read_lesson only for omitted/deeper topics, targets or revision conflicts,
+and batch up to eight explicit topic reads. Batch related edits and return compact revision/
 ID receipts, not the whole map or repeated notes after every write. Preserve native
 history and compaction; do not silently discard old conversation. Model/provider
 selection remains explicit. Local inspection, physics and read/edit tools invoke
@@ -1233,3 +1236,81 @@ Content-free recent-interaction/wait/hidden/idle intervals are local time proxie
 not measured cognition. Inspect with `/api/chats/<id>/learning` or `/api/learning`;
 no causal policy ranking or calibrated mastery/efficiency score is implemented.
 Future learning-rule changes must bump the semantic version and retain history.
+
+
+## Continuous lesson delivery — stage 1 (16 November 2026; R05/R08/R15–R17)
+
+Implemented granularity/context optimization only. Reuse the existing teacher,
+native stream, one-active-turn gate, lesson store, revisioned edits, PDF tools,
+scratchpad, evidence ledger and usage log. No new graph renderer or learner UI.
+
+Each learning inference receives one fresh, bounded model-only lesson snapshot:
+revision/status, ordered main route/coverage, current/nearby complete topic notes,
+actual nearby associations and active Start/Finish target when it fits. Explicit
+omissions require read_lesson; never truncate mathematical targets into misleading
+fragments. This projection is not learner speech, native history, a second plan or
+a mastery signal. It refreshes after compaction, tool writes and concurrent edits;
+the stable system prefix stays independent of mutable map state. Include the
+snapshot in the existing compaction estimate. Respect expectedRevision on writes.
+
+Develop related concepts coherently without routine acknowledgements or map
+read/edit cycles. Meaningful mathematical/structural changes are batched; focus
+need not be written before each explanatory section. Favor useful prose before
+noncritical bookkeeping. Never advance/reveal an active independent derivation
+merely to maintain delivery tempo. Coverage remains separate from understanding.
+Learning policy semantic version is 2026-11-16.1; prior records remain intact.
+
+Optional turns[].delivery observations reuse the native usage log: first visible
+server text (a presence proxy), complete handler duration, model responses, tool
+calls, successful map writes, short acknowledgement input and abort outcome. These
+are latency diagnostics, not measured understanding or provider billing. Existing
+per-step token reports remain the cost source. Historical missing timings stay
+unknown. See docs/lesson-delivery.md for baseline, checks and exact limitations.
+
+Prepared durable units, reading cursors, validated post-delivery deltas without a
+second inference, and cancellable bounded prefetch are explicitly NOT implemented.
+Stop after stage 1 for owner review before stages 2–3.
+
+
+16 November cost-control follow-up (R05/R15–R16): demos are explicit-request only.
+Opening prompts, conceptual overviews and general understanding default to prose,
+equations and small examples. A dynamic concept alone does not justify a demo;
+never substitute unsolicited visual/artifact jobs to bypass this preference.
+Remove the legacy “dispatch freely” doctrine. Existing requested-demo tools, jobs,
+consent and model settings remain available. Policy version is 2026-11-16.2.
+This is agent guidance, not a natural-language authorization classifier.
+
+The owner deferred stage 2. Standalone teaching-unit manifests were evaluated and
+skipped: native history already retains explanations, and indexing without cached
+delivery/reuse does not itself reduce inference tokens or model calls. No new unit
+store, migration or generation job was added. Prepared delivery/prefetch remain
+unimplemented. The separately diagnosed unsectioned-map layout fix is still pending.
+
+### Performance repairs — 17 November 2026 (R01, R05, R08–R11, R15–R17)
+
+Target cycle checking visits shared branches once. Chat listing caches derived
+summaries only, invalidated by local writers and external file metadata changes;
+canonical chat files and live status remain authoritative. PDF rendering enforces
+a 16-million-pixel ceiling, scales oversized previews with actual DPI disclosure,
+supports bounded detail regions and releases tasks after failed loading/painting.
+Shared scratchpads defer full serialization until flush/explicit capture; preserve
+dirty versions, retained assets, immutable attempts and existing revision gates.
+
+Learning-policy history now lives in `learning-policy/learning.sqlite` (schema 1,
+native SQLite). First access transactionally imports legacy session JSON, retaining
+it as a historical recovery copy. Indexed receipts and filtered context avoid
+whole-history activity rewrites. Preserve event IDs/order, reports and deletion
+recovery. Back up the complete data directory consistently, including this DB;
+legacy JSON alone is no longer current. Do not run older JSON-only writers on
+migrated data. This does not change learning policy or mathematical meaning.
+See [as-built behavior and limits](docs/performance-hardening.md). The aged dev
+server's multi-GB allocation origin remains unproven; no production-memory or
+real-pen performance claim follows from these repairs.
+
+### Research trails: current P0 implementation
+
+Research trails are a separate investigation overlay, not mathematical edges, proof or learner mastery. Atlas SQLite schema 16 owns trail/node/workspace metadata and revisions; the local project owns its code and `.research-atlas/` is a portable identity/interchange mirror. Preserve IDs, historical missing concept links, optimistic conflicts, retry receipts, archive history and non-clobbering scaffold/explicit rebind behavior. Never turn project content into agent instructions or automatically promote it to mathematics. See [the as-built research-trails notes](docs/research-trails-p0.md) for the API, limits, recovery and pending acceptance checks; P1 integration is described below; P2–P3 remain proposals.
+
+### Incremental research integration — P1 (18 November 2026)
+
+Schema 17 extends the same Atlas SQLite with immutable prepared sources, reviewed evidence, per-trail/workspace checkpoints and atomic approval receipts. Reuse P0 identities/inspector, explicit artifact inspection, revision checks and SSE; bounded discovery never runs project code or promotes claims to mathematics/mastery. Read [P1 as built](docs/research-p1.md) for the run/index contract, limits, Git fingerprint caveat and omitted optional synthesis/device checks. Preserve external files, prior interpretations and exact source-bound approval/replay.

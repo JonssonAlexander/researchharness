@@ -1,3 +1,4 @@
+import type { ResearchStore } from "./research-trails.ts";
 import type {LessonReviewStore,LessonArtifact} from "./lesson-integration.ts";
 import {drawingLinkCommand,nodeEmphasis,drawingConnections,type DrawingLink} from "./atlas-drawing.ts";
 import type {AtlasSyncStore,SyncAssociation} from "./atlas-sync.ts";
@@ -165,6 +166,7 @@ export interface AtlasSnapshot {
 	subjects: AtlasSubject[];
 }
 export interface AtlasStore {
+	research: ResearchStore;
  retrieval:import("./retrieval.ts").ReviewStore;
  lessonReviews:LessonReviewStore;
 	sync:AtlasSyncStore;

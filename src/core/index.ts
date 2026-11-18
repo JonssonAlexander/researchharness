@@ -129,3 +129,7 @@ export * from "./python-workbench.ts";
 export * from "./article-reading.ts";
 
 export * from "./reading-guide.ts";
+
+export * from "./research-trails.ts";
+
+export * from './research-integration.ts';

@@ -22,7 +22,7 @@ export async function learningPolicyResponse(request: Request, chatId: string) {
         if (chatId !== 'review' && !stores.lessonStore.read(chatId))
             throw new AtlasError('Learning session not found.', 404);
         const plan=stores.lessonStore.read(chatId)?.plan,topicId=plan?.currentNodeId??null,derivationId=plan?.activeDerivationId??null;
-        const targets=new Map(stores.learningPolicy.read(chatId).events.filter(e=>e.type==='target').map(e=>{const t=learningTarget.parse(e.data);return [t.id,t] as const;}));
+        const targets=new Map(stores.learningPolicy.events(chatId,'target').map(e=>{const t=learningTarget.parse(e.data);return [t.id,t] as const;}));
         const targetIds=[...targets.values()].filter(t=>topicId&&t.topicIds.includes(topicId)).map(t=>t.id);
         saveLearningActivity(stores.learningPolicy, chatId, input.interval,undefined,{topicId,derivationId,targetIds,basis:'Estimated from saved lesson focus at interval receipt; not observed cognitive focus.'});
         return Response.json({ saved: true });

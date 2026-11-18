@@ -127,14 +127,14 @@ const RESEARCH_DESCRIPTION =
     "Do not use generic research for internal mathematical reasoning.";
 const DEMO_DESCRIPTION =
 	"Dispatch a background sub-agent that BUILDS and headlessly TESTS an interactive teaching instrument — a single-file HTML " +
-	"demo (parameter sweep, simulation, animation, sampling) rendered live in the lesson. Use it when the concept is DYNAMIC: " +
-	"something to sweep, animate, or sample is better experienced than described. " +
+	"demo (parameter sweep, simulation, animation, sampling) rendered live in the lesson. Use only when the learner explicitly requests an interactive demo, animation, or simulation artifact. " +
+	"Do not dispatch for an opening prompt, conceptual overview, general understanding, or merely because a concept is dynamic. Explain with prose and equations by default. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the tested demo arrives later " +
 	"as a new message. Write a precise brief: concept, controls, interactions, style.";
 const VISUAL_DESCRIPTION =
 	"Dispatch a background sub-agent that hand-authors ONE precise SVG figure, renders it, LOOKS at the render, and iterates " +
 	"until correct. Use it for exact spatial pictures auto-layout diagrams can't do: coordinate geometry, number lines, vectors, " +
-	"function plots, physical layouts. For flows/relations/taxonomies write mermaid inline instead. " +
+	"function plots, physical layouts. Do not substitute a costly visual job for an unsolicited demo in introductory or general conceptual explanations; prefer prose, equations or a small inline diagram. For flows/relations/taxonomies write mermaid inline instead. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the verified figure arrives later " +
 	"as a new message.";
 const PDF_DESCRIPTION =

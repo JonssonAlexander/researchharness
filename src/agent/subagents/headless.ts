@@ -46,7 +46,10 @@ export interface RenderSvgOptions {
 	height?: number;
 }
 
+export interface PdfRegion { x: number; y: number; width: number; height: number }
+
 export interface RenderPdfOptions {
+ region?: PdfRegion;
  /** Optional caller resource bound for uploaded pages. */
  maxPixels?:number;
 	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200. */
@@ -56,6 +59,7 @@ export interface RenderPdfOptions {
 export interface RenderedPdfPage {
 	page: number;
 	png: Buffer;
+ dpi?: number;
 }
 
 export interface HeadlessApi {
@@ -463,6 +467,9 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
 
 // ─── PDF page rasterization (pdfjs paints, Skia hosts) ─────────────────
 
+/** Test seam for observing the lifetime of a native PDF loading task. */
+export const pdfLoadingTaskObserver: { current?: (task: { destroy(): Promise<void> }) => void } = {};
+
 /** Render PDF pages to PNGs — the sources-v0 pdf-reader's eyes.
  *
  *  History: pdfjs ALWAYS painted the pages (scale = dpi/72, the skill's
@@ -477,6 +484,11 @@ async function renderPdfPages(
 	opts: RenderPdfOptions = {},
 ): Promise<RenderedPdfPage[]> {
 	const dpi = opts.dpi ?? 150;
+ const requestedMaxPixels = opts.maxPixels ?? 16_000_000;
+ const maxPixels = Math.min(requestedMaxPixels, 16_000_000);
+ if (!Number.isFinite(dpi) || dpi <= 0 || !Number.isFinite(requestedMaxPixels) || maxPixels < 1) throw new Error("Invalid PDF render DPI or pixel limit.");
+ const region = opts.region ?? { x: 0, y: 0, width: 1, height: 1 };
+ if (![region.x, region.y, region.width, region.height].every(Number.isFinite) || region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1) throw new Error("Invalid PDF page region.");
 	// NATIVE CANVAS (Wave E, owner 2026-10-10): pdfjs paints into
 	// @napi-rs/canvas in this process — no browser involved. pdfjs-dist v6's
 	// own Node integration IS @napi-rs/canvas (its optionalDependency: the
@@ -491,15 +503,30 @@ async function renderPdfPages(
 	// without it pdfjs renders non-embedded standard fonts via fallback);
 	// verbosity 0 = errors only (JBIG2 noise on scanned PDFs).
 	const loadingTask = pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
-	const doc = await loadingTask.promise;
 	try {
+  pdfLoadingTaskObserver.current?.(loadingTask);
+  const doc = await loadingTask.promise;
 		const out: RenderedPdfPage[] = [];
 		for (const pageNo of pages) {
 			if (pageNo < 1 || pageNo > doc.numPages) continue;
 			const pg = await doc.getPage(pageNo);
-			const vp = pg.getViewport({ scale: dpi / 72 });
-			if(opts.maxPixels&&vp.width*vp.height>opts.maxPixels)throw new Error("PDF page exceeds the image size limit.");
-			const canvas = createCanvas(Math.ceil(vp.width), Math.ceil(vp.height));
+			let scale = dpi / 72;
+   let vp = pg.getViewport({ scale });
+   if (!Number.isFinite(vp.width) || !Number.isFinite(vp.height) || vp.width <= 0 || vp.height <= 0) throw new Error("Invalid PDF page dimensions.");
+   let width = Math.ceil(vp.width * region.width), height = Math.ceil(vp.height * region.height);
+   if (!Number.isFinite(width * height)) throw new Error("Invalid PDF page dimensions.");
+   if (width * height > maxPixels) {
+    scale *= Math.min(Math.sqrt(maxPixels / (width * height)), maxPixels / width, maxPixels / height);
+    vp = pg.getViewport({ scale });
+    width = Math.ceil(vp.width * region.width); height = Math.ceil(vp.height * region.height);
+    while (width * height > maxPixels) {
+     scale *= 0.999;
+     vp = pg.getViewport({ scale });
+     width = Math.ceil(vp.width * region.width); height = Math.ceil(vp.height * region.height);
+    }
+   }
+   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) throw new Error("Invalid PDF page dimensions.");
+			const canvas = createCanvas(width, height);
 			const ctx = canvas.getContext("2d");
 			// pdfjs's render types speak the DOM context; @napi-rs/canvas's
 			// context is the same 2D API implemented over Skia.
@@ -507,9 +534,11 @@ async function renderPdfPages(
 				canvasContext: ctx as unknown as CanvasRenderingContext2D,
 				canvas: canvas as unknown as HTMLCanvasElement,
 				viewport: vp,
+    transform: [1, 0, 0, 1, -vp.width * region.x, -vp.height * region.y],
 			}).promise;
 			out.push({
 				page: pageNo,
+    dpi: scale * 72,
 				// Skia-encoded PNG → providerSafePng for the same single-IDAT
 				// canonical form every other vision-model image gets.
 				png: providerSafePng(canvas.toBuffer("image/png")),

@@ -24,6 +24,7 @@
 
 /** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
 export interface ServerEvents {
+ "research-trails-changed":Record<string,never>;
  "reading-changed":{chatId:string};
  "reading-guide-changed":{chatId:string};
  "problems-changed":Record<string,never>;
@@ -64,6 +65,7 @@ export type ServerEventType = keyof ServerEvents;
  *  name (types are erased; this list is the single source of truth for
  *  what the SSE channel can carry). */
 export const SERVER_EVENT_TYPES = [
+ "research-trails-changed",
  "reading-changed",
  "reading-guide-changed",
  "review-changed",

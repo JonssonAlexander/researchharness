@@ -20,6 +20,7 @@ import {
 	fitTransform,
 	labelAlpha,
 	pickNearest,
+ projectResearchNodes,
 	wrapRegionLabel,
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
@@ -441,4 +442,24 @@ test("proof highlighting never paints an implication junction as an empty claim 
    if(subtleHighlight)assert(strokes.every(width=>width===.5),"focus preserves the thin edge width");
   }
  }finally{if(previous)Object.defineProperty(globalThis,"window",previous);else Reflect.deleteProperty(globalThis,"window");}
+});
+
+
+test("research overlay renders and picks all supported nodes without changing the canonical graph",()=>{
+ const canonical={nodes:[{id:"ac_anchor",x:20,y:30},{id:"ac_other",x:70,y:80}],edges:[{from:"ac_anchor",to:"ac_other"}]};
+ const before=structuredClone(canonical),trailId="rt_test",rootId="rn_000";
+ const nodes=Array.from({length:500},(_,i)=>({id:`rn_${String(i).padStart(3,"0")}`,trailId,parentNodeId:i===0?null:i<32?`rn_${String(i-1).padStart(3,"0")}`:rootId,kind:"question" as const,title:`Question ${i}`,body:"",relatedConceptIds:[],revision:1,createdAt:"",updatedAt:"",missingConceptIds:[]}));
+ const geometry=projectResearchNodes(nodes,rootId,canonical.nodes[0]!);
+ assert.equal(geometry.length,500);
+ const deep=geometry.find(n=>n.id==="rn_031")!,late=geometry.find(n=>n.id==="rn_499")!;
+ assert(deep&&late);assert.equal(pickNearest(geometry,deep.x,deep.y,10)?.id,deep.id);assert.equal(pickNearest(geometry,late.x,late.y,10)?.id,late.id);
+ const rectangles:number[][]=[];
+ const ctx=new Proxy({fillRect:(...args:number[])=>rectangles.push(args)},{get:(target,key)=>key in target?target[key as keyof typeof target]:()=>{}});
+ const detail={trail:{primaryConceptId:"ac_anchor",anchorConceptIds:["ac_anchor"]},nodes};
+ const view={researchTrails:[],researchDetail:detail,nodeById:new Map(canonical.nodes.map(n=>[n.id,n])),researchGeometry:()=>geometry,kFit:1,settings:{labelZoom:8},data:{fontFamily:"sans-serif"}};
+ (GraphCanvasRenderer.prototype as unknown as {drawResearch:(this:unknown,ctx:unknown,k:number)=>void}).drawResearch.call(view,ctx,1);
+ assert.equal(rectangles.length,500);
+ assert(rectangles.some(([x,y])=>x===deep.x-5&&y===deep.y-5));
+ assert(rectangles.some(([x,y])=>x===late.x-5&&y===late.y-5));
+ assert.deepEqual(canonical,before);
 });

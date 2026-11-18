@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { activityInput, decideLearning, decisionContext, evidenceInput, learningTarget, summarizeActivity, type DecisionContext, type LearningEvent } from '../src/core/learning-policy.ts';
 import { createLearningPolicyStore } from '../src/store/learning-policy.ts';
 
@@ -69,17 +70,75 @@ test('learning ledger survives restart and identical event append is idempotent'
  }finally{f.cleanup();}
 });
 
-test('event identity conflicts fail and atomic write failure preserves the prior ledger',()=>{
+test('event conflicts and transactional failures preserve the prior ledger',()=>{
  const f=temporaryStore();try{
   f.store.append('chat_1',event('decision_1'));
   assert.throws(()=>f.store.append('chat_1',{...event('decision_1'),data:{action:'connect'}}),/identity conflict/);
-  const before=fs.readFileSync(path.join(f.root,'chat_1.json'),'utf8');
-  const original=fs.renameSync;
-  fs.renameSync=function(from,to){if(to===path.join(f.root,'chat_1.json'))throw Object.assign(new Error('simulated disk failure'),{code:'EIO'});return original.call(fs,from,to);};
-  try{assert.throws(()=>f.store.append('chat_1',event('decision_2')),/simulated disk failure/);}finally{fs.renameSync=original;}
-  assert.equal(fs.readFileSync(path.join(f.root,'chat_1.json'),'utf8'),before);
+  const db=new DatabaseSync(path.join(f.root,'learning.sqlite'));db.exec("CREATE TRIGGER fail_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'simulated disk failure'); END");db.close();
+  assert.throws(()=>f.store.append('chat_1',event('decision_2')),/simulated disk failure/);
   assert.equal(f.store.read('chat_1').revision,1);
-  assert.deepEqual(fs.readdirSync(f.root),['chat_1.json']);
+ }finally{f.cleanup();}
+});
+
+test('legacy import resumes after failure, preserves source and survives backup and deletion',async()=>{
+ const f=temporaryStore();try{
+  const events=[event('decision_1'),{...event('activity_a'),type:'activity' as const,data:{id:'a',tabId:'tab',start:0,end:1000,state:'idle',surface:'chat'}}];
+  const original=JSON.stringify({schemaVersion:1,revision:2,events});fs.writeFileSync(path.join(f.root,'chat_1.json'),original);
+  f.store.read('initialize');let db=new DatabaseSync(path.join(f.root,'learning.sqlite'));
+  db.exec("CREATE TRIGGER fail_import BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'interrupted import'); END");db.close();
+  assert.throws(()=>f.store.read('chat_1'),/interrupted import/);assert.equal(fs.readFileSync(path.join(f.root,'chat_1.json'),'utf8'),original);
+  db=new DatabaseSync(path.join(f.root,'learning.sqlite'));db.exec('DROP TRIGGER fail_import');db.close();
+  assert.deepEqual(f.store.read('chat_1').events,events);assert.deepEqual(createLearningPolicyStore(f.root).read('chat_1').events,events);
+  const restored=path.join(f.root,'restore');fs.mkdirSync(restored);db=new DatabaseSync(path.join(f.root,'learning.sqlite'));await backup(db,path.join(restored,'learning.sqlite'));db.close();
+  assert.deepEqual(createLearningPolicyStore(restored).read('chat_1').events,events);
+  f.store.remove('chat_1');assert.equal(f.store.read('chat_1').revision,0);assert(!fs.existsSync(path.join(f.root,'chat_1.json')));
+ }finally{f.cleanup();}
+});
+
+test('corrupt legacy and future database schemas fail without replacing data',()=>{
+ const f=temporaryStore();try{
+  const file=path.join(f.root,'chat_1.json');fs.writeFileSync(file,'{"schemaVersion":2,"revision":0,"events":[]}');
+  assert.throws(()=>f.store.read('chat_1'),/Unsupported learning ledger/);assert.match(fs.readFileSync(file,'utf8'),/schemaVersion/);
+  const db=new DatabaseSync(path.join(f.root,'learning.sqlite'));db.exec('PRAGMA user_version=2');db.close();
+  assert.throws(()=>f.store.read('chat_1'),/Unsupported learning database version/);
+ }finally{f.cleanup();}
+});
+
+test('failed deletion preserves recoverable legacy or migrated history',()=>{
+ const f=temporaryStore();try{
+  f.store.read('initialize');
+  const file=path.join(f.root,'chat_1.json'),original=JSON.stringify({schemaVersion:1,revision:1,events:[event('decision_1')]});
+  fs.writeFileSync(file,original);
+  const db=new DatabaseSync(path.join(f.root,'learning.sqlite'));db.exec('BEGIN IMMEDIATE');
+  try{assert.throws(()=>f.store.remove('chat_1'),/locked/);assert.equal(fs.readFileSync(file,'utf8'),original);}finally{db.exec('ROLLBACK');db.close();}
+  const remove=fs.rmSync;fs.rmSync=((name,...args)=>{if(name===file)throw new Error('unlink failed');return remove(name,...args);}) as typeof fs.rmSync;
+  try{assert.throws(()=>f.store.remove('chat_1'),/unlink failed/);}finally{fs.rmSync=remove;}
+  assert.equal(fs.readFileSync(file,'utf8'),original);
+  assert.deepEqual(createLearningPolicyStore(f.root).read('chat_1').events,[event('decision_1')]);
+ }finally{f.cleanup();}
+});
+
+test('database permissions are private and corrupt databases fail closed',()=>{
+ const f=temporaryStore();try{
+  f.store.append('chat_1',event('decision_1'));
+  const file=path.join(f.root,'learning.sqlite');
+  assert.equal(fs.statSync(f.root).mode & 0o777,0o700);
+  assert.equal(fs.statSync(file).mode & 0o777,0o600);
+  fs.writeFileSync(file,'damaged database');
+  assert.throws(()=>f.store.read('chat_1'));
+  assert.equal(fs.readFileSync(file,'utf8'),'damaged database');
+ }finally{f.cleanup();}
+});
+
+test('activity receipt is idempotent and rejects a conflicting payload',async()=>{
+ const {saveLearningActivity}=await import('../src/server/learning-policy.ts');const f=temporaryStore();try{
+  const activity={id:'a',tabId:'tab',start:1000,end:2000,state:'idle',surface:'chat'};
+  const read=f.store.read;f.store.read=()=>{throw new Error('Activity must not read the ledger');};
+  saveLearningActivity(f.store,'chat_1',activity,new Date(2000));f.store.read=read;
+  saveLearningActivity(f.store,'chat_1',activity,new Date(2000));
+  assert.equal(f.store.read('chat_1').revision,1);
+  assert.throws(()=>saveLearningActivity(f.store,'chat_1',{...activity,state:'interaction'},new Date(2000)),/receipt conflict/);
+  assert.equal(f.store.read('chat_1').revision,1);
  }finally{f.cleanup();}
 });
 

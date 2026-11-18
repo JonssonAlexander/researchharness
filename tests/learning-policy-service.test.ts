@@ -9,7 +9,7 @@ import {activityStateAt,interactionExpiryCut} from '../components/use-learning-a
 
 function memoryStore():LearningPolicyStore{
  const ledgers=new Map<string,LearningLedger>();
- return {list:()=>[...ledgers.keys()],remove:id=>{ledgers.delete(id);},read:id=>structuredClone(ledgers.get(id)??{schemaVersion:1,revision:0,events:[]}),append(id,event){const old=ledgers.get(id)??{schemaVersion:1 as const,revision:0,events:[]};const prior=old.events.find(e=>e.id===event.id);if(prior){if(JSON.stringify(prior)!==JSON.stringify(event))throw new Error('identity conflict');return structuredClone(old);}const next={...old,revision:old.revision+1,events:[...old.events,structuredClone(event)]};ledgers.set(id,next);return structuredClone(next);}};
+ return {events:(id,type)=>structuredClone((ledgers.get(id)?.events??[]).filter(e=>e.type===type)),event:(id,eventId)=>structuredClone(ledgers.get(id)?.events.find(e=>e.id===eventId)),appendActivity(id,event){this.append(id,event);},list:()=>[...ledgers.keys()],remove:id=>{ledgers.delete(id);},read:id=>structuredClone(ledgers.get(id)??{schemaVersion:1,revision:0,events:[]}),append(id,event){const old=ledgers.get(id)??{schemaVersion:1 as const,revision:0,events:[]};const prior=old.events.find(e=>e.id===event.id);if(prior){if(JSON.stringify(prior)!==JSON.stringify(event))throw new Error('identity conflict');return structuredClone(old);}const next={...old,revision:old.revision+1,events:[...old.events,structuredClone(event)]};ledgers.set(id,next);return structuredClone(next);}};
 }
 const concept='ac_11111111-1111-4111-8111-111111111111';
 const lesson=():LearningSession=>({schemaVersion:1,revision:1,status:'active',plan:{objective:'Understand the theorem',nodes:[{id:'topic_1',title:'The theorem',conceptId:concept,tangent:false}],connections:[],currentNodeId:'topic_1',derivations:[{id:'deriv_1',nodeId:'topic_1',title:'Main argument',start:'Assume x > 0.',finish:'Show the inequality.',status:'working'}],activeDerivationId:'deriv_1'}});
@@ -122,4 +122,15 @@ test('activity intervals reject stale events and deduplicate or conflict by stab
  assert.throws(()=>saveLearningActivity(store,'chat_1',{...base,state:'idle'},at),/receipt conflict/);
  assert.throws(()=>saveLearningActivity(store,'chat_1',{...base,id:'2'},new Date(base.end+121000)),/stale/);
  assert.equal(learningReport(store,'chat_1').summary.time.milliseconds.interaction,500);
+});
+
+test('shared prerequisite branches are visited without enumerating paths',()=>{
+ const f=fixture(),s=f.service();
+ for(let i=0;i<80;i++) s.target(f.target(`target_${i}`,1,i<2?[]:[`target_${i-1}`,`target_${i-2}`]));
+ const before=f.store.read('chat_1');
+ assert.throws(()=>s.target(f.target('target_0',2,['target_79'])),/acyclic/);
+ assert.throws(()=>s.target(f.target('target_0',2,['target_0'])),/Prerequisites/);
+ assert.throws(()=>s.target(f.target('target_0',3)),/revision conflict/);
+ assert.throws(()=>s.target(f.target('target_0',2,['missing'])),/Prerequisites/);
+ assert.deepEqual(f.store.read('chat_1'),before);
 });

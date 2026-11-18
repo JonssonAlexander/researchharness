@@ -9,8 +9,10 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { describe, it } from "node:test";
-import { realHeadless } from "../src/agent/subagents/headless.ts";
+import { realHeadless, pdfLoadingTaskObserver } from "../src/agent/subagents/headless.ts";
+import { tinyPdf } from "./helpers/tiny-pdf.ts";
 import { standardFontsDir } from "../src/agent/subagents/pdf-ops.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
@@ -81,4 +83,101 @@ describe("native pdf_render (pdfjs paints, @napi-rs/canvas hosts)", () => {
 		const pages = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 72 });
 		assert.equal(pages.length, 1);
 	});
+});
+
+describe("bounded PDF rendering", () => {
+ it("downsamples to the default and stricter pixel ceilings and reports DPI", async () => {
+  const [page] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 1000 });
+  assert.ok(page);
+  const facts = pngFacts(page.png);
+  assert.ok(facts.w * facts.h <= 16_000_000);
+  assert.ok(page.dpi! < 1000);
+  const [small] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 150, maxPixels: 100_000 });
+  assert.ok(small);
+  const smallFacts = pngFacts(small.png);
+  assert.ok(smallFacts.w * smallFacts.h <= 100_000);
+  assert.ok(small.dpi! < 150);
+ });
+ it("renders a selected region at the requested resolution", async () => {
+  const [full] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 150 });
+  const [part] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 150, region: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 } });
+  assert.ok(full && part);
+  assert.equal(pngFacts(part.png).w, Math.ceil(pngFacts(full.png).w / 2));
+  assert.equal(pngFacts(part.png).h, Math.ceil(pngFacts(full.png).h / 2));
+  assert.equal(part.dpi, 150);
+ });
+ it("rejects invalid limits, DPI, and regions before painting", async () => {
+  for (const opts of [{ dpi: NaN }, { dpi: -1 }, { maxPixels: Infinity }, { maxPixels: 0 }, { region: { x: 0.9, y: 0, width: 0.2, height: 1 } }]) {
+   await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [1], opts), /Invalid PDF/);
+  }
+ });
+});
+
+it("destroys each loading task after both rejected and successful loads", async () => {
+ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-invalid-"));
+ const invalid = path.join(dir, "invalid.pdf");
+ fs.writeFileSync(invalid, "not a PDF");
+ let destroyed = 0;
+ pdfLoadingTaskObserver.current = task => {
+  const destroy = task.destroy.bind(task);
+  task.destroy = async () => { destroyed++; await destroy(); };
+ };
+ try {
+  for (let i = 0; i < 3; i++) await assert.rejects(realHeadless.renderPdfPages(invalid, [1]));
+  await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 72 });
+  assert.equal(destroyed, 4);
+ } finally {
+  pdfLoadingTaskObserver.current = undefined;
+  fs.rmSync(dir, { recursive: true, force: true });
+ }
+});
+
+it("destroys the loading task if observation throws", async () => {
+ let destroyed = 0;
+ pdfLoadingTaskObserver.current = task => {
+  const destroy = task.destroy.bind(task);
+  task.destroy = async () => { destroyed++; await destroy(); };
+  throw new Error("observation failed");
+ };
+ try {
+  await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [1]), /observation failed/);
+  assert.equal(destroyed, 1);
+ } finally { pdfLoadingTaskObserver.current = undefined; }
+});
+
+it("bounds a physically oversized PDF page and its detail region", async () => {
+ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-large-"));
+ const file = path.join(dir, "large.pdf");
+ fs.writeFileSync(file, tinyPdf([{ runs: [{ text: "Detail", x: 72, y: 720 }] }], { width: 10000, height: 10000 }));
+ try {
+  const [page] = await realHeadless.renderPdfPages(file, [1], { dpi: 150 });
+  const [detail] = await realHeadless.renderPdfPages(file, [1], { dpi: 150, region: { x: 0, y: 0, width: 0.1, height: 0.1 } });
+  assert.ok(page && detail);
+  const { w, h } = pngFacts(page.png);
+  assert.ok(w * h <= 16_000_000);
+  assert.ok(page.dpi! < 150);
+  assert.equal(detail.dpi, 150);
+  assert.deepEqual([pngFacts(detail.png).w, pngFacts(detail.png).h], [2084, 2084]);
+ } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("destroys the loading task and preserves a page render error", async () => {
+ let destroyed = 0;
+ pdfLoadingTaskObserver.current = task => {
+  const destroy = task.destroy.bind(task);
+  task.destroy = async () => { destroyed++; await destroy(); };
+  const loading = task as typeof task & { promise: Promise<{ getPage: (n: number) => Promise<{ render: () => unknown }> }> };
+  void loading.promise.then(doc => {
+   const getPage = doc.getPage.bind(doc);
+   doc.getPage = async n => {
+    const page = await getPage(n);
+    page.render = () => { throw new Error("render failed"); };
+    return page;
+   };
+  });
+ };
+ try {
+  await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [1]), /render failed/);
+  assert.equal(destroyed, 1);
+ } finally { pdfLoadingTaskObserver.current = undefined; }
 });

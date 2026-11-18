@@ -1,3 +1,4 @@
+import {createResearchStore} from "./research-trails.ts";
 import {createReviewStore} from "./retrieval.ts";
 import {createLessonReviewStore,readLessonReviews} from "./lesson-integration.ts";
 import {drawingLink,drawingConnections} from "../core/atlas-drawing.ts";
@@ -58,7 +59,7 @@ export function createAtlasStore(file: string): AtlasStore {
 		const db = new DatabaseSync(file, { timeout: 1000 });
 		try {
 			const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
-			if (version > 15)
+			if (version > 17)
 				throw new AtlasError("This Atlas database needs a newer app. Upgrade before opening it.", 409);
 			if (version === 0) {
 				const tables = db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
@@ -241,6 +242,26 @@ CREATE INDEX retrieval_activity_day ON retrieval_activities(json_extract(record,
 CREATE TABLE retrieval_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)),hash TEXT NOT NULL) STRICT;
 PRAGMA user_version=15; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
             }
+            if(version<16){
+                if(version===15)db.prepare("VACUUM INTO ?").run(`${file}.v15-${randomUUID()}.bak`);
+                db.exec("BEGIN IMMEDIATE");try{db.exec(`
+CREATE TABLE research_workspaces(id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+CREATE TABLE research_trails(id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+CREATE TABLE research_nodes(id TEXT PRIMARY KEY, trailId TEXT NOT NULL REFERENCES research_trails(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+CREATE INDEX research_nodes_trail ON research_nodes(trailId);
+CREATE TABLE research_mutation_receipts(id TEXT PRIMARY KEY, command TEXT NOT NULL, result TEXT NOT NULL CHECK(json_valid(result))) STRICT;
+PRAGMA user_version=16; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
+            }
+            if(version<17){
+                if(version===16)db.prepare("VACUUM INTO ?").run(`${file}.v16-${randomUUID()}.bak`);
+                db.exec("BEGIN IMMEDIATE");try{db.exec(`
+CREATE TABLE research_import_reviews(id TEXT PRIMARY KEY,trailId TEXT NOT NULL REFERENCES research_trails(id),record TEXT NOT NULL CHECK(json_valid(record)),status TEXT NOT NULL,command TEXT,receipt TEXT) STRICT;
+CREATE INDEX research_import_reviews_trail ON research_import_reviews(trailId);
+CREATE TABLE research_import_checkpoints(trailId TEXT NOT NULL REFERENCES research_trails(id),workspaceId TEXT NOT NULL REFERENCES research_workspaces(id),record TEXT NOT NULL CHECK(json_valid(record)),PRIMARY KEY(trailId,workspaceId)) STRICT;
+CREATE TABLE research_evidence(id TEXT PRIMARY KEY,trailId TEXT NOT NULL REFERENCES research_trails(id),nodeId TEXT NOT NULL REFERENCES research_nodes(id),record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+CREATE INDEX research_evidence_trail ON research_evidence(trailId);
+PRAGMA user_version=17; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
+            }
 			return run(db);
 		} finally {
 			db.close();
@@ -393,6 +414,7 @@ PRAGMA user_version=15; COMMIT;`);}catch(e){db.exec("ROLLBACK");throw e;}
 	const mindmaps = createMindmapStore(database, path.dirname(file));
 	const proposals=createMapProposalStore(database,mindmaps);
 	return {
+		research:createResearchStore(database),
 		retrieval:createReviewStore(database),
 		lessonReviews:createLessonReviewStore(database,snapshot,writeNote),
 		sync:createAtlasSyncStore(database,snapshot,writeNote),

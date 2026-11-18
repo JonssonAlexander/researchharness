@@ -9,6 +9,7 @@ import {graphMathLabel} from "./graph-math-label";
 import {MessageResponse} from "./ai-elements/message";
 import {DictationBar,useDictation,useDictationTarget,joinDictation} from "./dictation";
 import {useServerEvent,useServerResync} from "./server-events";
+import {scratchpadChanges} from "./scratchpad-changes";
 import type {ScratchEditorHandle} from "./scratchpad-editor";
 import {useLearningActivity} from "./use-learning-activity";
 const Editor=dynamic(()=>{if(typeof window!=="undefined")Object.assign(window,{EXCALIDRAW_ASSET_PATH:"/excalidraw/"});return import('./scratchpad-editor');},{ssr:false});
@@ -39,27 +40,28 @@ function ReviewPreferences({settings,run}:{settings:ReviewSettings;run:Run}){
 function ReviewAttempt({activity,model,intervals,now,run,onDone,onReady}:{activity:Activity;model:string|null;intervals?:Record<string,string[]>;now:string;run:Run;onDone:(snapshot:ReviewSnapshot,stop?:boolean)=>Promise<void>|void;onReady:(flush:()=>Promise<void>)=>void}){
  const [padSize,setPadSize]=useState<'small'|'half'|'full'>('half');
  const [answer,setAnswer]=useState(activity.answer),[writing,setWriting]=useState(false),[drawingLoaded,setDrawingLoaded]=useState(activity.status!=='ready'),[initial,setInitial]=useState<ScratchScene|null>(null),[ratings,setRatings]=useState<Record<string,number|null>>(activity.ratings??{}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saveState,setSaveState]=useState('Saved');
+ const changes=useRef(scratchpadChanges(empty));
  const latest=useRef({text:activity.answer,scene:null as ScratchScene|null}),saved=useRef({text:activity.answer,scene:''}),revision=useRef(activity.revision),drawingRevision=useRef(0),editor=useRef<ScratchEditorHandle|null>(null),queue=useRef(Promise.resolve()),timer=useRef<ReturnType<typeof setTimeout>|null>(null),locked=useRef(false);
  const revealed=activity.status==='revealed'||activity.status==='rated',help=activity.help,checking=busy||help?.state==='running'&&Date.now()-Date.parse(help.at)<20*60*1000;
  useLearningActivity('review',checking,'review');
  useEffect(()=>{revision.current=Math.max(revision.current,activity.revision);},[activity.revision]);
- const flush=useCallback(async()=>{if(timer.current)clearTimeout(timer.current);const current={text:latest.current.text,scene:latest.current.scene},fingerprint=current.scene?JSON.stringify(current.scene):'';
+ const flush=useCallback(async()=>{if(timer.current)clearTimeout(timer.current);const capture=changes.current.capture();if(initial)latest.current.scene=capture.scene;const current={text:latest.current.text,scene:latest.current.scene},fingerprint=current.scene?JSON.stringify(current.scene):'';
   const next=queue.current.catch(()=>{}).then(async()=>{if(activity.status!=='ready')return;
    if(current.text!==saved.current.text){const v=await run({action:'draft',id:activity.id,revision:revision.current,answer:current.text},true);revision.current=(v.result as Activity).revision;saved.current.text=current.text;}
-   if(current.scene&&fingerprint!==saved.current.scene){const v=await run({action:'drawing',id:activity.id,revision:revision.current,expectedRevision:drawingRevision.current,scene:current.scene},true);drawingRevision.current=(v.result as ScratchDraft).revision;saved.current.scene=fingerprint;}
-   setSaveState('Saved');
+   if(current.scene&&fingerprint!==saved.current.scene){const v=await run({action:'drawing',id:activity.id,revision:revision.current,expectedRevision:drawingRevision.current,scene:JSON.parse(fingerprint)},true);drawingRevision.current=(v.result as ScratchDraft).revision;saved.current.scene=fingerprint;}
+   changes.current.saved(capture.version);setSaveState(!changes.current.dirty()&&current.text===latest.current.text?'Saved':'Unsaved changes');
   });queue.current=next;await next;
- },[activity.id,activity.status,run]);
+ },[activity.id,activity.status,run,initial]);
  const flushRef=useRef(flush);flushRef.current=flush;
  const changed=()=>{setSaveState('Saving…');if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>void flushRef.current().catch(e=>{setError(e.message);setSaveState('Save failed');}),800);};
  const append=useCallback((text:string)=>{latest.current.text=joinDictation(latest.current.text,text);setAnswer(latest.current.text);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>void flushRef.current().catch(e=>setError(e.message)),800);},[]);
  const dictation=useDictation({append});useDictationTarget(append,!revealed);
- useEffect(()=>{onReady(async()=>{await dictation.finish();if(editor.current&&!revealed)latest.current.scene=editor.current.snapshot();await flushRef.current();});return()=>{onReady(async()=>{});if(timer.current)clearTimeout(timer.current);void flushRef.current().catch(()=>{});};},[onReady,dictation.finish,revealed]);
- useEffect(()=>{const unload=(e:BeforeUnloadEvent)=>{if(saved.current.text!==latest.current.text||latest.current.scene&&JSON.stringify(latest.current.scene)!==saved.current.scene){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',unload);return()=>window.removeEventListener('beforeunload',unload);},[]);
- const loadDrawing=useCallback(async()=>{const r=await fetch(`/api/atlas/review?drawing=${activity.id}`,{cache:'no-store'}),v=await r.json();if(!r.ok)throw new Error(v.error);const d=v.draft as ScratchDraft|null;if(d){latest.current.scene=d.scene;saved.current.scene=JSON.stringify(d.scene);drawingRevision.current=d.revision;setInitial(d.scene);setWriting(true);}setDrawingLoaded(true);},[activity.id]);
+ useEffect(()=>{onReady(async()=>{await dictation.finish();await flushRef.current();});return()=>{onReady(async()=>{});if(timer.current)clearTimeout(timer.current);void flushRef.current().catch(()=>{});};},[onReady,dictation.finish,revealed]);
+ useEffect(()=>{const unload=(e:BeforeUnloadEvent)=>{if(saved.current.text!==latest.current.text||changes.current.dirty()){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',unload);return()=>window.removeEventListener('beforeunload',unload);},[]);
+ const loadDrawing=useCallback(async()=>{const r=await fetch(`/api/atlas/review?drawing=${activity.id}`,{cache:'no-store'}),v=await r.json();if(!r.ok)throw new Error(v.error);const d=v.draft as ScratchDraft|null;if(d){changes.current.reset(d.scene);latest.current.scene=d.scene;saved.current.scene=JSON.stringify(d.scene);drawingRevision.current=d.revision;setInitial(d.scene);setWriting(true);}setDrawingLoaded(true);},[activity.id]);
  useEffect(()=>{if(activity.status!=='ready')return;setDrawingLoaded(false);void loadDrawing().catch(e=>setError(e.message));},[activity.id,activity.status,loadDrawing]);
  async function openDrawing(){if(writing){setWriting(false);return;}setError('');try{if(!drawingLoaded)await loadDrawing();if(!initial){const scene=latest.current.scene??empty;latest.current.scene=scene;saved.current.scene=JSON.stringify(scene);setInitial(scene);}setWriting(true);}catch(e){setError((e as Error).message);}}
- async function reveal(){if(locked.current)return;locked.current=true;setBusy(true);setError('');try{await dictation.finish();if(editor.current)latest.current.scene=editor.current.snapshot();await flushRef.current();let image:string|undefined;
+ async function reveal(){if(locked.current)return;locked.current=true;setBusy(true);setError('');try{await dictation.finish();await flushRef.current();let image:string|undefined;
    if(latest.current.scene){const blob=await editor.current?.image(latest.current.scene);if(blob)image=await new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(new Error('Drawing export failed; your work is saved.'));r.onload=()=>resolve(String(r.result));r.readAsDataURL(blob);});}
    const v=await run({action:'reveal',id:activity.id,revision:revision.current,answer:latest.current.text,attempted:true,...image?{image,drawingRevision:drawingRevision.current}:{} });revision.current=(v.result as Activity).revision;setWriting(false);
   }catch(e){setError((e as Error).message);}finally{setBusy(false);locked.current=false;}}
@@ -89,7 +91,7 @@ function ReviewAttempt({activity,model,intervals,now,run,onDone,onReady}:{activi
  {initial&&<section aria-label="Review scratchpad" data-size={padSize} className={!writing?'hidden':padSize==='full'?'fixed inset-2 z-[70] flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background shadow-xl':`flex h-[50dvh] shrink-0 flex-col overflow-hidden border-t bg-background md:h-auto md:border-l md:border-t-0 ${padSize==='small'?'md:w-96 md:max-w-[50%]':'md:w-1/2'}`}>
   <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs"><span className="min-w-0 flex-1 font-medium">Scratchpad</span><select aria-label="Review scratchpad size" className="rounded border bg-background px-1 py-1 text-xs" value={padSize} onChange={e=>setPadSize(e.target.value as typeof padSize)}><option value="small">Small</option><option value="half">Half screen</option><option value="full">Full screen</option></select><button type="button" className={button} onClick={()=>setWriting(false)}>Close</button></header>
   {padSize==='full'&&<details className="max-h-[30vh] shrink-0 overflow-auto border-b px-3 py-2 text-sm"><summary className="cursor-pointer text-xs">Question</summary><MessageResponse mode="static">{activity.front}</MessageResponse></details>}
-  <div className="relative min-h-40 flex-1 bg-white"><Editor initial={initial} disabled={busy||revealed} onReady={handle=>{editor.current=handle;}} onChange={scene=>{if(locked.current||revealed)return;latest.current.scene=scene;changed();}}/></div>
+  <div className="relative min-h-40 flex-1 bg-white"><Editor initial={initial} disabled={busy||revealed} onReady={handle=>{editor.current=handle;}} onChange={read=>{if(locked.current||revealed)return;changes.current.change(read);changed();}}/></div>
   <footer className="flex shrink-0 items-center gap-2 border-t px-3 py-2 text-xs"><span className="flex-1 text-muted-foreground">{saveState}</span>{padSize==='full'&&!revealed&&<button type="button" className={button} disabled={busy||!drawingLoaded} onClick={()=>void reveal()}>I tried · show answer</button>}</footer>
  </section>}
  </div>;

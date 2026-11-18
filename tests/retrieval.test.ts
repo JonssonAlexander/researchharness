@@ -64,7 +64,7 @@ test('study days and one-shot refresh boundaries respect Stockholm DST and UTC s
  const n=new Date('2026-10-24T22:00:00Z'),boundary=Date.parse(nextReviewChange(n,'Europe/Stockholm',[]));assert.equal(studyDay(new Date(boundary),'Europe/Stockholm'),'2026-10-26');assert.equal(Math.round((boundary-n.getTime())/3600000),25);
 });
 test('v14 migration keeps a backup and scheduler data refuses external corruption',async()=>{
- const f=fixture();const db=new DatabaseSync(f.file);db.exec('DROP TABLE retrieval_items; DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_settings; PRAGMA user_version=14');db.close();
+ const f=fixture();const db=new DatabaseSync(f.file);db.exec('DROP TABLE retrieval_items; DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_settings; DROP TABLE research_import_reviews; DROP TABLE research_import_checkpoints; DROP TABLE research_evidence; DROP TABLE research_mutation_receipts; DROP TABLE research_nodes; DROP TABLE research_trails; DROP TABLE research_workspaces; PRAGMA user_version=14');db.close();
  await f.enrol();assert(fs.readdirSync(path.dirname(f.file)).some(n=>n.includes('.v14-')&&n.endsWith('.bak')));
  const edit=new DatabaseSync(f.file);edit.exec("UPDATE retrieval_items SET record=json_set(record,'$.front','Tampered')");edit.close();assert.throws(()=>f.atlas.retrieval.items(),/changed outside Atlas/);
 });

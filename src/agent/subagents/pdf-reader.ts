@@ -101,6 +101,7 @@ export function createPdfTools(_pdfPath: string): Record<string, Tool> {
 			description:
 				"Render pages to images and show them to you for visual reading (equations, diagrams, layout). DPI: 100 text, 150 default, 200 dense small print. Max 6 pages per call.",
 			parameters: Type.Object({
+    region: Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), width: Type.Number(), height: Type.Number() }, { description: "Optional normalized page rectangle (0–1, top-left origin) for detail." })),
 				pages: Type.String({ description: "Page spec, e.g. '1-3' or '2,5,8'" }),
 				dpi: Type.Optional(
 					Type.Integer({ minimum: 72, maximum: 300, description: "Render DPI (100 text / 150 default / 200 dense)" }),
@@ -292,7 +293,7 @@ export async function runPdfReaderAgent(
 						const dpi = numOr(args.dpi, 150);
 						const wanted = specNumbers(spec, RENDER_BATCH_CAP);
 						opts.onActivity?.(`pdf_render: ${spec} @${dpi}dpi`);
-						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi });
+						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi, region: args.region as import("./headless").PdfRegion | undefined });
 						for (const p of pages) {
 							consulted.add(p.page);
 							read.add(p.page);
@@ -305,7 +306,7 @@ export async function runPdfReaderAgent(
 								toolText(
 									call.id,
 									call.name,
-									`Rendered ${pages.length} page(s) at ${dpi} DPI — the images follow below. Read them carefully (equations, diagrams, layout).`,
+									`Rendered ${pages.length} page(s): ${pages.map(p => `page ${p.page} at ${(p.dpi ?? dpi).toFixed(1)} DPI`).join(", ")}. Images follow. If detail is unreadable, render a smaller region; do not claim unreadable material was inspected.`,
 								),
 							);
 						}

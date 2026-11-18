@@ -1,4 +1,5 @@
 import {learningHistory} from './learning-policy-http.ts';
+import {lessonDelivery} from './lesson-delivery.ts';
 import {createLearningPolicyService} from './learning-policy.ts';
 import {readingGuideService} from './reading-guide.ts';
 import {pythonWorkbench} from "./python-workbench.ts";
@@ -10,6 +11,7 @@ import {graphView} from "./graph.ts";
 import {scratchDelivery} from "../core/scratchpad.ts";
 import {scratchMessage,scratchImages} from "./scratchpad.ts";
 import {learningInstructions} from "../core/learning-session.ts";
+import {lessonContextText} from "../core/lesson-context.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	createPracticeAgent,
@@ -95,7 +97,9 @@ import type {CallUsage} from "../core/contracts.ts";
 
 function instructionTokens(chatId:string,kind?:"teach"|"practice"):number {
  const lesson=kind!=="practice"?stores.lessonStore.read(chatId):null;
- return Math.ceil((lesson?learningInstructions(lesson):composeInstructions(kind==="practice"?"practice":"teacher")).length/4);
+ // The fresh model-only tail is absent from native history, so include it in
+ // the existing compaction budget rather than silently consuming headroom.
+ return Math.ceil((lesson?learningInstructions(lesson).length+lessonContextText(lesson).length:composeInstructions(kind==="practice"?"practice":"teacher").length)/4);
 }
 
 function settlementErrorText(error: unknown): string {
@@ -215,6 +219,7 @@ export async function handleChatInput(
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 ): Promise<Response> {
+	const requestStarted = performance.now();
 	let record = stores.chatStore.getChat(chatId);
  if(record?.challenge)record=recoverChallengeHistory(record);
 	if (!record) {
@@ -559,6 +564,7 @@ export async function handleChatInput(
   return Response.json({error:"The lesson could not be initialized. Your input is saved; retry after checking local storage."},{status:500});
  }
 
+	const delivery = lesson ? lessonDelivery(requestStarted, input.type === 'text' ? input.text : '') : undefined;
 	// A test-injected agent gets no usage collector (tests assert the
 	// transcript, not the money channel); when it's ours, usage flows through
 	// the factory's subscription (wired above via onUsage).
@@ -583,6 +589,7 @@ export async function handleChatInput(
 		// LH_PROVIDER_EVENTS=1.
 		providerEventNote(chatId, "turn", `run start (base: ${agentMessages.length} messages)`);
 		const handle = runPiTurn({
+            onEvent: delivery?.observe,
  ...(record.challenge?{clientProjection:challengeProjection(chatId)}:{}),
 			agent: constructed,
 			requestCycle,
@@ -638,6 +645,7 @@ export async function handleChatInput(
 						at: new Date().toISOString(),
 						model: modelId,
 						steps,
+						...(delivery ? {delivery: delivery.finish(isAborted)} : {}),
 					});
 				}
 				// GRAPH GATE (settings-storage wave, 2026-09-19): the write channel —

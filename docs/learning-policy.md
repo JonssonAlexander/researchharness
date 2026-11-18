@@ -1,4 +1,4 @@
-# Evidence-aware mathematical learning (implemented 15 November 2026)
+# Evidence-aware mathematical learning (updated 16 November 2026)
 
 The product specification is `research_atlas_learning_policy.md` in the enclosing
 workspace. This implementation applies to conversational lessons, including PDF
@@ -13,7 +13,10 @@ attached article through the existing bounded text/page-image tools and consults
 Atlas where relevant. The PDF workspace, comments, persistent article canvas,
 Chat/Reading switch, dictation and scratchpad submissions remain unchanged.
 
-Explanations can develop fluently. There is no every-step quiz, mandatory initial
+Explanations develop coherently across about 2–3 related main concepts initially,
+when appropriate, joining definitions, equations, intuition and consequences. This
+is not a quota or word limit. Ordinary explanatory sections need no OK/Continue
+turn; independent reconstruction remains a genuine pause for learner work. There is no every-step quiz, mandatory initial
 test, acknowledgement gate or fixed prediction frequency. At meaningful strategy
 changes the tutor calls `choose_learning_action`. Its deterministic priority rules
 respect requested explanation/continuation/work, prerequisite gaps, importance,
@@ -29,9 +32,13 @@ when to finish. A recommendation never autoplays a lesson or forces a quiz.
 - The lesson store owns the visible map, notes, focus and coverage. `explored`
   still means discussed, not understood.
 - `src/core/learning-policy.ts` owns the pure policy, schemas, and time aggregation.
-- `src/store/learning-policy.ts` owns local atomic, revisioned, append-only logical
-  events in `data/learning-policy/<chatId>.json`. It uses existing atomic writes
-  and single-process writer semantics. Native chat records remain authoritative.
+- `src/store/learning-policy.ts` owns revisioned, append-only logical events in
+  `data/learning-policy/learning.sqlite` (schema 1, native Node SQLite). Indexed
+  receipts and transactions replace full-history activity rewrites. Existing
+  `<chatId>.json` ledgers migrate transactionally on first access and remain
+  recovery copies; after migration the database owns new policy events. Native
+  chat records remain authoritative for conversation history. Single-writer
+  semantics are unchanged.
 - `src/server/learning-policy.ts` validates targets, sources and evidence and
   produces inspectable reports; the agent receives an injected service.
 - Agent-only targets have stable IDs, revisions, an actual mathematical task and
@@ -75,7 +82,10 @@ Local JSON inspection/export:
 Exports contain private learner text assessments and prompt snapshots; they use
 no-store responses, never expose unrevealed Challenge solutions, and stay local.
 Deleting a session deletes its learning ledger through the existing deletion flow.
-Existing full-data backups include this folder; no older schema migration needed.
+Back up the complete data directory, including this database and retained legacy
+files, with the app stopped or a consistent SQLite backup. Legacy JSON alone is
+not a current backup after migration. Unsupported/corrupt ledgers or newer database
+versions fail closed. See [performance repairs](performance-hardening.md).
 
 ## Passive timing
 
@@ -104,3 +114,24 @@ at receipt. This is explicitly an estimated association, useful for inspecting
 where time went; it is not cognitive focus or time-to-mastery. Joint targets can
 share time. Intervals spanning a policy change retain separate policy spans;
 pre-policy time remains unattributed. Longitudinal exports expose these gaps.
+
+
+## Continuous delivery, stage 1
+
+Policy `2026-11-16.1` reconciles the previous one-key-idea style and mandatory
+opening map reads/focus writes. A bounded, request-local snapshot supplies live
+lesson context without a tool round-trip. Explicit reads remain for omitted/deeper
+material and conflicts. Meaningful map changes are batched; coverage is still
+not demonstrated understanding. No automatic solution reveal or forced completion.
+
+Native `turns[].delivery` observations and existing token steps support prospective
+latency/cost inspection without a new activity store. First text is a server-side
+presence proxy, not semantic usefulness or browser paint. Prepared units, delayed
+map synchronization without another inference, and bounded prefetch remain stages
+2–3. See [architecture, baseline and limitations](lesson-delivery.md).
+
+
+Cost-control amendment: policy `2026-11-16.2` makes interactive demos
+explicit-request only, particularly avoiding unsolicited artifacts in opening and
+conceptual explanations. Existing tools remain available for requested demos.
+Stage 2, including standalone unit indexing, remains deferred; see lesson-delivery.md.

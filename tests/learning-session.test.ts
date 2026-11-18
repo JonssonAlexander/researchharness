@@ -53,6 +53,12 @@ test('learning agent has conversational policy and no assessment/plan-gate tools
  const agent=createLearningAgent({chatId:'chat_agent',chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},store,()=>{}, {engine:{model:faux.getModel(),streamFn:faux.streamSimple},learning:lesson});
  const names=agent.state.tools.map(t=>t.name);assert(names.includes('update_lesson'));for(const name of ['quiz','explain','recall','probe','probe_done','ask_user_question','plan_init'])assert(!names.includes(name));
  assert(agent.state.systemPrompt.includes('Do not run an initial prober'));assert(agent.state.systemPrompt.includes('Start (assumptions'));assert(agent.state.systemPrompt.includes('Understand a result'));
+ assert.match(agent.state.systemPrompt,/Do not call demo unless the learner explicitly requests/);
+ const demo=agent.state.tools.find(t=>t.name==='demo');assert(demo,'Explicitly requested demos remain available');
+ assert.match(demo.description,/Use only when the learner explicitly requests/);
+ const {composeInstructions}=await import('../src/agent/teacher-agent.ts');
+ assert.match(composeInstructions('teacher'),/Use `demo` only when the learner explicitly requests/);
+ assert(!composeInstructions('teacher').includes('Dispatch freely'));
 });
 
 test('a conversational lesson streams a native plan update and prose without a pending question',async()=>{

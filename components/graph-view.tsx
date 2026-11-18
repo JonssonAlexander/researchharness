@@ -72,6 +72,7 @@ import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, projectAtlas, type AtlasPathFocus, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
+import {useResearch} from "./research-trails";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
@@ -991,6 +992,8 @@ export function GraphView({
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	const atlas = useAtlas();
+ const research=useResearch();
+ const researchRef=useRef(research); researchRef.current=research;
 	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined; maps:string} | null>(null);
 	const atlasActionsRef = useRef(atlas);
 	atlasActionsRef.current = atlas;
@@ -1382,7 +1385,9 @@ export function GraphView({
 		const renderer = new GraphCanvasRenderer(
 			canvas,
 			{
-				onSelectConnection:(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);},
+				onSelectResearchAnchor:(id)=>{setConceptId(id);setAtlasOpen(true);},
+                onSelectResearch:(trailId,nodeId)=>{researchRef.current.select(trailId,nodeId);setAtlasOpen(true);},
+                onSelectConnection:(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);},
                 onToggleConnection:(sourceId,targetId)=>{if([sourceId,targetId].every(id=>atlasRef.current.concepts.some(c=>c.id===id))){setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);}},
                 onSelect: (nodeId, pos) => {
                     setLinkPair(null);
@@ -1522,7 +1527,9 @@ export function GraphView({
 		});
 	}, [snapshot, atlas.snapshot, isEmpty]);
 
-	useEffect(()=>{rendererRef.current?.setNodeEmphasis(emphasis);},[emphasis,isEmpty]);
+	useEffect(()=>{rendererRef.current?.setResearchOverlay(research.mode==='hide'?[]:research.trails.filter(t=>!t.archivedAt),research.mode==='selected'&&research.detail?.trail.id===research.selectedId?research.detail:null);},[research.trails,research.detail,research.selectedId,research.mode,isEmpty]);
+
+ useEffect(()=>{rendererRef.current?.setNodeEmphasis(emphasis);},[emphasis,isEmpty]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1584,7 +1591,7 @@ export function GraphView({
 	return (
 		<div className="relative h-full w-full">
 			{atlasOpen && (
-				<AtlasPanel onOpenMap={scope=>{setMapScope(scope);setAtlasOpen(false);}} onDerivations={id=>{setDerivationId(id);setLinkPair(null);}} onEditLinks={(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});}} atlas={atlas} selectedId={conceptId} onSelect={setConceptId} focusedMapId={mapFocus} onArrangePreview={previewArrangement} onLearn={onAtlasLearn}
+				<AtlasPanel research={research} onOpenMap={scope=>{setMapScope(scope);setAtlasOpen(false);}} onDerivations={id=>{setDerivationId(id);setLinkPair(null);}} onEditLinks={(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});}} atlas={atlas} selectedId={conceptId} onSelect={setConceptId} focusedMapId={mapFocus} onArrangePreview={previewArrangement} onLearn={onAtlasLearn}
 					onMapFocus={(id,center)=>{setMapFocus(id);setAtlasFocus(null);setQuery("");if(center&&id){setAtlasOpen(false);const map=atlas.snapshot.mindmaps?.find(m=>m.id===id);rendererRef.current?.fitNodes(map?.captures.find(c=>c.id===map.currentRevision)?.conceptIds??[],{bottom:160});}}}
 					onRelax={(id) => rendererRef.current?.relaxAtlas(id)}
 					viewActions={{

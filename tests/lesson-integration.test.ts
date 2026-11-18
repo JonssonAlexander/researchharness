@@ -79,7 +79,7 @@ test('metadata failure rolls back the Atlas transaction and resumes after canoni
  const count=stores.graphStore.readNodes().length;await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true});assert.equal(stores.graphStore.readNodes().length,count);
 });
 test('v13 migration backs up original metadata and opens a durable review store',()=>{
- const file=path.join(root,'migration','atlas.sqlite');createAtlasStore(file).read();const db=new DatabaseSync(file);db.exec('DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_items; DROP TABLE retrieval_settings; DROP TABLE lesson_reviews; PRAGMA user_version=13');db.close();
+ const file=path.join(root,'migration','atlas.sqlite');createAtlasStore(file).read();const db=new DatabaseSync(file);db.exec('DROP TABLE retrieval_events; DROP TABLE retrieval_activities; DROP TABLE retrieval_items; DROP TABLE retrieval_settings; DROP TABLE lesson_reviews; DROP TABLE research_import_reviews; DROP TABLE research_import_checkpoints; DROP TABLE research_evidence; DROP TABLE research_mutation_receipts; DROP TABLE research_nodes; DROP TABLE research_trails; DROP TABLE research_workspaces; PRAGMA user_version=13');db.close();
  const store=createAtlasStore(file);assert.deepEqual(store.lessonReviews.list(),[]);assert(fs.readdirSync(path.dirname(file)).some(n=>n.includes('.v13-')&&n.endsWith('.bak')));
 });
 test('SQL failure rolls back notes, concept roots and receipt while retaining a resumable approval',async()=>{

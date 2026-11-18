@@ -48,7 +48,7 @@ const TO_UNICODE = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap
 	+ "1 begincodespacerange <00> <FF> endcodespacerange\n1 beginbfchar <7E> <0014> endbfchar\n"
 	+ "endcmap CMapName currentdict /CMap defineresource pop end end";
 
-export function tinyPdf(pages: readonly TinyPage[]): Uint8Array<ArrayBuffer> {
+export function tinyPdf(pages: readonly TinyPage[], dimensions = { width: WIDTH, height: HEIGHT }): Uint8Array<ArrayBuffer> {
 	const objects: string[] = [
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		`<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, i) => `${6 + i * 2} 0 R`).join(" ")}] >>`,
@@ -60,7 +60,7 @@ export function tinyPdf(pages: readonly TinyPage[]): Uint8Array<ArrayBuffer> {
 	for (const [i, page] of pages.entries()) {
 		const stream = content(page);
 		objects.push(
-			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${WIDTH} ${HEIGHT}] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
+			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${dimensions.width} ${dimensions.height}] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
 			`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
 		);
 	}

@@ -153,6 +153,23 @@ export interface TurnUsage {
 	model: string;
 	/** One entry per agent step (model call) in this turn. */
 	steps: CallUsage[];
+	/** Optional lesson delivery observations; absent on historical/non-lesson turns. */
+	delivery?: LessonDeliveryMetrics;
+}
+
+export interface LessonDeliveryMetrics {
+	schemaVersion: 1;
+	/** Server request entry to first learner-visible prose, before SSE coalescing.
+	 * A text-presence proxy, not a judgment of mathematical usefulness. */
+	firstTextMs: number | null;
+	/** Server request entry to settlement; includes retrieval/tools/inference. */
+	totalMs: number;
+	/** Completed native responses, including failures; billed steps stay in steps. */
+	modelResponses: number;
+	toolCalls: Record<string, number>;
+	successfulMapWrites: number;
+	acknowledgementInput: boolean;
+	aborted: boolean;
 }
 
 // ─── Plan blocks (the plan lives in the chat) ────────────────────────────────

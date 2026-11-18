@@ -70,6 +70,8 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+ /** Observe the existing server wire after subscription admission; diagnostic only. */
+ onEvent?: (event:TurnWireEvent)=>void;
  /** Optional browser-only projection; never changes agent history or persistence. */
  clientProjection?: (event:TurnWireEvent)=>TurnWireEvent;
 	requestCycle?: ChatGPTRequestCycle;
@@ -163,6 +165,8 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	const send = (raw: TurnWireEvent) => {
  const event=spec.clientProjection?spec.clientProjection(raw):raw;
 		if (settled) return;
+		// Observability must never interrupt delivery or canonical settlement.
+		try { spec.onEvent?.(event); } catch { /* diagnostic listener only */ }
 		const key = coalesceKey(event);
 		if (key !== null) {
 			// Retention: replace-in-place the run's latest snapshot.

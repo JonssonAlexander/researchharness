@@ -87,9 +87,11 @@ label width does not change default Atlas/derivation rendering. Focused checks
 exercise the reported long-label constellation, deterministic separation and
 unchanged names; live browser visual sign-off remains pending.
 
-Teaching style applies to the conversation as well as the workspace: one key idea,
-useful equations/steps and brief intuition by default, with depth developed through
-back-and-forth. Expand on request or when a real gap needs it. Essential assumptions
+Teaching style applies to the conversation as well as the workspace: coherent
+mathematical developments, initially spanning about 2–3 related main concepts when
+appropriate, with equations and intuition connected. No routine acknowledgement
+gates between ordinary sections. Expand or interrupt freely; preserve independent
+reconstruction when the evidence-aware policy selects it. Essential assumptions
 and genuine uncertainty remain explicit without repeated qualifications. This is
 encoded in both conversational learning instructions and the legacy teacher prompt.
 
@@ -245,8 +247,9 @@ restores the drag snapshot. No RAF runs permanently at rest. This replaces the
 Map tools have always been deterministic local code; no separate model runs for
 inspection, layout or each node write. The expensive teacher still decides what
 to teach/change. Its stable system prompt now contains the objective rather than
-the entire mutable map. The teacher checks live focus/targets via scope=current,
-reads up to eight needed topics with topicIds, and batches writes. Edit receipts
+the entire mutable map. The teacher now receives fresh bounded focus/route/target context at the model
+boundary (16 November stage 1), reads only omitted/deeper topics with topicIds,
+and batches meaningful writes. Focus need not be saved before every transition. Edit receipts
 return revision/current IDs and changed IDs/counts without duplicating all notes.
 Full notes and complete equations remain available through explicit reads. Existing
 native conversation and compaction semantics are unchanged; nothing is silently
