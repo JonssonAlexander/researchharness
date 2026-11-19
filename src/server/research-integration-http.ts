@@ -6,7 +6,7 @@ import {emit} from '../core/events.ts';
 import {stores} from './stores.ts';
 import {PATHS} from '../../config.ts';
 import {requireSameOrigin} from './request-origin.ts';
-import {readSourceBody} from './mindmaps.ts';
+import {readRequestBody} from './request-body.ts';
 import {createResearchIntegrationService} from './research-integration.ts';
 
 const action=z.discriminatedUnion('kind',[
@@ -28,7 +28,7 @@ export async function researchIntegrationResponse(request:Request){
   if(request.method!=='POST')throw new AtlasError('Method not allowed.',405);
   requireSameOrigin(request);
   if(request.headers.get('content-type')?.split(';')[0]!=='application/json')throw new AtlasError('Expected JSON.',415);
-  const c=action.parse(JSON.parse((await readSourceBody(request,512*1024)).toString('utf8')));
+  const c=action.parse(JSON.parse((await readRequestBody(request,512*1024)).toString('utf8')));
   let result:unknown;
   if(c.kind==='prepare')result=service.prepare(c.trailId);
   else if(c.kind==='inspect')result=service.inspect(c);

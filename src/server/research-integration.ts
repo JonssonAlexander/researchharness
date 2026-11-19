@@ -88,22 +88,34 @@ export function createResearchIntegrationService(store:ResearchStore,dataRoot:st
    }
    const indexPath=`${basePath}/runs/index.jsonl`, index=readBounded(root,indexPath,1024*1024); fileHashes[indexPath]=hash(index);
    const lines=index.toString('utf8').split('\n'), start=cp?.fileHashes[indexPath]===fileHashes[indexPath] ? Math.min(cp.runCursor ?? 0,lines.length) : 0;
-   const seen=new Set<string>(); for(let i=0;i<start;i++) {try {seen.add(researchRunIndexSchema.parse(JSON.parse(lines[i]!)).runId);} catch {}}
-   let remaining=0,runCursor=0,attempts=0;
-   const warn=(message:string)=>{if(warnings.length<199) warnings.push(message);else if(warnings.length===199) warnings.push('Additional warnings were omitted.');};
-   for(let i=start;i<lines.length;i++) {
+   type IndexedRun = {line:number; entry?:z.infer<typeof researchRunIndexSchema>; duplicate:boolean};
+   const seen=new Set<string>(), pending:IndexedRun[]=[], retries:IndexedRun[]=[];
+   const batchLimit=20;
+   let remaining=0,runCursor=0;
+   for(let i=0;i<lines.length;i++) {
     const line=lines[i]!.trim(); if(!line) continue;
     let entry:z.infer<typeof researchRunIndexSchema>|undefined; try {entry=researchRunIndexSchema.parse(JSON.parse(line));} catch {}
-    const duplicate=entry && seen.has(entry.runId);
-    if(entry && !duplicate && cp?.runHashes[entry.runId]===entry.hash) {seen.add(entry.runId);continue;}
-    if(attempts>=20) {
-     runCursor=i; const pendingSeen=new Set(seen);
-     for(const next of lines.slice(i)) {if(!next.trim()) continue; try {const parsed=researchRunIndexSchema.parse(JSON.parse(next)); const repeated=pendingSeen.has(parsed.runId); pendingSeen.add(parsed.runId); if(!repeated && cp?.runHashes[parsed.runId]===parsed.hash) continue;} catch {} remaining++;}
-     break;
+    const duplicate=entry!==undefined && seen.has(entry.runId);
+    if(entry && !duplicate) {
+     seen.add(entry.runId);
+     if(cp?.runHashes[entry.runId]===entry.hash) continue;
     }
-    attempts++;
-    if(!entry) {warn(`Run index line ${i+1} is invalid.`); continue;}
-    if(duplicate) {warn(`Run index line ${i+1} duplicates an earlier run ID.`);continue;} seen.add(entry.runId);
+    if(i<start) {
+     if(entry && !duplicate && retries.length<batchLimit) retries.push({line:i,entry,duplicate});
+     continue;
+    }
+    // Leave room to retry an older run even when the new batch is full.
+    const freshLimit=retries.length ? batchLimit-1 : batchLimit;
+    if(pending.length<freshLimit) pending.push({line:i,entry,duplicate});
+    else {
+     if(remaining===0) runCursor=i;
+     remaining++;
+    }
+   }
+   const warn=(message:string)=>{if(warnings.length<199) warnings.push(message);else if(warnings.length===199) warnings.push('Additional warnings were omitted.');};
+   for(const {line,entry,duplicate} of [...pending,...retries.slice(0,batchLimit-pending.length)]) {
+    if(!entry) {warn(`Run index line ${line+1} is invalid.`); continue;}
+    if(duplicate) {warn(`Run index line ${line+1} duplicates an earlier run ID.`);continue;}
     const relative=`${basePath}/runs/${entry.path}`;
     try {
      const bytes=readBounded(root,relative,65536); if(hash(bytes)!==entry.hash) throw new Error('record hash differs');

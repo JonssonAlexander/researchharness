@@ -39,6 +39,13 @@ function render(chat: ChatListItem, active = false) {
 }
 
 describe("SessionRow", () => {
+	it("marks the destination as opening while navigation is pending", () => {
+		const html = renderToStaticMarkup(<SessionRow chat={item({})} active={false} opening onOpen={() => {}} />);
+		assert.match(html, /aria-busy="true"/);
+		assert.match(html, /Opening…/);
+		assert.doesNotMatch(html, /Working/);
+	});
+
 	it("no phase strips, no phase colors — the retired decoration", () => {
 		const html = render(item({ phase: "teach" }));
 		assert.ok(!html.includes("phase-strip"), "strip removed by design (too busy)");

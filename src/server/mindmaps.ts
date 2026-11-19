@@ -4,6 +4,7 @@ import { MINDMAP_LIMITS, mindmapInput, mindmapId } from "../core/mindmaps.ts";
 import { emit } from "../core/events.ts";
 import { stores } from "./stores.ts";
 import { prepareRnote } from "./rnote.ts";
+import { readRequestBody } from "./request-body.ts";
 
 export function createMindmapService(store: AtlasStore, prepare = prepareRnote) {
 	return {
@@ -27,26 +28,11 @@ export function createMindmapService(store: AtlasStore, prepare = prepareRnote) 
 		},
 	};
 }
-export async function readSourceBody(request: Request, limit: number) {
-	if (Number(request.headers.get("content-length")) > limit) throw new AtlasError("Import exceeds the upload limit.", 413);
-	const reader = request.body?.getReader();
-	if (!reader) throw new AtlasError("Expected an upload.");
-	const chunks: Uint8Array[] = []; let size = 0;
-	try {
-		for (;;) {
-			const {value, done} = await reader.read(); if (done) break;
-			size += value.length;
-			if (size > limit) { await reader.cancel(); throw new AtlasError("Import exceeds the upload limit.", 413); }
-			chunks.push(value);
-		}
-	} finally { reader.releaseLock(); }
-	return Buffer.concat(chunks);
-}
 export async function importMindmapResponse(request: Request): Promise<Response> {
 	try {
 		const type = request.headers.get("content-type") ?? "";
 		if (!type.startsWith("multipart/form-data;")) throw new AtlasError("Expected a file upload.", 415);
-		const bytes = await readSourceBody(request, MINDMAP_LIMITS.request);
+		const bytes = await readRequestBody(request, MINDMAP_LIMITS.request);
 		const form = await new Response(bytes, {headers: {"content-type": type}}).formData();
 		for (const key of form.keys())
 			if (!["metadata", "original", "preview"].includes(key) || form.getAll(key).length !== 1) throw new AtlasError("Unexpected or repeated upload field.");
@@ -63,7 +49,7 @@ export async function importMindmapResponse(request: Request): Promise<Response>
 export async function archiveMindmapResponse(request: Request): Promise<Response> {
 	try {
 		if (request.headers.get("content-type")?.split(";")[0] !== "application/json") throw new AtlasError("Expected JSON.", 415);
-		return Response.json(createMindmapService(stores.atlasStore).archive(JSON.parse((await readSourceBody(request, 4096)).toString("utf8"))));
+		return Response.json(createMindmapService(stores.atlasStore).archive(JSON.parse((await readRequestBody(request, 4096)).toString("utf8"))));
 	} catch (error) { return failure(error); }
 }
 export function mindmapAssetResponse(request: Request): Response {

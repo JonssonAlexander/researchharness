@@ -6,7 +6,7 @@ import {emit} from '../core/events.ts';
 import {stores} from './stores.ts';
 import {PATHS} from '../../config.ts';
 import {requireSameOrigin} from './request-origin.ts';
-import {readSourceBody} from './mindmaps.ts';
+import {readRequestBody} from './request-body.ts';
 import {createResearchWorkspaceService} from './research-workspaces.ts';
 
 const workspaceAction=z.object({kind:z.enum(['workspace-bind','workspace-create','workspace-rebind','workspace-open','workspace-repair']),approve:z.literal(true),requestId:z.string().uuid(),trailId:researchTrailId.optional(),workspaceId:researchWorkspaceId.optional(),expectedRevision:z.number().int().positive().optional(),path:z.string().min(1).max(4096).optional(),name:z.string().trim().min(1).max(80).optional(),label:z.string().trim().min(1).max(160).optional()}).strict();
@@ -39,7 +39,7 @@ export async function researchTrailsResponse(request:Request){
   if(request.method!=='POST')throw new AtlasError('Method not allowed.',405);
   requireSameOrigin(request);
   if(request.headers.get('content-type')?.split(';')[0]!=='application/json')throw new AtlasError('Expected JSON.',415);
-  const body=JSON.parse((await readSourceBody(request,65536)).toString('utf8'));
+  const body=JSON.parse((await readRequestBody(request,65536)).toString('utf8'));
   const workspaces=createResearchWorkspaceService(store,PATHS.data);
   let result:unknown;
   if(String(body.kind).startsWith('workspace-')){

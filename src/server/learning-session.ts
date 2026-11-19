@@ -7,7 +7,7 @@ import type {LearningContext} from "../core/atlas-sync.ts";
 import {stores} from "./stores.ts";
 import {emit} from "../core/events.ts";
 import {isTurnRunning} from "./turn-liveness.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 export const getLesson=(id:string)=>stores.lessonStore.read(id);
 export function startLesson(id:string,objective:string,context?:LearningContext):LearningSession{
  const atlas=stores.atlasStore.read(),concepts=context?context.conceptIds.flatMap(id=>atlas.concepts.filter(c=>c.id===id)):[];
@@ -34,7 +34,7 @@ export async function lessonResponse(request:Request,id:string):Promise<Response
   if(!lesson||chat.kind==="practice")throw new AtlasError("This session does not use the lesson workspace.",409);
   if(isTurnRunning(id))throw new AtlasError("Wait for the current response before editing the lesson.",409);
   if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
-  const change=lessonChange.parse(JSON.parse((await readSourceBody(request,262144)).toString("utf8")));
+  const change=lessonChange.parse(JSON.parse((await readRequestBody(request,262144)).toString("utf8")));
   const saved=stores.lessonStore.save(id,change);emit("lesson-changed",{chatId:id});return Response.json({lesson:saved});
  }catch(e){return Response.json({error:e instanceof AtlasError?e.message:"Lesson could not be loaded or saved."},{status:e instanceof AtlasError?e.status:400});}
 }

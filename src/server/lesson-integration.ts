@@ -16,7 +16,7 @@ import {resolveConversationSpec,resolveSlot} from "../core/settings-resolution.t
 import {stores} from "./stores.ts";
 import {isTurnRunning} from "./turn-liveness.ts";
 import {emit} from "../core/events.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 import {syncContext} from "./atlas-sync.ts";
 const id=z.string().regex(/^lr_[0-9a-f-]{36}$/),digest=z.string().regex(/^[0-9a-f]{64}$/);
 const command=z.discriminatedUnion("action",[
@@ -125,5 +125,5 @@ export function createLessonIntegrationService(engine=engineFor,distill=distillL
 export async function lessonIntegrationResponse(request:Request):Promise<Response>{try{
  const service=createLessonIntegrationService();if(request.method==="GET"){const q=new URL(request.url).searchParams;if(q.has("config"))return Response.json({model:service.model(q.get("chatId")??"")});if(q.has("id"))return Response.json({review:stores.atlasStore.lessonReviews.read(id.parse(q.get("id")))});return Response.json({reviews:stores.atlasStore.lessonReviews.list(q.get("chatId")??undefined)});}
  if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
- const c=command.parse(JSON.parse((await readSourceBody(request,1048576)).toString("utf8")));const review=c.action==="generate"?await service.generate(c,request.signal):c.action==="edit"?service.edit(c):await service.commit(c);if(c.action==="commit"){await createRetrievalService().autoEnrol();emit("review-changed",{});}return Response.json({review});
+ const c=command.parse(JSON.parse((await readRequestBody(request,1048576)).toString("utf8")));const review=c.action==="generate"?await service.generate(c,request.signal):c.action==="edit"?service.edit(c):await service.commit(c);if(c.action==="commit"){await createRetrievalService().autoEnrol();emit("review-changed",{});}return Response.json({review});
 }catch(e){return Response.json({error:e instanceof AtlasError?e.message:e instanceof z.ZodError?`Check proposal fields: ${e.issues[0]?.path.join(".")||"request"} — ${e.issues[0]?.message}`:"Lesson integration is unavailable. Local work is retained; retry the exact approval if interrupted."},{status:e instanceof AtlasError?e.status:400});}}

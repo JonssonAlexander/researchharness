@@ -13,7 +13,7 @@ import {interpretMap} from "../agent/subagents/map-interpretation.ts";
 import {SubmitProposalError} from "../agent/subagents/submit-agent.ts";
 import {stores} from "./stores.ts";
 import {exportRnoteImages,validateMindmapPng} from "./rnote.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 import {jobCost} from "./pricing.ts";
 
 const command=z.object({id:z.string().regex(/^mp_[0-9a-f-]{36}$/),sourceRevision:mindmapRevisionId,expectedModel:z.string().max(240),consent:z.literal(true),reprocess:z.boolean().optional(),parentId:z.string().regex(/^mp_[0-9a-f-]{36}$/).optional()}).strict();
@@ -98,7 +98,7 @@ export async function mapProposalResponse(request:Request):Promise<Response> {
 		const service=createMapProposalService(stores.atlasStore),query=new URL(request.url).searchParams;
 		if(request.method==="POST") {
 			if(request.headers.get("content-type")?.split(";")[0]!=="application/json")throw new AtlasError("Expected JSON.",415);
-			const raw=(await readSourceBody(request,4096)).toString("utf8");
+			const raw=(await readRequestBody(request,4096)).toString("utf8");
 			return Response.json(await service.generate(JSON.parse(raw),request.signal));
 		}
 		if(query.get("config")==="1")return Response.json({model:service.model()},{headers:{"Cache-Control":"no-store"}});

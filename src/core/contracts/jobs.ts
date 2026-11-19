@@ -6,7 +6,7 @@ export type { PythonInput, PythonResult } from "../python-workbench.ts";
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
  * master. Pure types + protocol docs + tiny pure helpers; type-only imports
- * of "ai" (safe everywhere: server, client, tests). See docs/vision.md.
+ * of "ai" (safe everywhere: server, client, tests). See docs/archive/vision.md.
  */
 import type { CallUsage } from "./chat.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";

@@ -1,7 +1,7 @@
 import { stores } from './stores.ts';
 import { learningReport, learningTimeline, saveLearningActivity } from './learning-policy.ts';
 import { requireSameOrigin } from './request-origin.ts';
-import { readSourceBody } from './mindmaps.ts';
+import { readRequestBody } from './request-body.ts';
 import {learningTarget} from '../core/learning-policy.ts';
 import { AtlasError } from '../core/atlas.ts';
 /** Inspectable local export; agent-only targets have no frontend presentation. */
@@ -16,7 +16,7 @@ export async function learningPolicyResponse(request: Request, chatId: string) {
             throw new AtlasError('Method not allowed.', 405);
         if (!request.headers.get('content-type')?.startsWith('application/json'))
             throw new AtlasError('Expected JSON.', 415);
-        const input = JSON.parse((await readSourceBody(request, 8192)).toString('utf8'));
+        const input = JSON.parse((await readRequestBody(request, 8192)).toString('utf8'));
         if (input.action !== 'activity')
             throw new AtlasError('Unsupported learning action.');
         if (chatId !== 'review' && !stores.lessonStore.read(chatId))

@@ -8,7 +8,7 @@ import type {LhMarkerMessage, LhMessage} from "../core/native-messages.ts";
 import {AtlasError} from "../core/atlas.ts";
 import {scratchKey,attemptId,scratchScene,scratchTarget,practiceScratchTarget,lessonScratchTarget,scratchAttemptMessage,scratchDelivery,resolveScratchpadImages} from "../core/scratchpad.ts";
 import {stores} from "./stores.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 export function scratchMessage(chatId:string,id:string){const a=stores.scratchpadStore.attempt(chatId,id);if(!a)throw new AtlasError("Saved attempt not found.",404);return scratchAttemptMessage(a);}
 function scratchImage(chatId: string, id: string, vision: boolean): ImageContent {
  if (!vision) throw new AtlasError("Choose an image-capable model to read this drawing. Your work is saved.", 409);
@@ -78,7 +78,7 @@ export async function scratchpadResponse(request:Request,chatId:string):Promise<
   const target=targetFor(q.get("pad")??undefined),padId=scratchKey.parse(q.get("pad")??target.id),draft=stores.scratchpadStore.read(chatId,padId),attempts=stores.scratchpadStore.list(chatId,padId).map(a=>({id:a.id,number:a.number,createdAt:a.createdAt,target:a.draft.target,revision:a.draft.revision,hasImage:!!a.imageHash,delivery:scratchDelivery(chat.messages,a.id)}));return Response.json({target,padId,draft,attempts},{headers:{"Cache-Control":"no-store"}});
  }
  if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
- const body=JSON.parse((await readSourceBody(request,24*1024*1024)).toString("utf8"));
+ const body=JSON.parse((await readRequestBody(request,24*1024*1024)).toString("utf8"));
  const padId=scratchKey.parse(body.padId),target=targetFor(padId);
  if(request.method==="PUT"){
   const input=save.parse(body.draft);if(padId!==target.id||JSON.stringify(input.target)!==JSON.stringify(target))throw new AtlasError("The lesson target changed. Reopen the scratchpad; your local work is retained.",409);

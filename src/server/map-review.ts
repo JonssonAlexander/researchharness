@@ -3,6 +3,7 @@ import {AtlasError,atlasConceptId} from "../core/atlas.ts";
 import {mapReviewInput,integrationChoices} from "../core/map-review.ts";
 import {emit} from "../core/events.ts";
 import {createRetrievalService} from "./retrieval.ts";
+import {readRequestBody} from "./request-body.ts";
 import {stores} from "./stores.ts";
 const command=z.discriminatedUnion("action",[
 	mapReviewInput.extend({action:z.literal("save")}),
@@ -15,10 +16,11 @@ export async function mapReviewResponse(request:Request):Promise<Response>{
 		const store=stores.atlasStore.reviews;
 		if(request.method==="GET")return Response.json(store.read(new URL(request.url).searchParams.get("id")??""),{headers:{"Cache-Control":"no-store"}});
 		if(request.headers.get("content-type")?.split(";")[0]!=="application/json")return Response.json({error:"Expected JSON."},{status:415});
-		const reader=request.body?.getReader();if(!reader)throw new AtlasError("Expected review content.");
-		const chunks:Uint8Array[]=[];let size=0;
-		try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>512000){await reader.cancel();throw new AtlasError("Review is too large.",413);}chunks.push(value);}}finally{reader.releaseLock();}
-		const result=command.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));if(!result.success)throw new AtlasError(result.error.issues[0]?.message??"Invalid review.");
+		const body=await readRequestBody(request,512000,{
+			missing:"Expected review content.",
+			tooLarge:"Review is too large.",
+		});
+		const result=command.safeParse(JSON.parse(body.toString("utf8")));if(!result.success)throw new AtlasError(result.error.issues[0]?.message??"Invalid review.");
 		const c=result.data;
 		const value=c.action==="save"?store.save({proposalId:c.proposalId,expectedRevision:c.expectedRevision,draft:c.draft}):c.action==="prepare"?store.prepare(c.proposalId,c.expectedRevision,c.choices,c.baseRevision):c.action==="prepare-connections"?store.prepareConnections(c.proposalId,c.baseRevision,c.identities):store.commit(c.id,c.digest);
 		if(c.action==="commit"){await createRetrievalService().autoEnrol();emit("review-changed",{});}

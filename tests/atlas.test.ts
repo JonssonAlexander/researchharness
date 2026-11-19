@@ -12,6 +12,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-test-"));
 process.env.LH_DATA_DIR = root;
 process.env.LH_AUTH_FILE = path.join(root, "auth.json");
 const { createAtlasService, atlasResponse, saveAtlasResponse } = await import("../src/server/atlas.ts");
+const { mapReviewResponse } = await import("../src/server/map-review.ts");
 const { stores } = await import("../src/server/stores.ts");
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 const subject = (title = "Probability"): SubjectInput => ({
@@ -227,6 +228,20 @@ test("the HTTP boundary preserves canonical ledger bytes and rejects oversized/i
 	assert.equal((await post(c)).status, 409);
 	assert.equal((await post({ ...concept(), propositionIds: ["n_missing"] })).status, 409);
 	assert.equal((await post({ ...concept(), title: "x".repeat(65536) })).status, 413);
+	for (const [handler, size, message] of [
+		[saveAtlasResponse, 65537, "Atlas change is too large."],
+		[mapReviewResponse, 512001, "Review is too large."],
+	] as const) {
+		const request = new Request("http://localhost/api/atlas", {
+			method: "POST",
+			headers: { "content-type": "application/json", "content-length": String(size) },
+			body: "{}",
+		});
+		const response = await handler(request);
+		assert.equal(response.status, 413);
+		assert.deepEqual(await response.json(), { error: message });
+		assert.equal(request.bodyUsed, false);
+	}
 	assert.equal((await post(c, "text/plain")).status, 415);
 	assert.equal((await post({ ...concept(), kind: "theorem" })).status, 400);
 	assert.deepEqual(fs.readFileSync(ledger), original);

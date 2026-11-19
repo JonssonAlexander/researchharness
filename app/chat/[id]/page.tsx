@@ -2,7 +2,7 @@ import {challengeClientChat} from "@/src/server";
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
-import { getLesson, compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { getLesson, compactionInFlight, getChat, isTurnRunning, readSettingsRecord, sessionCost, turnFailure } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,8 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={challengeClientChat(chat).messages}
+			initialTurns={chat.turns}
+			initialPricing={sessionCost(chat)}
  initialChallenge={chat.challenge}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}

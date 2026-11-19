@@ -1,4 +1,6 @@
+import { AtlasError } from "../core/atlas.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { readRequestBody } from "./request-body.ts";
 import { webSubscriptionOwner, webSubscriptionsEnabled, webSubscriptionStatus } from "./web-subscriptions.ts";
 
 const HEADERS = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" };
@@ -29,20 +31,17 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 		if (request.method === "GET") return Response.json(await webSubscriptionStatus(), { headers: HEADERS });
 		if (request.method !== "POST") return error("Unsupported method.", 405);
 		if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error("Expected JSON.", 415);
-		// Bound both advertised and streamed input before parsing commands.
-		if (Number(request.headers.get("content-length")) > 16384) return error("Request too large.", 413);
-		const reader = request.body?.getReader();
-		if (!reader) return error("Expected a command.", 400);
-		const chunks: Uint8Array[] = []; let size = 0;
+		let body: Buffer;
 		try {
-			for (;;) {
-				const next = await reader.read(); if (next.done) break;
-				size += next.value.byteLength;
-				if (size > 16384) { await reader.cancel(); return error("Request too large.", 413); }
-				chunks.push(next.value);
-			}
-		} finally { reader.releaseLock(); }
-		const command: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+			body = await readRequestBody(request, 16384, {
+				missing: "Expected a command.",
+				tooLarge: "Request too large.",
+			});
+		} catch (cause) {
+			if (cause instanceof AtlasError) return error(cause.message, cause.status);
+			throw cause;
+		}
+		const command: unknown = JSON.parse(body.toString("utf8"));
 		if (!command || typeof command !== "object" || Array.isArray(command)) return error("Invalid command.", 400);
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;

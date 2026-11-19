@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
@@ -286,12 +286,14 @@ export function SessionRow({
 	chat,
 	active,
 	onOpen,
+	opening = false,
 	kbdSelected = false,
 	onContextMenu,
 }: {
 	chat: ChatListItem;
 	active: boolean;
 	onOpen: () => void;
+	opening?: boolean;
 	/** Keyboard-cycle highlight (shortcut wave A: Alt+↑/↓ + Alt+Enter) —
 	 *  visually distinct from the active session, which stays filled. */
 	kbdSelected?: boolean;
@@ -303,6 +305,7 @@ export function SessionRow({
 			type="button"
 			onClick={onOpen}
 			onContextMenu={onContextMenu}
+			aria-busy={opening || undefined}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			className={cn(
 				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
@@ -318,7 +321,7 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className="block text-xs text-muted-foreground">{opening ? <span role="status">Opening…</span> : sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -401,6 +404,14 @@ function SessionsSidebar() {
 	}, []);
 	const pathname = usePathname();
 	const router = useRouter();
+	const [isOpening, startOpening] = useTransition();
+	const [openingId, setOpeningId] = useState<string | null>(null);
+	const openSession = (id: string) => {
+		const href = `/chat/${id}`;
+		if (pathname === href && !isOpening) return;
+		setOpeningId(id);
+		startOpening(() => router.push(href));
+	};
 	const { open: openSettings } = useSettingsDialog();
 
 	/* New session (owner, 2026-09-13): NO POST — the button opens the
@@ -763,7 +774,7 @@ function SessionsSidebar() {
 									const target = shown![kbdIndex !== null && kbdIndex < n ? kbdIndex : 0];
 									if (!target) return;
 									e.preventDefault();
-									router.push(`/chat/${target.id}`);
+									openSession(target.id);
 									setKbdIndex(null);
 									e.currentTarget.blur();
 								}
@@ -824,10 +835,11 @@ function SessionsSidebar() {
 									key={c.id}
 									chat={c}
 									active={pathname === `/chat/${c.id}`}
+									opening={isOpening && openingId === c.id}
 									kbdSelected={i === kbdIndex}
 									onOpen={() => {
 										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
+										openSession(c.id);
 									}}
 									onContextMenu={(e) => openContext(e, c)}
 								/>

@@ -6,7 +6,7 @@ import {LESSON_DOCUMENT_LIMIT,type LessonDocumentReader} from '../core/lesson-do
 import {pdfPageCount,pdfExtract} from '../agent/subagents/pdf-ops.ts';
 import {getHeadless} from '../agent/subagents/headless.ts';
 import {stores} from './stores.ts';
-import {readSourceBody} from './mindmaps.ts';
+import {readRequestBody} from './request-body.ts';
 import {isTurnRunning} from './turn-liveness.ts';
 import {emit} from '../core/events.ts';
 export function lessonDocumentReader(chatId:string,vision:boolean):LessonDocumentReader{
@@ -29,7 +29,7 @@ export async function lessonDocumentsResponse(request:Request,chatId:string){try
   return Response.json({sources:stores.lessonDocuments.list(chatId)},{headers});
  }
  if(isTurnRunning(chatId))throw new AtlasError('Wait for the current reply before adding a source.',409);
- const name=query.get('name')??'',bytes=await readSourceBody(request,LESSON_DOCUMENT_LIMIT);if(!name||name.length>180||!bytes.length)throw new AtlasError('Choose a named, nonempty source file.');
+ const name=query.get('name')??'',bytes=await readRequestBody(request,LESSON_DOCUMENT_LIMIT);if(!name||name.length>180||!bytes.length)throw new AtlasError('Choose a named, nonempty source file.');
  let pages:number|null=null,kind:'pdf'|'text'='text';
  if(/\.pdf$/i.test(name)||bytes.subarray(0,5).toString()==='%PDF-'){
   kind='pdf';const dir=await fs.mkdtemp(path.join(os.tmpdir(),'atlas-lesson-source-'));try{const file=path.join(dir,'source.pdf');await fs.writeFile(file,bytes,{mode:0o600});pages=await pdfPageCount(file);if(pages>500)throw new AtlasError('Use a PDF of up to 500 pages or attach a shorter extract.');}catch(e){throw e instanceof AtlasError?e:new AtlasError('This PDF could not be opened. Check that it is readable and not password-protected.');}finally{await fs.rm(dir,{recursive:true,force:true});}

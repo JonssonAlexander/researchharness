@@ -630,6 +630,11 @@ describe("graph ledger store", () => {
 		assert.equal(nodes[0]!.name, "Store test");
 		assert.equal(nodes[0]!.statement, "Store test, elaborated.");
 		assert.deepEqual(nodes[0]!.provenance, [{ chatId: "chat_c", messageId: "m1" }]);
+
+		fs.appendFileSync(LEDGER_FILES.nodes, '{"interrupted":');
+		const next = { ...node, id: "n_after_torn_write" };
+		graphStore.appendNode(next);
+		assert.deepEqual(graphStore.readNodes().find((saved) => saved.id === next.id), next);
 	});
 
 

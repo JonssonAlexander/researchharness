@@ -8,6 +8,13 @@ import {
 } from "@/src/server";
 import type { ChatSettings } from "@/src/core";
 
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+	const { id } = await params;
+	const chat = getChat(id);
+	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	return Response.json({ settings: chat.settings });
+}
+
 /**
  * The per-chat model control (model-control wave): replace-whole settings —
  * the picker sends the complete desired object ({} clears all overrides).

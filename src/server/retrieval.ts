@@ -10,7 +10,7 @@ import {piEngineForSpec,type PiEngine} from "../agent/models.ts";
 import {makeReviewQuestion} from "../agent/subagents/retrieval.ts";
 import {reviewScheduler,schedulerConfig,cardInput,prepareReplay,serial} from "./retrieval-scheduler.ts";
 import {stores} from "./stores.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 import {emit} from "../core/events.ts";
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function engineFor(){const spec=resolveSlot(stores.settingsStore.readSettings()?.models?.strong);if(!spec)throw new AtlasError('Choose a teaching model in Settings for AI checks and connected questions. Individual cards work locally.',503);return piEngineForSpec(spec,false);}
@@ -150,5 +150,5 @@ export async function retrievalResponse(request:Request){try{
   return Response.json(await service.snapshot(),{headers:{'Cache-Control':'no-store'}});
  }
  if(!request.headers.get('content-type')?.startsWith('application/json'))throw new AtlasError('Expected JSON.',415);
- const raw=JSON.parse((await readSourceBody(request,24*1024*1024)).toString('utf8')),result=await service.command(raw,request.signal);emit('review-changed',{});return Response.json({result,snapshot:await service.snapshot()});
+ const raw=JSON.parse((await readRequestBody(request,24*1024*1024)).toString('utf8')),result=await service.command(raw,request.signal);emit('review-changed',{});return Response.json({result,snapshot:await service.snapshot()});
  }catch(e){return Response.json({error:e instanceof AtlasError?e.message:e instanceof z.ZodError?`Check review details: ${e.issues[0]?.message??'unsupported request'}`:'Review is unavailable. Saved targets and attempts are retained.'},{status:e instanceof AtlasError?e.status:400});}}

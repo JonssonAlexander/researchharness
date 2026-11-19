@@ -54,7 +54,8 @@ import type { GraphStore } from "../core/ports.ts";
 function appendLine<T>(file: string, record: T): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
+	// A crashed append may have left a partial line without a newline.
+	fs.appendFileSync(file, `\n${JSON.stringify(record)}\n`, "utf-8");
 }
 
 function readRawLines(file: string): unknown[] {

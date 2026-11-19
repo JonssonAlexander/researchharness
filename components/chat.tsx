@@ -229,6 +229,8 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	initialTurns,
+	initialPricing,
 	initialError,
 	initialPrompt,
 	initiallyInFlight,
@@ -245,6 +247,8 @@ export function Chat({
  initialArticle?:string;
 	title: string;
 	initialMessages: LhMessage[];
+	initialTurns?: TurnUsage[];
+	initialPricing?: SessionPricing;
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -950,12 +954,12 @@ export function Chat({
 
 	// ── Session usage (wave-4 stats bar) ──
 	// The money channel: the record's turns log and read-time server Pi
-	// pricing projection. Seeded once on mount (the page doesn't carry turns),
+	// pricing projection. Seeded by the page along with the transcript,
 	// refreshed when the local stream settles (each turn appends to the log
 	// server-side), and kept fresh by syncFromServer whenever it already
 	// fetches the record. No turns yet → the bar renders "—" everywhere.
-	const [turns, setTurns] = useState<TurnUsage[]>([]);
-	const [pricing, setPricing] = useState<SessionPricing | undefined>();
+	const [turns, setTurns] = useState<TurnUsage[]>(initialTurns ?? []);
+	const [pricing, setPricing] = useState<SessionPricing | undefined>(initialPricing);
 	// The per-chat model control state (model-picker writes via PUT; the
 	// record is the source of truth, lifted here so the stats bar re-renders).
 	// The dock's reserved tail height (DockOverlay reports it; the spacer at
@@ -976,9 +980,6 @@ export function Chat({
 			// transient blip: stats stay on the last known figures
 		}
 	}, [chatId]);
-	useEffect(() => {
-		void syncTurns();
-	}, [syncTurns]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
 	// 2026-10-02): our own stream just ended. Two instant LOCAL actions

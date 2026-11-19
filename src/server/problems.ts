@@ -7,7 +7,7 @@ import type {LhMessage} from "../core/native-messages.ts";
 import {stores} from "./stores.ts";
 import {isTurnRunning} from "./turn-liveness.ts";
 import {compactionInFlight} from "./compaction.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 /** Redaction is only for browser/export views. The model and persisted native transcript stay intact. */
 export function challengeClientValue<T>(value:T,chatId:string,entries?:ReturnType<typeof stores.problemStore.byChat>):T{
  if(!entries&&!stores.chatStore.getChat(chatId)?.challenge)return value;
@@ -27,7 +27,10 @@ export function challengeClientValue<T>(value:T,chatId:string,entries?:ReturnTyp
  }
  return visit(value) as T;
 }
-export function challengeClientChat(chat:ChatRecord){return {...chat,messages:challengeClientValue(chat.messages,chat.id)};}
+export function challengeClientChat(chat:ChatRecord){
+ if(!chat.challenge)return chat;
+ return {...chat,messages:challengeClientValue(chat.messages,chat.id,stores.problemStore.byChat(chat.id))};
+}
 export function currentChallenge(chatId:string){return stores.problemStore.byChat(chatId).at(-1)??null;}
 export function challengeScratchLesson(chatId:string){const saved=currentChallenge(chatId);return saved?challengeLesson(saved.problem,saved.attempt):null;}
 function seed(p:SavedProblem,a:ProblemAttempt):LhMessage[]{const timestamp=Date.now();return [
@@ -46,7 +49,7 @@ export async function problemsResponse(request:Request){try{
   return Response.json({problems:entries.filter(p=>!q.has("conceptId")||[...p.conceptIds,...p.techniqueIds].includes(q.get("conceptId")!)).map(p=>publicProblem(p,q.has("chatId")?p.attempts.find(a=>a.chatId===q.get("chatId"))?.id:undefined))},{headers});
  }
  if(!request.headers.get("content-type")?.startsWith("application/json"))throw new AtlasError("Expected JSON.",415);
- const c=action.parse(JSON.parse((await readSourceBody(request,16384)).toString("utf8"))),p=stores.problemStore.read(c.id);if(!p)throw new AtlasError("Problem not found.",404);
+ const c=action.parse(JSON.parse((await readRequestBody(request,16384)).toString("utf8"))),p=stores.problemStore.read(c.id);if(!p)throw new AtlasError("Problem not found.",404);
  if(c.action==="retry"){
   const existing=p.attempts.find(a=>a.id===`pa_${c.requestId}`);if(existing){recoverChallengeHistory(stores.chatStore.getChat(existing.chatId)!);return Response.json({chatId:existing.chatId});}
   const chat=stores.chatStore.createChat(p.title,"practice",challengeSettings.parse({workflow:"challenge",minutes:c.minutes})),original=stores.chatStore.getChat(p.attempts[0]!.chatId);if(original?.settings)stores.chatStore.saveSettings(chat.id,original.settings);

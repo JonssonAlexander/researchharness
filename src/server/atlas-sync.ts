@@ -8,7 +8,7 @@ import { newGraphContextMessage, chainsForSelection, formatChainLine, sessionMar
 import { resolveRoleSpec, resolveConversationSpec, resolveSlot } from "../core/settings-resolution.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { reviewAtlasKnowledge } from "../agent/subagents/atlas-sync.ts";
-import { readSourceBody } from "./mindmaps.ts";
+import { readRequestBody } from "./request-body.ts";
 import { emit } from "../core/events.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { stores } from "./stores.ts";
@@ -128,7 +128,7 @@ export async function atlasSyncResponse(request: Request): Promise<Response> {
         }
         if (request.headers.get("content-type")?.split(";")[0] !== "application/json")
             throw new AtlasError("Expected JSON.", 415);
-        const c = command.parse(JSON.parse((await readSourceBody(request, 16000)).toString("utf8")));
+        const c = command.parse(JSON.parse((await readRequestBody(request, 16000)).toString("utf8")));
         return Response.json(c.action === "generate" ? await service.generate(c, request.signal) : service.commit(c));
     }
     catch (e) {

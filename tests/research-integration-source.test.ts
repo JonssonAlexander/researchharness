@@ -23,18 +23,27 @@ test('bounded source review preserves batches, rejects stale files and gates art
   fs.writeFileSync(path.join(root,'.research-atlas','workspace.json'),JSON.stringify({schemaVersion:1,workspaceId,trails:[{trailId,relativePath:`trails/${trailId}`}]}));
   fs.writeFileSync(path.join(dir,'brief.md'),'question'); fs.writeFileSync(path.join(dir,'handoff.md'),'handoff'); fs.writeFileSync(path.join(root,'result.txt'),'result');
   const entries:string[]=[];
-  for(let i=0;i<22;i++) { const runId=`run_${i}`, data=JSON.stringify({schemaVersion:1,runId,trailId,outcome:'completed',artifacts:i===0?[{path:'result.txt',hash:hash('result'),mime:'text/plain'}]:[]}); fs.writeFileSync(path.join(dir,'runs',`${runId}.json`),data); entries.push(JSON.stringify({schemaVersion:1,runId,path:`${runId}.json`,hash:hash(data)})); }
+  for(let i=0;i<40;i++) { const runId=`run_${i}`, data=JSON.stringify({schemaVersion:1,runId,trailId,outcome:'completed',artifacts:i===0?[{path:'result.txt',hash:hash('result'),mime:'text/plain'}]:[]}); fs.writeFileSync(path.join(dir,'runs',`${runId}.json`),data); entries.push(JSON.stringify({schemaVersion:1,runId,path:`${runId}.json`,hash:hash(data)})); }
+  const interruptedRun=path.join(dir,'runs','run_1.json'), restored=fs.readFileSync(interruptedRun);
+  fs.unlinkSync(interruptedRun);
   entries.push('{bad json'); fs.writeFileSync(path.join(dir,'runs','index.jsonl'),entries.join('\n'));
   const reviews=new Map<string,PreparedResearch>(); let checkpoint:ResearchCheckpoint|null=null;
   const integration:ResearchIntegrationStore={checkpoint:()=>checkpoint,reviews:()=>[],review(id){const value=reviews.get(id);if(!value)throw Error('missing');return value;},prepare(value){reviews.set(value.id,value);return value;},apply(input){const value=this.review(input.reviewId); value.status=input.dismiss?'dismissed':'applied';checkpoint={trailId,workspaceId,fileHashes:value.fileHashes,runHashes:{...checkpoint?.runHashes,...value.runHashes},git:value.git,runCursor:value.runCursor,receipt:value.id,updatedAt:now};return {reviewId:value.id,status:value.status,evidenceIds:[]};},evidence:()=>[]};
   const store:ResearchStore & {integration:ResearchIntegrationStore}={integration,list:()=>({trails:[trail],workspaces:[workspace]}),detail:()=>({trail,nodes:[node],workspace}),save:()=>({})};
   const service=createResearchIntegrationService(store,path.join(temp,'data'));
-  const review=service.prepare(trailId); assert.equal(review.sources.filter(s=>s.kind==='run').length,20); assert.equal(review.remaining,3); assert(review.warnings.some(w=>w.includes('reproducibility'))); assert.equal(checkpoint,null);
+  const review=service.prepare(trailId); assert.equal(review.sources.filter(s=>s.kind==='run').length,19); assert.equal(review.remaining,21); assert(review.warnings.some(w=>w.includes('reproducibility'))); assert(review.warnings.some(w=>w.includes('Run run_1 is unavailable'))); assert.equal(checkpoint,null);
   const run=review.sources.find(s=>s.run?.runId==='run_0')!; assert.equal(service.inspect({reviewId:review.id,sourceId:run.id,artifactIndex:0,approve:true}).content,'result');
   fs.unlinkSync(path.join(root,'result.txt')); fs.symlinkSync('/etc/passwd',path.join(root,'result.txt')); assert.throws(()=>service.inspect({reviewId:review.id,sourceId:run.id,artifactIndex:0,approve:true}),/symlink/);
   fs.writeFileSync(path.join(dir,'handoff.md'),'changed'); assert.throws(()=>service.apply({reviewId:review.id,digest:review.digest,decisions:[],dismiss:true}),/changed/);
   fs.writeFileSync(path.join(dir,'handoff.md'),'handoff'); service.apply({reviewId:review.id,digest:review.digest,decisions:[],dismiss:true});
-  const next=service.prepare(trailId); assert.equal(next.sources.filter(s=>s.kind==='run').length,2); assert.equal(next.remaining,0); assert(next.warnings.some(w=>w.includes('invalid')));
+  fs.writeFileSync(interruptedRun,restored);
+  const next=service.prepare(trailId);
+  assert.deepEqual(next.sources.flatMap(s=>s.run?[s.run.runId]:[]).sort(),['run_1',...Array.from({length:19},(_,i)=>`run_${i+20}`)]);
+  assert.equal(next.remaining,2);
+  service.apply({reviewId:next.id,digest:next.digest,decisions:[],dismiss:true});
+  const last=service.prepare(trailId);
+  assert.deepEqual(last.sources.flatMap(s=>s.run?[s.run.runId]:[]),['run_39']);
+  assert.equal(last.remaining,0); assert(last.warnings.some(w=>w.includes('invalid')));
   const huge=JSON.stringify({schemaVersion:1,runId:'huge',trailId,outcome:'completed',objective:'x'.repeat(70000)}); fs.writeFileSync(path.join(dir,'runs','huge.json'),huge);
   const invalid=Array.from({length:21},()=>'{bad json'); invalid.push(JSON.stringify({schemaVersion:1,runId:'escape',path:'../secret.json',hash:hash('secret')}),JSON.stringify({schemaVersion:1,runId:'huge',path:'huge.json',hash:hash(huge)}));
   fs.writeFileSync(path.join(dir,'runs','index.jsonl'),invalid.join('\n')); const first=service.prepare(trailId); assert.equal(first.remaining,3); assert.equal(first.runCursor,20);

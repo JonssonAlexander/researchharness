@@ -6,7 +6,7 @@ import {AtlasError} from "../core/atlas.ts";
 import {articleId,readingComment,readingContext,articleCanvasTarget,type ReadingArticle,type ReadingComment} from "../core/article-reading.ts";
 import {scratchScene,type ScratchScene} from "../core/scratchpad.ts";
 import {stores} from "./stores.ts";
-import {readSourceBody} from "./mindmaps.ts";
+import {readRequestBody} from "./request-body.ts";
 import {emit} from "../core/events.ts";
 const token=z.string().uuid(),revision=z.number().int().nonnegative();
 const command=z.discriminatedUnion('action',[
@@ -53,7 +53,7 @@ export async function readingResponse(request:Request,chat:string){try{
  }
  if(!request.headers.get('content-type')?.startsWith('application/json'))throw new AtlasError('Expected JSON.',415);
  requireSameOrigin(request);
- const c=command.parse(JSON.parse((await readSourceBody(request,24*1024*1024)).toString('utf8'))),{article}=resolveArticle(chat,c.sourceId);
+ const c=command.parse(JSON.parse((await readRequestBody(request,24*1024*1024)).toString('utf8'))),{article}=resolveArticle(chat,c.sourceId);
  if(c.action==='open')return Response.json({workspace:stores.readingStore.open(chat,article)},{headers});
  let w=stores.readingStore.read(chat,article.hash);if(!w)throw new AtlasError('Open this article first.',409);
  const {revision:_revision,...requestData}=c as typeof c&{revision:number};void _revision;const requestHash=createHash('sha256').update(JSON.stringify(requestData)).digest('hex');

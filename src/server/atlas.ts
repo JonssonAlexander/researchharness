@@ -1,5 +1,6 @@
 import { AtlasError, atlasCommandSchema, type AtlasStore } from "../core/atlas.ts";
 import { emit } from "../core/events.ts";
+import { readRequestBody } from "./request-body.ts";
 import { stores } from "./stores.ts";
 
 /** Only explicit owner-authored saves are exposed. No model tool writes Atlas. */
@@ -34,25 +35,11 @@ export async function saveAtlasResponse(request: Request): Promise<Response> {
 	if (request.headers.get("content-type")?.split(";")[0] !== "application/json")
 		return Response.json({ error: "Expected JSON." }, { status: 415 });
 	try {
-		const reader = request.body?.getReader();
-		if (!reader) throw new AtlasError("Expected an Atlas change.");
-		const chunks: Uint8Array[] = [];
-		let size = 0;
-		try {
-			for (;;) {
-				const { value, done } = await reader.read();
-				if (done) break;
-				size += value.byteLength;
-				if (size > 65536) {
-					await reader.cancel();
-					throw new AtlasError("Atlas change is too large.", 413);
-				}
-				chunks.push(value);
-			}
-		} finally {
-			reader.releaseLock();
-		}
-		return Response.json(service().save(JSON.parse(Buffer.concat(chunks).toString("utf8"))));
+		const body = await readRequestBody(request, 65536, {
+			missing: "Expected an Atlas change.",
+			tooLarge: "Atlas change is too large.",
+		});
+		return Response.json(service().save(JSON.parse(body.toString("utf8"))));
 	} catch (error) {
 		return failure(error);
 	}
