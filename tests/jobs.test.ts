@@ -45,6 +45,7 @@ import {
 	buildProbeHandoffSteer,
 } from "../src/core/contracts.ts";
 import { composeInstructions, createTeacherAgent } from "../src/agent/teacher-agent.ts";
+import { listSourceSegments } from "../src/agent/prompt-segments.ts";
 import { createTeacherTools } from "../src/agent/tools.ts";
 import { webTools } from "../src/agent/tools/web.ts";
 import { handleChatRequest } from "../src/server/chat-handler.ts";
@@ -1504,17 +1505,15 @@ describe("prompt composition", () => {
 		);
 	});
 
-	it("guards prompt size — no fragment can silently balloon (the README-leak class)", () => {
-		// The wave-1 leak: README.md (815 bytes / ~200 tokens) rode into every
-		// teacher turn until the numeric-prefix filter stopped it. This guard
-		// catches the sibling failure mode — an accidental dump pasted into a
-		// fragment. Thresholds: largest real fragment is 40-demos.md at ~3.2k
-		// chars; 8k is generous headroom. Composed total ≤ 60k chars.
-		for (const f of fs.readdirSync("src/agent/prompts").filter((f) => /^\d+-[\w.-]+\.md$/.test(f))) {
-			const body = fs.readFileSync(`src/agent/prompts/${f}`, "utf-8").trim();
-			assert.ok(body.length <= 8_000, `fragment ${f} is ${body.length} chars — over the 8k guard`);
+	it("guards the size of the default teacher and practice prompts", () => {
+		for (const [role, limit] of [["teacher", 24_000], ["practice", 14_000]] as const) {
+			for (const segment of listSourceSegments(role)) {
+				const length = fs.readFileSync(segment.file, "utf-8").trim().length;
+				assert.ok(length <= 8_000, `${segment.path} exceeds the 8,000-character fragment budget`);
+			}
+			const length = composeInstructions(role).length;
+			assert.ok(length <= limit, `${role} prompt is ${length} characters, above its ${limit}-character budget`);
 		}
-		assert.ok(composeInstructions("teacher").length <= 60_000, "composed system prompt over the 60k guard");
 	});
 });
 

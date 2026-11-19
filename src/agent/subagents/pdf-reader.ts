@@ -43,8 +43,6 @@ Reading doctrine — always in this order:
      the pages that hit. Never read a long document front-to-back.
 3. When the extracted text of a page looks math- or diagram-heavy, or garbled, RENDER that
    page and read it visually before drawing conclusions from it.
-4. Render DPI guidance: 100 for text-dominant pages, 150 the default, 200 for dense small
-   print (math details, fine diagrams).
 
 Tool outputs may be error strings (file unreadable, invalid regex, no hits). Adapt: narrow the
 page spec, change the query, lower DPI. If the document genuinely cannot answer the question,
@@ -99,7 +97,7 @@ export function createPdfTools(_pdfPath: string): Record<string, Tool> {
 		pdf_render: {
 			name: "pdf_render",
 			description:
-				"Render pages to images and show them to you for visual reading (equations, diagrams, layout). DPI: 100 text, 150 default, 200 dense small print. Max 6 pages per call.",
+				"Render pages to images for visual reading (equations, diagrams, layout). Max 6 pages per call.",
 			parameters: Type.Object({
     region: Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), width: Type.Number(), height: Type.Number() }, { description: "Optional normalized page rectangle (0–1, top-left origin) for detail." })),
 				pages: Type.String({ description: "Page spec, e.g. '1-3' or '2,5,8'" }),
@@ -196,8 +194,6 @@ export async function runPdfReaderAgent(
 	const prompt = [
 		`PDF path: ${pdfPath}`,
 		`Question (what the teacher needs from this document): ${input.question || "(no question — give a structural overview)"}`,
-		"",
-		"Read the document per your doctrine, then produce your final brief in the required format.",
 	].join("\n");
 
 	let messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];

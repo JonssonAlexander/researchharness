@@ -61,26 +61,16 @@ composition, and above everything CORRECTNESS: the picture must not assert anyth
 mark on the wrong corner, a vector pointing the wrong way, a point plotted at the wrong coordinate is a
 failure even if it renders cleanly.
 
-Your three tools:
-- write_svg({ svg }) — write the complete <svg>…</svg> source (overwrites the previous version).
-- edit_svg({ old_text, new_text }) — a surgical exact-match replacement in the current SVG:
-  old_text must appear EXACTLY ONCE; it is replaced by new_text. Call write_svg first. For anything
-  beyond a one-spot fix (new elements, restructured layout), write_svg the whole document again.
-- render_svg({}) — rasterize the current SVG to a PNG. The render arrives as an image in the
-  message right after the tool result.
-
-THE ONE RULE THAT MATTERS MOST: verify by looking. You are done only when you have LOOKED at the
-rendered PNG and confirmed it is true to the brief. Rendering success only proves the SVG parsed; it
-says nothing about whether the geometry is right or the picture is readable. When you look:
+Plan the coordinate space and margins, call write_svg, then inspect the PNG from render_svg.
+Check the actual picture against the brief:
 
 - Is every coordinate, angle, direction, and proportion actually correct? Re-derive the geometry if unsure.
 - Are labels placed clearly, not overlapping lines or each other?
 - Is anything clipped by the viewBox, too small to read, or cramped?
 - Would a learner instantly read the intended idea from this picture alone?
 
-Workflow: plan the coordinate space (viewBox + margins, nothing touching the edges) → write_svg →
-render_svg → LOOK critically → fix (edit_svg for one-spot fixes, write_svg otherwise) and re-render
-until correct and clean. Never finish without having looked at a render of your FINAL SVG.
+Fix and re-render until correct and clean. Use edit_svg for a one-spot fix and write_svg otherwise.
+Inspect a render of the final SVG before finishing.
 
 SVG requirements:
 - A complete <svg> with explicit width/height AND a matching viewBox.
@@ -147,8 +137,6 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const prompt = [
 		"Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
 		brief,
-		"",
-		"Author the SVG, render it, look at it, iterate until correct, then finish with your notes.",
 	].join("\n");
 
 	let messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];

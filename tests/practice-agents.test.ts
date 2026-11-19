@@ -297,14 +297,14 @@ describe("persistent practice nudges", () => {
 
 	it("keeps the many-claims default, hint ladder, dismissal, and explicit-go-ahead pause", () => {
 		const prompt = normalizeWhitespace(composeInstructions("practice"));
-		assert.match(prompt, /A problem may take many claims; staying is the default/);
+		assert.match(prompt, /Stay with the active problem across attempts/);
 		for (const rung of ["R0", "R1", "R2", "R3", "R4", "R5"]) {
 			assert.ok(prompt.includes(`**${rung} —`));
 		}
-		assert.match(prompt, /Concluding ends your turn; the next problem is posed only when the learner explicitly moves on/);
-		assert.match(prompt, /After the conclude's result.*END YOUR TURN: no further tool calls in that reply, never another problem/);
-		assert.match(prompt, /A clarification question is never the go-ahead; when in doubt, answer and wait/);
-		assert.match(prompt, /The learner may discard a problem without concluding it/);
+		assert.match(prompt, /then end the turn with no further tool calls/);
+		assert.match(prompt, /Pose again only after \*\*Next problem\*\* or an explicit request to move on/);
+		assert.match(prompt, /A follow-up question leaves the pause in place/);
+		assert.match(prompt, /A learner dismissal also closes the problem, with no reveal/);
 	});
 
 	it("aligns the conclude description with the canonical ack without changing outcomes or the runtime pause mechanism", async () => {
@@ -332,7 +332,7 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		// The base's voice section and the doctrine's spine are present…
 		assert.match(prompt, /Everything in this section deletes a default/);
 		assert.match(prompt, /You run practice sessions\./);
-		assert.match(prompt, /## Standing prohibitions/);
+		assert.match(prompt, /Keep the intended proposition out of the wording/);
 		// …and nothing from the teaching system prompt or shared fragments.
 		assert.doesNotMatch(prompt, /install understanding/);
 		// The shared 20-question-tools doctrine (predict/check) must not
@@ -364,13 +364,12 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		// plan rewriting is normal, not exceptional (continuous adaptation)
 		assert.match(teacher, /Rewriting is a normal, common event/);
 		// planning is the natural verification moment
-		assert.match(teacher, /planning is the natural moment for verification/);
+		assert.match(teacher, /planning is the natural moment for verification/i);
 		// no size ceilings, and the detour keeps the pace (owner round, 2026-10-07)
 		assert.ok(!teacher.includes("Typically 5–15 nodes"), "the node-count cap is dead");
 		assert.match(teacher, /No size ceiling/);
 		assert.match(teacher, /never rush the repair/);
-		assert.match(teacher, /one and only pace/);
-		assert.match(teacher, /nothing to rush/, "the goal reiteration composes");
+		assert.match(teacher, /Give repairs the same pace as the rest of the lesson/);
 	});
 
 	it("the prober doctrine steers difficulty by evidence (owner round, 2026-10-07)", () => {

@@ -63,17 +63,8 @@ Build quality:
 - Smooth enough interaction; requestAnimationFrame for animation, not setInterval when it matters.
 - Dark-mode neutral: pick a clean light background for the demo area so it reads on any card.
 
-THE HOUSE RULE — never deliver untested:
-1. Call write_demo with the complete HTML document.
-2. Call run_demo. It loads the file in a headless browser, waits ~2s, and reports console errors, uncaught
-   errors (window.onerror), and failed requests. Optionally pass a probe: a JS expression evaluated in
-   the page (e.g. "typeof window.simulate === 'function'" or a state assertion) to check deeper.
-3. If run_demo reports problems, FIX the document and call write_demo again, then run_demo again.
-   Iterate until run_demo reports PASSED.
-4. Only then finish. Your final message is 1-3 sentences of NOTES for the teacher (what the demo shows,
-   its controls, what to try) — NEVER the HTML itself.
-
-Never claim success you did not see: a PASSED run_demo is the only definition of done.`;
+Use write_demo, then run_demo. Fix any problems and repeat until run_demo reports PASSED on the final HTML.
+Then return 1–3 sentences for the teacher on what it shows, its controls and what to try. Omit the HTML.`;
 
 interface BuilderState {
 	html: string | null;
@@ -106,8 +97,7 @@ export function createDemoBuilderTools(
 			name: "write_demo",
 			label: "write_demo",
 			description:
-				"Write the complete self-contained HTML document for the demo (overwrites any previous version). " +
-				"Always follow with run_demo to test it headlessly.",
+				"Write the complete self-contained HTML document for the demo (overwrites any previous version).",
 			parameters: writeDemoInput,
 			execute: serverExecute("write_demo", writeDemoInput, async ({ html }) => {
 				if (!html || html.trim().length === 0) return "ERROR: empty document — write the full HTML.";
@@ -198,8 +188,6 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 		`Demo title: ${title}`,
 		`Brief (all you know about the lesson — this comes from the teacher, verbatim):`,
 		brief,
-		"",
-		"Build the demo, test it with run_demo, iterate until PASSED, then finish with your notes.",
 	].join("\n");
 
 	let finalText = "";
