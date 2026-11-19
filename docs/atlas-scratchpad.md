@@ -69,11 +69,14 @@ Duplicate IDs acknowledge the same delivery without appending or launching a new
 turn. An image-capability/missing-asset preflight refuses unsupported input before
 new chat history is written. No drawing is silently sent as text alone.
 
-The agent's injected attachment resolver loads the checked PNG only at its model
-boundary, where Pi receives a real user image block. Native history never stores
-repeated base64 copies. Compacted-away drawings are not reloaded; image references
-get the existing fixed image-token estimate in context heuristics. Replay uses the
-same resolution. The transcript renders the submitted image and learner explanation.
+A new scratchpad submission and its first learner follow-up carry the latest
+PNG automatically. Retry keeps the drawing needed for that response. Resuming
+pending feedback can carry the drawing even after a compaction cut. Later
+messages and automatic job wakes rely on the saved text and attempt references.
+The tutor can list and read submitted drawings from the same chat, including
+compacted attempts. A requested PNG goes to the inference after the tool call.
+Native history saves the tool receipt and attempt references. The transcript
+renders the submitted images and learner explanations.
 Text exports/summaries explicitly note that drawing pixels are not present; later
 lesson distillation can use the recorded feedback and text but does not independently
 reread these images in this slice.

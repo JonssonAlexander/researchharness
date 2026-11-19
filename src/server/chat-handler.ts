@@ -8,9 +8,9 @@ import { fileAccessPolicy } from "./file-access.ts";
 import {challengeProjection,challengeScratchLesson,recoverChallengeHistory,reconcileChallengeCalls} from "./problems.ts";
 import {lessonDocumentReader} from "./lesson-documents.ts";
 import {graphView} from "./graph.ts";
-import {scratchDelivery} from "../core/scratchpad.ts";
-import {scratchMessage,scratchImages} from "./scratchpad.ts";
-import {learningInstructions} from "../core/learning-session.ts";
+import {activeScratchpadImageId,scratchDelivery} from "../core/scratchpad.ts";
+import {scratchMessage,scratchImages,scratchpadContext} from "./scratchpad.ts";
+import {LEARNING_INSTRUCTIONS} from "../core/learning-session.ts";
 import {lessonContextText} from "../core/lesson-context.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
@@ -99,7 +99,7 @@ function instructionTokens(chatId:string,kind?:"teach"|"practice"):number {
  const lesson=kind!=="practice"?stores.lessonStore.read(chatId):null;
  // The fresh model-only tail is absent from native history, so include it in
  // the existing compaction budget rather than silently consuming headroom.
- return Math.ceil((lesson?learningInstructions(lesson).length+lessonContextText(lesson).length:composeInstructions(kind==="practice"?"practice":"teacher").length)/4);
+ return Math.ceil((lesson?LEARNING_INSTRUCTIONS.length+lessonContextText(lesson,stores.lessonStore.originalGoal(chatId,lesson)).length:composeInstructions(kind==="practice"?"practice":"teacher").length)/4);
 }
 
 function settlementErrorText(error: unknown): string {
@@ -300,9 +300,11 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
-	if(input.type==="scratchpad"||record.messages.some(m=>m.role==="custom"&&m.customType==="scratchpad-attempt")){
-  try{const candidates=input.type==="scratchpad"?[...record.messages,scratchMessage(chatId,input.attemptId)]:record.messages;scratchImages(chatId,candidates,conversationEngine.model.input.includes("image"));}catch(e){return Response.json({error:e instanceof Error?e.message:"Drawing attachment unavailable"},{status:422});}
- }
+	const vision = conversationEngine.model.input.includes("image");
+	if (input.type === "scratchpad") {
+		try { scratchImages(chatId, [scratchMessage(chatId, input.attemptId)], vision); }
+		catch (e) { return Response.json({error: e instanceof Error ? e.message : "Drawing attachment unavailable"}, {status: 422}); }
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
@@ -379,6 +381,17 @@ export async function handleChatInput(
 		return settledTurnResponse(); // the cheap terminal — no beginTurn, no turn
 	}
 
+	const merged = [...record.messages, ...appends];
+	// Retry omits failed replies only in the request, so Pi can continue from the original input.
+	const agentMessages = input.type === "retry" ? merged.filter(m => !retryOmissions.has(m.id)) : merged;
+	const resumeId = input.type === "continue" ? input.scratchpadAttemptId : undefined;
+	const drawingId = input.type === "steers" ? null : resumeId ?? activeScratchpadImageId(agentMessages);
+	const resumeOlderDrawing = !!resumeId || input.type === "retry";
+	if (drawingId && input.type !== "scratchpad") {
+		try { scratchImages(chatId, agentMessages, vision, drawingId, resumeOlderDrawing); }
+		catch (e) { return Response.json({error: e instanceof Error ? e.message : "Drawing attachment unavailable"}, {status: 422}); }
+	}
+
 	// One turn per chat, ever. A second request while a turn runs means a
 	// stale/remounted client raced a live one — letting it through would
 	// double-run the teacher and clobber the first turn's persist.
@@ -393,13 +406,8 @@ export async function handleChatInput(
 	// truth instead of the pre-answer record. (Wave C: the wake's markers
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
-	const merged = [...record.messages, ...appends];
-	// Retry preserves every persisted attempt. Pi needs a non-assistant
-	// tail to start continue(), so its temporary history omits the trailing
-	// failures only. Count that SAME temporary prefix at settlement, or the
-	// retained failures would make persistTurn skip genuinely new output.
-	const agentMessages = input.type === "retry" ? merged.filter((m) => !retryOmissions.has(m.id)) : merged;
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
+	// Count the same temporary prefix used by Pi when settling the full native record.
 	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
 		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
@@ -478,7 +486,9 @@ export async function handleChatInput(
  lessonSources:lesson?lessonDocumentReader(chatId,engine.model.input.includes("image")):undefined,
  challenge:record.challenge?{store:stores.problemStore,minutes:record.challenge.minutes}:undefined,
  atlasLookup:(lesson||record.challenge)&&graphToolsEnabled(effective)?{read:()=>{const graph=graphView();return {atlas:stores.atlasStore.read(),propositions:graph.propositions,chains:graph.chains};},lesson:id=>stores.atlasStore.lessonReviews.read(id)}:undefined,
- resolveAttachments:messages=>scratchImages(chatId,messages,engine.model.input.includes("image")),
+ readChatHistory: lesson ? () => stores.chatStore.getChat(chatId)?.messages ?? [] : undefined,
+ lessonHistoryInputId: input.type === "text" ? appends.findLast(m => m.role === "user")?.id : undefined,
+ ...scratchpadContext(chatId,agentMessages,vision,drawingId,resumeOlderDrawing),
 		engine,
 		callPurpose,
 		requestCycle,

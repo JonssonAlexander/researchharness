@@ -79,13 +79,14 @@ test("alias resolves only OAuth; native Responses body is stateless/namespaced, 
 	assert.equal(call.id, "call_scratch|fc_scratch"); assert.equal(call.namespace, "learnharness");
 	const thinking = result.content.find((block) => block.type === "thinking")!;
 	assert.equal(thinking.thinkingSignature, JSON.stringify(reasoning));
-	const history = normalizeContext({ messages: [...context().messages, result, { role: "toolResult", toolCallId: call.id, toolName: call.name, isError: false, content: [{ type: "text", text: "Scratch tool result" }], timestamp: 2 }] });
+	const history = normalizeContext({ messages: [...context().messages, result, { role: "toolResult", toolCallId: call.id, toolName: call.name, isError: false, content: [{ type: "text", text: "Scratch tool result" }, { type: "image", data: "b2xk", mimeType: "image/png" }], timestamp: 2 }] });
 	responseEvents = [complete()];
 	await engine.streamFn(engine.model, history).result();
 	const replay = requests[1]!.body.input;
 	assert(replay.some((item: any) => item.encrypted_content === "scratch-encrypted-reasoning"));
 	assert(replay.some((item: any) => item.type === "function_call" && item.id === "fc_scratch" && item.namespace === "learnharness"));
-	assert(replay.some((item: any) => item.type === "function_call_output" && item.call_id === "call_scratch"));
+	const output = replay.find((item: any) => item.type === "function_call_output" && item.call_id === "call_scratch");
+	assert(output?.output.some((block: any) => block.type === "input_image" && block.image_url === "data:image/png;base64,b2xk"));
 });
 
 test("mixed history never blanket-relabels API providers or reuses foreign reasoning signatures", () => {

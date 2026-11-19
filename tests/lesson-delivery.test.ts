@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {initialLesson, learningInstructions, type LearningSession} from '../src/core/learning-session.ts';
-import {lessonContext, lessonContextText, LESSON_CONTEXT_LIMIT} from '../src/core/lesson-context.ts';
+import {initialLesson, LEARNING_INSTRUCTIONS, type LearningSession} from '../src/core/learning-session.ts';
+import {lessonContext, LESSON_CONTEXT_LIMIT} from '../src/core/lesson-context.ts';
 import {asAgentMessages} from '../src/core/native-messages.ts';
 import {newCompactionMarker} from '../src/core/compaction.ts';
 import {lessonDelivery} from '../src/server/lesson-delivery.ts';
@@ -47,15 +47,18 @@ test('bounded snapshot supplies current plus two route candidates with complete 
     assert.equal(lessonContext(null).status, 'unavailable');
 });
 
-test('oversized context omits whole topics/targets explicitly instead of chopping equations or notes', () => {
+test('oversized context gives priority to exact active goals and targets over optional notes', () => {
     const saved = lesson(); saved.plan.nodes = Array.from({length: 40}, (_, i) => ({id: `topic_${i}`, title: '\\'.repeat(160), notes: '\\'.repeat(2000), conceptId: null, tangent: false}));
     saved.plan.objective = '\\'.repeat(4000);
     saved.plan.derivations = [{id: 'proof', nodeId: 'topic_0', title: 'Proof', start: '\u0001'.repeat(4000), finish: '\u0002'.repeat(4000), status: 'working'}];
     saved.plan.activeDerivationId = 'proof';
     const s = lessonContext(saved); assert('topics' in s);
-    assert(JSON.stringify(s).length <= LESSON_CONTEXT_LIMIT);
-    assert.equal(s.activeTargetNeedsRead, true);
-    assert(!('start' in s.activeDerivation!));
+    assert(JSON.stringify(s).length > LESSON_CONTEXT_LIMIT);
+    assert.equal(s.objective, saved.plan.objective);
+    assert.deepEqual(s.activeDerivation, saved.plan.derivations[0]);
+    assert.equal(s.route.length, 40);
+    assert.deepEqual(s.completeTopicIds, ['topic_0']);
+    assert.equal(s.omittedTopicIds.length, 39);
     for (const n of s.topics) assert.equal(n.notes, saved.plan.nodes.find(t => t.id === n.id)!.notes);
 });
 
@@ -65,27 +68,29 @@ test('working derivation retains complete Start/Finish and excludes automatic ne
     const s = lessonContext(saved); assert('topics' in s);
     assert.deepEqual(s.activeDerivation, saved.plan.derivations[0]);
     assert.deepEqual(s.completeTopicIds, ['topic_0']);
-    assert.equal(s.activeTargetNeedsRead, false);
-    assert.match(learningInstructions(saved), /wait for the independent attempt/);
+    assert.match(LEARNING_INSTRUCTIONS, /wait for the independent attempt/);
 });
 
 test('request-local snapshot refreshes after learner edits and tool writes without entering history or the system prefix', async () => {
     const store = createLearningSessionStore(path.join(root, 'fresh')), first = store.create('fresh', lesson().plan);
-    const prefix = learningInstructions(first), faux = createFauxCore({});
+    const faux = createFauxCore({});
+    let prefix: string | undefined;
     const agent = agentFor('fresh', store, faux);
     // An edit after agent construction must be visible at the actual inference boundary.
     const changed = structuredClone(first.plan); changed.nodes[0]!.notes = 'Learner correction: preserve $B_{11}A$.';
+    changed.objective = 'Explain estimation under a rank constraint';
     store.save('fresh', {expectedRevision: 1, status: 'active', plan: changed});
     faux.setResponses([
-        context => {const s = snapshotIn(context.messages); assert(s.includes('Learner correction')); assert(s.includes('B_{11}A')); return fauxAssistantMessage([fauxToolCall('edit_lesson', {expectedRevision: 2, topics: [{id: 'estimate', notes: 'Updated estimation equation.'}]}, {id: 'batch'})], {stopReason: 'toolUse'});},
-        context => {const s = snapshotIn(context.messages); assert(s.includes('Updated estimation equation')); return fauxAssistantMessage([fauxText('The covariance factors determine the estimator.')]);},
+        context => {prefix = JSON.stringify(context.messages.find(m => m.role === 'system')?.content); const s = snapshotIn(context.messages); assert(s.includes('Learner correction')); assert(s.includes('B_{11}A')); assert(s.includes(changed.objective)); assert(s.includes(first.plan.objective)); assert(prefix && !prefix.includes(changed.objective)); return fauxAssistantMessage([fauxToolCall('edit_lesson', {expectedRevision: 2, topics: [{id: 'estimate', notes: 'Updated estimation equation.'}]}, {id: 'batch'})], {stopReason: 'toolUse'});},
+        context => {const s = snapshotIn(context.messages); assert(s.includes('Updated estimation equation')); assert.equal(JSON.stringify(context.messages.find(m => m.role === 'system')?.content), prefix); return fauxAssistantMessage([fauxText('The covariance factors determine the estimator.')]);},
     ]);
     await agent.prompt('Connect these ideas.');
     assert.equal(store.read('fresh')!.revision, 3);
-    assert.equal(learningInstructions(store.read('fresh')!), prefix);
     assert(!JSON.stringify(agent.state.messages).includes('Fresh lesson-state snapshot'));
     assert.equal(JSON.stringify(agent.state.messages).includes('Learner correction'), false);
-    assert.equal(createLearningSessionStore(path.join(root, 'fresh')).read('fresh')!.revision, 3);
+    const reopened = createLearningSessionStore(path.join(root, 'fresh'));
+    assert.equal(reopened.read('fresh')!.revision, 3);
+    assert.equal(reopened.originalGoal('fresh', reopened.read('fresh')!), first.plan.objective);
 });
 
 test('normal explanatory development streams two related concepts in one native call without map IO or acknowledgement', async () => {
@@ -143,28 +148,212 @@ test('delivery timing ignores thinking/tool inputs and counts successful writes 
 });
 
 test('aborting an in-flight lesson never applies its late map proposal and fresh questions can resume', async () => {
-    const store = createLearningSessionStore(path.join(root, 'abort')), first = store.create('abort', lesson().plan);
+    const store = createLearningSessionStore(path.join(root, 'abort'));
+    const plan = lesson().plan;
+    plan.derivations = [{id: 'proof', nodeId: 'topic_0', title: 'Factor identity', start: 'Assume A and B are positive definite.', finish: 'Prove the tensor identity under those assumptions.', status: 'working'}];
+    plan.activeDerivationId = 'proof';
+    const first = store.create('abort', plan);
     let release!: () => void, entered!: () => void;
     const gate = new Promise<void>(resolve => {release = resolve;}), started = new Promise<void>(resolve => {entered = resolve;});
     const faux = createFauxCore({}), agent = agentFor('abort', store, faux);
-    faux.setResponses([async () => {entered(); await gate; return fauxAssistantMessage([fauxToolCall('edit_lesson', {expectedRevision: 1, topics: [{id: 'topic_0', notes: 'Late abandoned proposal'}]}, {id: 'late'})], {stopReason: 'toolUse'});}]);
+    const assertActiveProof = (messages: unknown) => {
+        const s = snapshotIn(messages);
+        assert(s.includes(plan.derivations[0]!.start));
+        assert(s.includes(plan.derivations[0]!.finish));
+    };
+    faux.setResponses([async context => {
+        assertActiveProof(context.messages);
+        entered();
+        await gate;
+        return fauxAssistantMessage([fauxToolCall('edit_lesson', {expectedRevision: 1, topics: [{id: 'topic_0', notes: 'Late abandoned proposal'}]}, {id: 'late'})], {stopReason: 'toolUse'});
+    }]);
     const work = agent.prompt('Explain the route.'); await started; agent.abort(); release(); await work;
     assert.deepEqual(store.read('abort'), first);
-    const next = createFauxCore({}); next.setResponses([context => {snapshotIn(context.messages); return fauxAssistantMessage([fauxText('Let us address your interruption directly.')]);}]);
+    const next = createFauxCore({}); next.setResponses([context => {assertActiveProof(context.messages); return fauxAssistantMessage([fauxText('Let us address your interruption directly.')]);}]);
     await agentFor('abort', store, next).prompt('Actually, explain the factor ordering.');
     assert.deepEqual(store.read('abort'), first);
 });
 
 test('snapshot follows native compaction without retaining old mutable map state', async () => {
-    const store = createLearningSessionStore(path.join(root, 'compacted')); store.create('compacted', lesson().plan);
+    const store = createLearningSessionStore(path.join(root, 'compacted'));
+    const first = store.create('compacted', lesson().plan);
+    const plan = {...first.plan, objective: 'Derive the estimator under fixed rank'};
+    store.save('compacted', {expectedRevision: 1, status: 'active', plan});
+    const uncut = lessonContext(store.read('compacted'), first.plan.objective, [
+        {role: 'user', content: first.plan.objective, timestamp: 1},
+    ]);
+    assert('originalGoal' in uncut);
+    assert.deepEqual(uncut.originalGoal, {from: 'retainedUserMessage', number: 1});
     const faux = createFauxCore({}), agent = agentFor('compacted', store, faux);
     agent.state.messages.push(...asAgentMessages([
         {id: 'old', role: 'user', content: 'Old material to compact.', timestamp: 1},
+        {id: 'goal', role: 'user', content: first.plan.objective, timestamp: 2},
         {id: 'kept', role: 'user', content: 'Continue the mathematical explanation.', timestamp: 2},
         newCompactionMarker('Prior context summarized.', {firstKeptMessageId: 'kept', tokensBefore: 1000, at: 'fixture'}),
     ]));
-    faux.setResponses([context => {const s = snapshotIn(context.messages); assert(s.includes('Separable covariance')); assert(!s.includes('Old material to compact.')); assert(s.includes('Prior context summarized.')); assert.equal((s.match(/Fresh lesson-state snapshot/g) ?? []).length, 1); return fauxAssistantMessage([fauxText('The explanation continues from the current saved map.')]);}]);
+    faux.setResponses([context => {
+        const s = snapshotIn(context.messages);
+        assert(s.includes('Separable covariance'));
+        assert(!s.includes('Old material to compact.'));
+        assert(s.includes('Prior context summarized.'));
+        assert(s.includes(first.plan.objective));
+        assert(s.includes(plan.objective));
+        assert.equal((s.match(/Fresh lesson-state snapshot/g) ?? []).length, 1);
+        return fauxAssistantMessage([fauxText('The explanation continues from the current saved map.')]);
+    }]);
     await agent.continue();
     assert(!JSON.stringify(agent.state.messages).includes('Fresh lesson-state snapshot'));
-    assert.equal(store.read('compacted')!.revision, 1);
+    assert.equal(store.read('compacted')!.revision, 2);
+});
+
+test('the tutor can discover an exact saved equation before the active compaction cut', async () => {
+    const chat = stores.chatStore.createChat('History lookup');
+    stores.chatStore.saveSettings(chat.id, {model: {provider: 'openrouter', id: 'z-ai/glm-5.3-flash'}});
+    stores.lessonStore.create(chat.id, lesson().plan);
+    const equation = String.raw`The diagonal correction was \(B_{11}A\).`;
+    stores.chatStore.saveMessages(chat.id, [
+        {id: 'old-proof', role: 'user', content: equation, timestamp: 1},
+        {id: 'kept', role: 'user', content: 'Continue to the estimator.', timestamp: 2},
+        newCompactionMarker('Earlier details are summarized.', {firstKeptMessageId: 'kept', tokensBefore: 1000, at: 'fixture'}),
+    ]);
+    const faux = createFauxCore({});
+    let calls = 0;
+    faux.setResponses([
+        context => {
+            calls++;
+            assert(!JSON.stringify(context.messages).includes('diagonal correction was'));
+            return fauxAssistantMessage([fauxToolCall('read_chat_history', {operation: 'search', query: 'diagonal correction'}, {id: 'discover'})], {stopReason: 'toolUse'});
+        },
+        context => {
+            calls++;
+            assert(context.messages.some(m => m.role === 'toolResult' && JSON.stringify(m.content).includes('old-proof')));
+            return fauxAssistantMessage([fauxToolCall('read_chat_history', {operation: 'read', ids: ['old-proof']}, {id: 'exact'})], {stopReason: 'toolUse'});
+        },
+        context => {
+            calls++;
+            const result = context.messages.filter(m => m.role === 'toolResult').at(-1);
+            assert(result?.content[0]?.type === 'text');
+            assert.equal(JSON.parse(result.content[0].text).messages[0].text, equation);
+            return fauxAssistantMessage('Use the recovered correction in the estimator.');
+        },
+    ]);
+    const response = await handleChatInput(chat.id, {type: 'text', text: 'Recover the earlier correction.'}, opts =>
+        createLearningAgent({chatId: chat.id, chatStore: stores.chatStore, jobStore: stores.jobStore, spawn: () => {}},
+            stores.lessonStore, () => {}, {...opts, engine: {model: faux.getModel(), streamFn: faux.streamSimple}}));
+    assert.equal(response.status, 200);
+    const run = runningTurn(chat.id);
+    if (run) await new Response(run.subscribe()).text();
+    assert.equal(calls, 3);
+    assert.equal(stores.chatStore.getChat(chat.id)!.messages[0]!.content, equation);
+});
+
+test('development inspector reports projected context counts and usage without content', async t => {
+    const store = createLearningSessionStore(path.join(root, 'inspect'));
+    store.create('inspect', lesson().plan);
+    const oldMode = process.env.NODE_ENV, oldFlag = process.env.LH_CONTEXT_INSPECT;
+    Reflect.set(process.env, 'NODE_ENV', 'development');
+    process.env.LH_CONTEXT_INSPECT = '1';
+    t.after(() => {
+        if (oldMode === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV');
+        else Reflect.set(process.env, 'NODE_ENV', oldMode);
+        if (oldFlag === undefined) delete process.env.LH_CONTEXT_INSPECT;
+        else process.env.LH_CONTEXT_INSPECT = oldFlag;
+    });
+    const write = t.mock.method(console, 'info', () => {});
+    const faux = createFauxCore({});
+    faux.setResponses([fauxAssistantMessage('A mathematical answer.')]);
+    const agent = agentFor('inspect', store, faux);
+    agent.state.messages.push(...asAgentMessages([
+        {id: 'old', role: 'user', content: 'private old mathematics', timestamp: 1},
+        {id: 'kept', role: 'user', content: 'private kept mathematics', timestamp: 2},
+        newCompactionMarker('private summary', {firstKeptMessageId: 'kept', tokensBefore: 1000, at: 'fixture'}),
+    ]));
+    await agent.prompt('private learner text', [{type: 'image', mimeType: 'image/png', data: 'c2NyYXRjaA=='}]);
+    assert.equal(write.mock.callCount(), 1);
+    const [tag, line] = write.mock.calls[0]!.arguments;
+    assert.equal(tag, '[lesson-context]');
+    assert(typeof line === 'string');
+    assert(!line.includes('private'));
+    assert(!line.includes('c2NyYXRjaA=='));
+    const report = JSON.parse(line);
+    assert.equal(report.images, 1);
+    assert.equal(report.activeHistory.firstId, 'kept');
+    assert.equal(report.activeHistory.startIndex, 1);
+    assert(report.estimatedTokens.compactionSummary > 0);
+    assert(report.estimatedTokens.instructions > 0);
+    assert(report.estimatedTokens.tools > 0);
+    assert(report.estimatedTokens.lessonSnapshot > 0);
+    assert(report.providerUsage.input > 0);
+});
+
+test('shadow keeps the provider projection intact and enabled selection pays for an exact historical lookup', async t => {
+    const oldMode = process.env.NODE_ENV, oldFlag = process.env.LH_LESSON_HISTORY;
+    Reflect.set(process.env, 'NODE_ENV', 'development');
+    t.after(() => {
+        if (oldMode === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV');
+        else Reflect.set(process.env, 'NODE_ENV', oldMode);
+        if (oldFlag === undefined) delete process.env.LH_LESSON_HISTORY;
+        else process.env.LH_LESSON_HISTORY = oldFlag;
+    });
+    const log = t.mock.method(console, 'info', () => {});
+    const originalGoal = 'Connect covariance structure to estimation';
+    const reference = String.raw`Prior detail: keep \(B_{11}A\) under the stated block ordering.`;
+    const opening = 'New standalone question: derive the variance of a sample mean under independence.';
+    for (const mode of ['shadow', 'on'] as const) {
+        process.env.LH_LESSON_HISTORY = mode;
+        const chat = stores.chatStore.createChat('Projection fixture');
+        stores.chatStore.saveSettings(chat.id, {model: {provider: 'openrouter', id: 'z-ai/glm-5.3-flash'}});
+        const initial = stores.lessonStore.create(chat.id, lesson().plan);
+        stores.lessonStore.save(chat.id, {expectedRevision: initial.revision, status: 'active',
+            plan: {...initial.plan, objective: 'Derive estimators under explicit assumptions'}});
+        stores.chatStore.saveMessages(chat.id, [
+            {id: 'before-cut', role: 'user', content: reference, timestamp: 1},
+            {id: 'goal', role: 'user', content: originalGoal, timestamp: 2},
+            {...fauxAssistantMessage('OLD LESSON MATERIAL. '.repeat(700)), id: 'closed'},
+            newCompactionMarker('Original context summary.', {firstKeptMessageId: 'goal', tokensBefore: 1000, at: 'fixture'}),
+        ]);
+        const faux = createFauxCore({});
+        faux.setResponses([
+            context => {
+                const sent = JSON.stringify(context.messages);
+                assert.equal(sent.includes('OLD LESSON MATERIAL'), mode === 'shadow');
+                assert(sent.includes(originalGoal));
+                assert(sent.includes('Derive estimators under explicit assumptions'));
+                assert(sent.includes('Original context summary.'));
+                assert(sent.includes(opening));
+                return mode === 'on'
+                    ? fauxAssistantMessage([fauxToolCall('read_chat_history', {operation: 'read', ids: ['before-cut']}, {id: 'lookup'})], {stopReason: 'toolUse'})
+                    : fauxAssistantMessage('The variance is sigma squared divided by n.');
+            },
+            context => {
+                const result = context.messages.find(m => m.role === 'toolResult');
+                assert(result?.content[0]?.type === 'text');
+                assert.equal(JSON.parse(result.content[0].text).messages[0].text, reference);
+                assert(!JSON.stringify(context.messages).includes('OLD LESSON MATERIAL'));
+                return fauxAssistantMessage('The variance is sigma squared divided by n.');
+            },
+        ]);
+        const response = await handleChatInput(chat.id, {type: 'text', text: opening}, opts =>
+            createLearningAgent({chatId: chat.id, chatStore: stores.chatStore, jobStore: stores.jobStore, spawn: () => {}},
+                stores.lessonStore, () => {}, {...opts, engine: {model: faux.getModel(), streamFn: faux.streamSimple}}));
+        assert.equal(response.status, 200);
+        const run = runningTurn(chat.id);
+        if (run) await new Response(run.subscribe()).text();
+        const saved = stores.chatStore.getChat(chat.id)!;
+        assert(saved.messages.some(m => m.id === 'closed'));
+        assert(saved.messages.some(m => m.id === 'before-cut'));
+        assert(saved.messages.at(-1)?.role === 'assistant');
+        assert(JSON.stringify(saved.messages.at(-1)).includes('sigma squared'));
+    }
+    const reports = log.mock.calls.filter(call => call.arguments[0] === '[lesson-context]')
+        .map(call => JSON.parse(String(call.arguments[1])));
+    assert.equal(reports.length, 3);
+    assert(reports.every(r => r.historySelection.droppedMessages === 2));
+    assert.equal(reports[0].estimatedInputTokens, reports[0].historySelection.baselineInputTokens);
+    assert.equal(reports[1].estimatedInputTokens, reports[1].historySelection.candidateInputTokens);
+    assert.deepEqual(reports[1].retrievalCalls, ['read_chat_history']);
+    assert.equal(reports[1].run, reports[2].run);
+    const baselineInput = reports[0].estimatedInputTokens;
+    const selectedWithLookup = reports[1].estimatedInputTokens + reports[2].estimatedInputTokens;
+    t.diagnostic(JSON.stringify({baselineInput, selectedFirstInput: reports[1].estimatedInputTokens, selectedWithLookup}));
 });

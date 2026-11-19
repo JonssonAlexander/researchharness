@@ -23,29 +23,112 @@ non-lesson probe/teach and Practice protocols are unchanged.
 
 ## Model context
 
-`src/core/lesson-context.ts` owns a pure, bounded projection of the existing lesson:
-revision/status, current focus, main route/coverage, current topic plus next two
-route candidates' complete notes, nearby saved associations, and active derivation.
-A working derivation excludes automatic next-topic candidates. Route adjacency is
-only a planning hint; it does not establish a mathematical dependency. Explicit
-saved associations remain distinct from route order.
+`src/core/lesson-context.ts` builds the lesson snapshot. It carries the original
+goal from lesson revision 1, the current objective, current focus, the ordered
+main topics with coverage, and the exact active Start/Finish. Current topic notes
+and the active derivation's topic retain their equations, assumptions and open
+questions. The original goal can point to identical text in the objective or
+in a retained user message. After a compaction cut it appears as text if needed.
+The original goal is the initial saved objective. The full opening message is
+kept in the transcript. A missing or unreadable first revision leaves the original
+goal unknown.
 
-The JSON budget is 24,000 characters (usually much smaller). Whole omitted topics
-and oversized targets are explicit; formulas/notes are never partially clipped.
-Only completeTopicIds count as read notes for subsequent edits. `read_lesson`
-still retrieves omitted/deeper material, the full topology or fresh conflict state.
-This does not duplicate source documents or inject unsubmitted handwriting.
+The snapshot adds the parent topic, up to two upcoming route candidates and
+nearby associations within the 24,000-character JSON budget. A working derivation
+excludes the upcoming candidates. Long required notes and exact targets can exceed
+the budget by themselves. Optional topics are included whole or listed as omitted.
+Only `completeTopicIds` count as read notes. Use `read_lesson` for omitted notes,
+the full topology or a fresh revision after a conflict. Route order and coverage
+describe teaching progress.
 
-`createLearningAgent` reads this projection through the injected lesson store at
-every model-bound conversion, after native compaction/protocol repair. It appends
-one explicitly labelled application-data message to the projected request only.
-It never enters Agent state, native history, subscription input-cause detection,
-steering queues or learner evidence. It cannot accumulate on repeated requests.
-The mutable map does not alter the system-prompt prefix. The existing compaction
-budget includes the model-only tail. Missing/deleted lessons are marked unavailable.
-No background writes or alternate persistence authority were added.
+The learning agent appends this fresh application-data message after native
+history projection and protocol repair. An edit takes effect on the next inference,
+even during a tool loop. The system instructions omit the mutable objective.
+The snapshot never becomes a stored message, learner submission, or steering event.
+The compaction budget still accounts for the snapshot. Native history, tool
+execution and retry use their existing paths.
+
+### Development inspector
+
+Run `LH_CONTEXT_INSPECT=1 npm run dev:local` and look for `[lesson-context]` in
+the server log. Each completed or aborted inference reports estimated input by
+category, image count, and the retained native range and compaction marker.
+Provider token counts are listed separately when admitted and present. The
+estimates use the existing character heuristic and fixed image allowance, so
+provider framing and vision token costs can differ. The inspector logs no
+prompt text, tool payloads, image bytes or credentials.
+
+Two deterministic fixtures compared with the prior projection. These are
+input estimates. Common tools and policy text are excluded from both sides.
+
+| Fixture | Before | P1 | Native history estimate |
+| --- | ---: | ---: | ---: |
+| 11-topic route, unchanged objective, 82 messages | 17,603 | 17,480 | 14,845 |
+| Changed objective and active proof, after compaction | 2,782 | 2,701 | 78 |
+
+The second request now includes the original goal too. The exact Start and
+Finish and the compacted history span stay the same in the fixture.
+
+### P2 — Saved chat lookup
+
+The tutor can use `read_chat_history` on demand. It reads the full saved lesson
+chat, including text before the active compaction cut.
+
+- `search` matches every keyword case-insensitively and returns up to eight
+  recent matching IDs with short excerpts. Pass `beforeId` for older results.
+- `read` retrieves up to eight IDs in saved order. `around` returns the anchor
+  and up to five neighbors on each side in saved order.
+- Reads return exact saved text and tool results with IDs, order, timestamps,
+  roles and tool-call references. Multiple text blocks are joined with a newline.
+  The encoded text budget is 12,000 characters per response. If an entry is
+  larger, read it alone with its `nextOffset` for the next exact slice. Old
+  lookup results, private thinking and image bytes are outside this lookup.
+  Drawings remain available through `read_scratchpad`.
+
+### P3 — Select the reasoning episode
+
+Start with `LH_LESSON_HISTORY=shadow npm run dev:local`. Shadow mode logs the
+candidate for every inference while sending the existing projection. Use
+`LH_LESSON_HISTORY=on` for an opt-in trial. Unset the flag to return to the
+existing request path.
+
+The only text cut starts at a learner's explicit `New standalone question:`
+message. Include the complete independent problem after the prefix. The request
+must have a known original goal, an available history tool and a closed previous
+exchange. A working derivation, a topic marked Revisit, an intervening input,
+an interrupted response or an uncertain tool group keeps the full active text.
+Retries, resumed feedback and background requests use the full-text path. The
+selector runs on the model-facing projection after compaction and preserves the
+compaction summary. The live snapshot still carries both goals, the roadmap
+and exact current mathematics. Saved chat remains accessible through P2.
+
+With the flag on, the fallback omits old image blocks from before the current
+input. Current P2 drawing attachments, pending feedback images and new tool
+images still travel. Old scratchpad drawings can be retrieved by ID. Other old
+images may need the original source tool. The native request state and saved
+messages keep their existing tool calls, results and attachments.
+
+The dev log groups inferences by run ID and reports baseline and candidate input
+estimates, image counts, the native compaction range, retrieval calls and
+provider usage when reported. Sum all inferences, including retrieval follow-ups.
+Shadow mode estimates the projection but cannot predict whether the model will
+need an extra lookup. In the paired scripted proof fixture, the first request
+fell from 14,843 to 11,188 estimated input tokens. Forcing one historical lookup
+raised the selected total to 22,443. The scripts check exact recovery and wire
+shape. Live teaching quality and usage remain to be measured.
+
+Compaction currently checks the saved record both before admission and after
+settlement. These checks can summarize a prefix an enabled request would skip.
+Before broader rollout, move the admission estimate to the actual per-request
+projection, with the full fallback budgeted separately. A reported token count
+from a shortened turn cannot serve as the full-history anchor. The settlement
+kick should defer eligible lesson turns until the next input is known. Use the
+same estimate for the compactor's internal recheck. This pass keeps the existing
+trigger and summary behavior.
 
 ## Teaching behavior
+
+The lesson prompt owns pacing, map use, and active derivation rules. The learning-policy guidance supplies strategy and evidence rules. Both compose into the same tutor prompt.
 
 Initially favor one coherent mathematical development across about 2–3 closely
 related main concepts when appropriate: definitions → equations → intuition and

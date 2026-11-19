@@ -48,11 +48,19 @@ test('agent updates a plan through its injected port, retains derivations, and c
 });
 
 test('learning agent has conversational policy and no assessment/plan-gate tools',async()=>{
- const {createLearningAgent}=await import('../src/agent/teacher-agent.ts');const {createFauxCore}=await import('@earendil-works/pi-ai');
+ const {createLearningAgent}=await import('../src/agent/teacher-agent.ts');const {createFauxCore,fauxAssistantMessage}=await import('@earendil-works/pi-ai');
  const faux=createFauxCore({}),store=createLearningSessionStore(path.join(root,'agent')),lesson=store.create('chat_agent',initialLesson('Understand a result'));
  const agent=createLearningAgent({chatId:'chat_agent',chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},store,()=>{}, {engine:{model:faux.getModel(),streamFn:faux.streamSimple},learning:lesson});
  const names=agent.state.tools.map(t=>t.name);assert(names.includes('update_lesson'));for(const name of ['quiz','explain','recall','probe','probe_done','ask_user_question','plan_init'])assert(!names.includes(name));
- assert(agent.state.systemPrompt.includes('Do not run an initial prober'));assert(agent.state.systemPrompt.includes('Start (assumptions'));assert(agent.state.systemPrompt.includes('Understand a result'));
+ assert(agent.state.systemPrompt.includes('Do not run an initial prober'));assert(agent.state.systemPrompt.includes('Start (assumptions'));assert(!agent.state.systemPrompt.includes('Understand a result'));
+ let sawObjective=false;
+ faux.setResponses([context=>{
+  sawObjective=context.messages.some(message=>message.role==='user'&&Array.isArray(message.content)&&
+   message.content.some(part=>part.type==='text'&&part.text.includes('"objective":"Understand a result"')));
+  return fauxAssistantMessage('Let us start with the assumptions.');
+ }]);
+ await agent.prompt('Start the lesson.');
+ assert(sawObjective,'The active objective reaches the model in its lesson snapshot');
  assert.match(agent.state.systemPrompt,/Do not call demo unless the learner explicitly requests/);
  const demo=agent.state.tools.find(t=>t.name==='demo');assert(demo,'Explicitly requested demos remain available');
  assert.match(demo.description,/Use only when the learner explicitly requests/);

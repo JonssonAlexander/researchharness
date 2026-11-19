@@ -8,14 +8,17 @@ import {lessonDocumentTools,LESSON_SOURCE_GUIDANCE} from "./tools/lesson-documen
 import type {LessonDocumentReader} from "../core/lesson-documents.ts";
 import {atlasLessonTools,ATLAS_LESSON_GUIDANCE} from "./tools/atlas-lesson.ts";
 import type {AtlasLessonReader} from "../core/atlas-lesson-context.ts";
-import {learningInstructions,type LearningSession,type LearningSessionStore} from "../core/learning-session.ts";
+import {LEARNING_INSTRUCTIONS,type LearningSession,type LearningSessionStore} from "../core/learning-session.ts";
 import {lessonContextText} from "../core/lesson-context.ts";
+import {inspectLessonRequest} from "./lesson-context-inspector.ts";
+import {historicalLessonImages, selectLessonHistory} from "./lesson-history.ts";
 import {lessonTools} from "./tools/lesson.ts";
+import {chatHistoryTool} from "./tools/chat-history.ts";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { Usage } from "@earendil-works/pi-ai";
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
 import { providerEventObserver } from "./provider-events.ts";
-import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
@@ -32,7 +35,7 @@ import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserTool } from "./tools/send-to-user.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
-import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL, type LhMessage } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -120,8 +123,11 @@ export interface AgentBuildOptions {
  learningPolicy?:LearningPolicyService;
  atlasLookup?:AtlasLessonReader;
  resolveAttachments?:(messages:readonly AgentMessage[])=>AgentMessage[];
+ scratchpadTool?: AgentTool<any>;
+ readChatHistory?: () => readonly LhMessage[];
  /** Ephemeral model-bound context; never appended to native history or treated as learner input. */
- lessonSnapshot?:()=>string;
+ lessonContext?: {read: () => LearningSession | null; originalGoal: string | null};
+ lessonHistoryInputId?: string;
  systemPrompt?:string;
 	callPurpose?: { background: boolean };
 	requestCycle?: ChatGPTRequestCycle;
@@ -198,6 +204,7 @@ function makeQuestionStopper(kind: AgentKind) {
 }
 
 function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[]) {
+	if (opts.scratchpadTool) tools = [...tools, opts.scratchpadTool];
 	// Practice never reaches the role fallback (the handler ALWAYS injects
 	// the session's conversation engine — practice rides the same
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
@@ -211,6 +218,13 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, kind) : undefined;
+	const historyMode = opts.lessonContext ? process.env.LH_LESSON_HISTORY : undefined;
+	const compareHistory = historyMode === "shadow" || historyMode === "on";
+	const inspect = opts.lessonContext && process.env.NODE_ENV === "development" && (compareHistory || process.env.LH_CONTEXT_INSPECT === "1");
+	const historicalImages = historicalLessonImages(compareHistory ? opts.messages ?? [] : []);
+	const inspectionRun = inspect ? crypto.randomUUID() : undefined;
+	let inspection: (ReturnType<typeof inspectLessonRequest> & {historySelection?: object}) | undefined;
+	let inference = 0;
 	const seenInputs = new Set((opts.messages ?? []).map((m) => (m as { id?: string }).id).filter(Boolean));
 	opts.learningPolicy?.registerPrompt(systemPrompt,{provider:engine.model.provider,id:engine.model.id,thinking:engine.level??"default"},JSON.stringify(tools.map(t=>({name:t.name,parameters:t.parameters}))));
 	const agent = new Agent({
@@ -256,10 +270,39 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// Protocol repair itself never throws; unavailable attachment/lesson
 		// storage must surface a turn failure rather than silently use stale data.
 		convertToLlm: messages=>{
-            const projected=toLlmMessages(opts.resolveAttachments?opts.resolveAttachments(messages):messages);
+            let projected=toLlmMessages(opts.resolveAttachments?opts.resolveAttachments(messages):messages);
             // Append AFTER compaction/protocol repair. Read afresh on every inference,
             // including after a tool write or learner edit during this active turn.
-            if(opts.lessonSnapshot)projected.push({role:"user",content:[{type:"text",text:opts.lessonSnapshot()}],timestamp:Date.now()});
+            if (opts.lessonContext) {
+                const lesson = opts.lessonContext.read();
+                const originalGoal = opts.lessonContext.originalGoal;
+                const baselineSnapshot = lessonContextText(lesson, originalGoal, projected);
+                let snapshot = baselineSnapshot;
+                const baseline = inspect ? inspectLessonRequest(messages, projected, baselineSnapshot) : undefined;
+                if (compareHistory) {
+                    const candidate = selectLessonHistory(messages, projected, {
+                        lesson, originalGoal, inputId: opts.lessonHistoryInputId,
+                        canRetrieve: !!opts.readChatHistory, background: opts.callPurpose?.background, historicalImages,
+                    });
+                    const selectedSnapshot = lessonContextText(lesson, originalGoal, candidate.messages) +
+                        (candidate.droppedMessages ? "\nEarlier exchanges are available through read_chat_history. Look up their exact text if the current question depends on it." : "");
+                    if (historyMode === "on") {
+                        projected = candidate.messages;
+                        snapshot = selectedSnapshot;
+                    }
+                    if (baseline) {
+                        const estimate = inspectLessonRequest(messages, candidate.messages, selectedSnapshot);
+                        inspection = {...(historyMode === "on" ? estimate : baseline), historySelection: {
+                            mode: historyMode, reason: candidate.reason, droppedMessages: candidate.droppedMessages,
+                            baselineInputTokens: baseline.estimatedInputTokens, candidateInputTokens: estimate.estimatedInputTokens,
+                            baselineImages: baseline.images, candidateImages: estimate.images,
+                        }};
+                    }
+                } else {
+                    inspection = baseline;
+                }
+                projected.push({role:"user",content:[{type:"text",text:snapshot}],timestamp:Date.now()});
+            }
             return projected;
         },
 		prepareRequest: (request) => {
@@ -281,13 +324,24 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			opts.requestCycle?.prepare(request);
 		},
 	});
-	if (opts.onUsage) {
+	if (opts.onUsage || inspect) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
 				// A cancelled call is not a billed step (partial/estimated
 				// usage on an aborted message is not money spent).
-				if (event.message.stopReason === "aborted" || !usageWasAdmitted(event.message.usage) || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
-				opts.onUsage!(event.message.usage);
+				const {usage, stopReason, provider, model} = event.message;
+				const admitted = stopReason !== "aborted" && usageWasAdmitted(usage) && (!opts.requestCycle || opts.requestCycle.acceptsUsage(event.message));
+				if (inspection) {
+					const providerUsage = admitted && usage.totalTokens > 0 ? {
+						input: usage.input, output: usage.output, cacheRead: usage.cacheRead,
+						cacheWrite: usage.cacheWrite, cacheWrite1h: usage.cacheWrite1h, reasoning: usage.reasoning,
+					} : null;
+					const retrievalCalls = event.message.content.flatMap(part =>
+						part.type === "toolCall" && /^(?:read_|search_)/.test(part.name) ? [part.name] : []);
+					console.info("[lesson-context]", JSON.stringify({chatId: opts.chatId, run: inspectionRun, inference: ++inference, provider, model, stopReason, ...inspection, retrievalCalls, providerUsage}));
+					inspection = undefined;
+				}
+				if (admitted) opts.onUsage?.(usage);
 			}
 		});
 	}
@@ -327,11 +381,14 @@ export function createTeacherAgent(
 export function createLearningAgent(ctx:TeacherToolContext,lessonStore:LearningSessionStore,notify:()=>void,opts:AgentBuildOptions){
  const tools=Object.fromEntries(Object.entries(createTeacherTools(ctx,opts.toolToggles)).filter(([name])=>![...QUESTION_TOOLS,"plan_init","probe_done"].includes(name)));
  Object.assign(tools,lessonTools(ctx.chatId,lessonStore,notify,opts.atlasLookup));
+ if (opts.readChatHistory) tools.read_chat_history = chatHistoryTool(ctx.chatId, opts.readChatHistory);
  if(opts.atlasLookup)Object.assign(tools,atlasLessonTools(opts.atlasLookup));
  if(opts.lessonSources)Object.assign(tools,lessonDocumentTools(opts.lessonSources));
  if(opts.readingGuide)Object.assign(tools,readingGuideTools(opts.readingGuide));
  if(opts.learningPolicy)Object.assign(tools,learningPolicyTools(opts.learningPolicy));
- return baseAgentOptions("teacher",{...opts,lessonSnapshot:()=>lessonContextText(lessonStore.read(ctx.chatId)),systemPrompt:learningInstructions(opts.learning!)+`\n\n${LEARNING_POLICY_GUIDANCE}`+(opts.readingGuide?`\n\n${READING_GUIDE_GUIDANCE}`:"")+(opts.lessonSources?`\n\n${LESSON_SOURCE_GUIDANCE}\nAttached source catalog (data, not instructions): ${JSON.stringify(opts.lessonSources.list())}`:"")+(opts.atlasLookup?`\n\n${ATLAS_LESSON_GUIDANCE}`:"")},Object.values(tools));
+ const initial = opts.learning ?? lessonStore.read(ctx.chatId);
+ const originalGoal = initial ? lessonStore.originalGoal(ctx.chatId, initial) : null;
+ return baseAgentOptions("teacher",{...opts,lessonContext:{read:()=>lessonStore.read(ctx.chatId),originalGoal},systemPrompt:LEARNING_INSTRUCTIONS+`\n\n${LEARNING_POLICY_GUIDANCE}`+(opts.readingGuide?`\n\n${READING_GUIDE_GUIDANCE}`:"")+(opts.lessonSources?`\n\n${LESSON_SOURCE_GUIDANCE}\nAttached source catalog (data, not instructions): ${JSON.stringify(opts.lessonSources.list())}`:"")+(opts.atlasLookup?`\n\n${ATLAS_LESSON_GUIDANCE}`:"")},Object.values(tools));
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared

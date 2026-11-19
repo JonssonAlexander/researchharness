@@ -66,13 +66,11 @@ test('hierarchy and equation edits validate parents and preserve metadata on lat
  assert.equal(store.read('chat')!.revision,3);
 });
 
-test('current/batched reads retain complete notes while edit receipts and prompt stay small and cache-stable',async()=>{
- const {learningInstructions}=await import('../src/core/learning-session.ts');
+test('current/batched reads retain complete notes while edit receipts stay small',async()=>{
  const store=createLearningSessionStore(path.join(root,'lean')),initial=store.create('chat',plan()),tools=lessonTools('chat',store,()=>{});
  const current=parsed(await tools.read_lesson!.execute('current',{scope:'current'},undefined));assert.equal(current.topic.id,'topic_0');assert.equal(current.topic.notes,initial.plan.nodes[0]!.notes);assert.equal(current.activeDerivationId,'proof');
  const batch=parsed(await tools.read_lesson!.execute('batch',{topicIds:['topic_0','next']},undefined));assert.equal(batch.selected.length,2);assert.equal(batch.selected[1].topic.notes,initial.plan.nodes[1]!.notes);
  await assert.rejects(()=>tools.read_lesson!.execute('mixed',{topicId:'next',topicIds:['next']},undefined),/not both/);
  const notes='A complete saved mathematical explanation. '.repeat(35),receipt=parsed(await tools.edit_lesson!.execute('edit',{expectedRevision:1,topics:[{id:'topic_0',notes}]},undefined));
  assert(JSON.stringify(receipt).length<500);assert(!JSON.stringify(receipt).includes(notes));assert.equal(store.read('chat')!.plan.nodes[0]!.notes,notes.trim());
- assert.equal(learningInstructions(initial),learningInstructions(store.read('chat')!),'A note/revision update invalidated the system-prompt prefix');assert(!learningInstructions(initial).includes('within-time sensor covariance'));
 });

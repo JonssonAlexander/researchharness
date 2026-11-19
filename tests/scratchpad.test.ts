@@ -66,6 +66,116 @@ test('a scripted multimodal lesson receives actual image pixels once; duplicate 
  const duplicate=await handleChatInput(f.chat.id,{type:'scratchpad',attemptId:a.id},build);assert.equal(duplicate.status,200);assert.equal((await handleChatInput(f.chat.id,{type:'continue',scratchpadAttemptId:a.id},build)).status,200);assert.equal(calls,1);assert.equal(stores.chatStore.getChat(f.chat.id)!.messages.filter(m=>m.id===a.id).length,1);
 });
 
+test('lesson sends only the latest drawing and can inspect an older submitted drawing for one inference', async () => {
+ const {handleChatInput} = await import('../src/server/chat-handler.ts');
+ const {createLearningAgent} = await import('../src/agent/teacher-agent.ts');
+ const {runningTurn} = await import('../src/server/turn-runs.ts');
+ const {fauxToolCall} = await import('@earendil-works/pi-ai');
+ const f = await session();
+ const chatId = f.chat.id;
+ stores.chatStore.saveSettings(chatId, {model:{provider:'openrouter',id:'openai/gpt-4.1'}});
+ const older = stores.scratchpadStore.capture(chatId, 'derivation', id(), 1, image);
+ const latestPng = new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="10"/></svg>').render().asPng();
+ const latest = stores.scratchpadStore.capture(chatId, 'derivation', id(), 1, latestPng);
+ const unsent = stores.scratchpadStore.capture(chatId, 'derivation', id(), 1, image);
+ stores.chatStore.saveMessages(chatId, [scratchAttemptMessage(older)]);
+ const faux = createFauxCore({});
+ const olderPixels = image.toString('base64'), latestPixels = latestPng.toString('base64');
+ let calls = 0;
+ faux.setResponses([
+  context => {
+   calls++;
+   const history = JSON.stringify(context.messages);
+   assert(history.includes(older.id));
+   assert(!history.includes(olderPixels));
+   assert(history.includes(latestPixels));
+   return fauxAssistantMessage([
+    fauxToolCall('read_scratchpad', {attemptId: older.id}, {id:'read-older'}),
+    fauxToolCall('read_scratchpad', {attemptId: unsent.id}, {id:'read-unsent'}),
+   ], {stopReason:'toolUse'});
+  },
+  context => {
+   calls++;
+   const results = context.messages.filter(m => m.role === 'toolResult');
+   assert(results.some(m => m.content.some(block => block.type === 'image' && block.data === olderPixels)));
+   assert(results.some(m => m.isError && JSON.stringify(m.content).includes('not submitted')));
+   return fauxAssistantMessage([fauxToolCall('read_scratchpad', {}, {id:'list-drawings'})], {stopReason:'toolUse'});
+  },
+  context => {
+   calls++;
+   const history = JSON.stringify(context.messages);
+   assert(!history.includes(olderPixels));
+   assert(history.includes(latestPixels));
+   const list = context.messages.find(m => m.role === 'toolResult' && JSON.stringify(m.content).includes('drawings'));
+   assert(list && JSON.stringify(list.content).includes(older.id));
+   assert(!JSON.stringify(list.content).includes(unsent.id));
+   return fauxAssistantMessage([fauxText('The two drawings use different first steps.')]);
+  },
+ ]);
+ const build = (opts: Parameters<typeof createLearningAgent>[3]) =>
+  createLearningAgent({chatId,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},
+   stores.lessonStore,()=>{},{...opts,engine:{model:faux.getModel(),streamFn:faux.streamSimple}});
+ const result = await handleChatInput(chatId, {type:'scratchpad',attemptId:latest.id}, build);
+ assert.equal(result.status, 200);
+ const run = runningTurn(chatId);
+ if (run) await new Response(run.subscribe()).text();
+ assert.equal(calls, 3);
+ const record = JSON.stringify(stores.chatStore.getChat(chatId));
+ assert(record.includes('different first steps'));
+ assert(!record.includes(olderPixels));
+ assert(!record.includes(latestPixels));
+});
+
+test('pending feedback and its follow-up retry keep the drawing, then ordinary chat stops sending it', async () => {
+ const {handleChatInput} = await import('../src/server/chat-handler.ts');
+ const {createLearningAgent} = await import('../src/agent/teacher-agent.ts');
+ const {runningTurn} = await import('../src/server/turn-runs.ts');
+ const {newCompactionMarker} = await import('../src/core/compaction.ts');
+ const f = await session();
+ const chatId = f.chat.id;
+ stores.chatStore.saveSettings(chatId, {model:{provider:'openrouter',id:'openai/gpt-4.1'}});
+ const attempt = stores.scratchpadStore.capture(chatId, 'derivation', id(), 1, image);
+ const marker = scratchAttemptMessage(attempt);
+ const faux = createFauxCore({});
+ const pixels = image.toString('base64');
+ const hasDrawing = (messages: unknown) => JSON.stringify(messages).includes(pixels);
+ const step = (expected: boolean, answer: string) => (context: {messages: unknown}) => {
+  assert.equal(hasDrawing(context.messages), expected);
+  return fauxAssistantMessage(answer);
+ };
+ faux.setResponses([
+  step(true, 'The first equality is correct.'),
+  step(true, 'Check the next line.'),
+  step(true, 'The correction preserves the sign.'),
+  step(false, 'Let us move to the next concept.'),
+ ]);
+ const build = (opts: Parameters<typeof createLearningAgent>[3]) =>
+  createLearningAgent({chatId,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},
+   stores.lessonStore,()=>{},{...opts,engine:{model:faux.getModel(),streamFn:faux.streamSimple}});
+ const run = async (input: Parameters<typeof handleChatInput>[1]) => {
+  const reply = await handleChatInput(chatId, input, build);
+  assert.equal(reply.status, 200);
+  const turn = runningTurn(chatId);
+  if (turn) await new Response(turn.subscribe()).text();
+ };
+ const tail = {...fauxAssistantMessage('Kept reasoning.'), id: 'kept'};
+ const cut = newCompactionMarker('Saved reasoning summary.', {firstKeptMessageId: 'kept', tokensBefore: 1000, at: 'fixture'});
+ const compacted = [marker, tail, cut];
+ assert(!hasDrawing(toLlmMessages(scratchImages(chatId, asAgentMessages(compacted), true, attempt.id))));
+ assert(hasDrawing(toLlmMessages(scratchImages(chatId, asAgentMessages(compacted), true, attempt.id, true))));
+ stores.chatStore.saveMessages(chatId, [marker]);
+ await run({type: 'continue', scratchpadAttemptId: attempt.id});
+ await run({type: 'text', text: 'Why is the sign positive on my drawing?'});
+ const messages = stores.chatStore.getChat(chatId)!.messages;
+ const last = messages.at(-1)!;
+ assert(last.role === 'assistant');
+ stores.chatStore.saveMessages(chatId, [...messages.slice(0, -1), {...last, stopReason: 'error'}]);
+ await run({type: 'retry'});
+ await run({type: 'text', text: 'Move on to the next result.'});
+ assert(stores.chatStore.getChat(chatId)!.messages.some(m => JSON.stringify(m.content).includes('move to the next concept')));
+ assert(!JSON.stringify(stores.chatStore.getChat(chatId)).includes(pixels));
+});
+
 test('a capture interrupted after image write retries safely with the same token',()=>{
  const {store,draft}=fixture(),token=id(),rename=fs.renameSync;fs.renameSync=((from,to)=>{if(String(to).endsWith(`${token}.json`))throw new Error('injected snapshot failure');return rename(from,to);}) as typeof fs.renameSync;
  try{assert.throws(()=>store.capture('chat','derivation',token,1,image),/snapshot failure/);}finally{fs.renameSync=rename;}

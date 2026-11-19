@@ -1,15 +1,72 @@
 import {challengeScratchLesson} from "./problems.ts";
 import {z} from "zod";
-import type {AgentMessage} from "@earendil-works/pi-agent-core";
+import {Type} from "typebox";
+import type {AgentMessage, AgentTool} from "@earendil-works/pi-agent-core";
+import type {ImageContent} from "@earendil-works/pi-ai";
+import {serverExecute} from "../agent/tool-execute.ts";
+import type {LhMarkerMessage, LhMessage} from "../core/native-messages.ts";
 import {AtlasError} from "../core/atlas.ts";
 import {scratchKey,attemptId,scratchScene,scratchTarget,practiceScratchTarget,lessonScratchTarget,scratchAttemptMessage,scratchDelivery,resolveScratchpadImages} from "../core/scratchpad.ts";
 import {stores} from "./stores.ts";
 import {readSourceBody} from "./mindmaps.ts";
 export function scratchMessage(chatId:string,id:string){const a=stores.scratchpadStore.attempt(chatId,id);if(!a)throw new AtlasError("Saved attempt not found.",404);return scratchAttemptMessage(a);}
-export function scratchImages(chatId:string,messages:readonly AgentMessage[],vision:boolean){return resolveScratchpadImages(messages,id=>{
- if(!vision)throw new AtlasError("Choose an image-capable model to read this drawing. Your work is saved.",409);
- const image=stores.scratchpadStore.image(chatId,id);return {type:"image",mimeType:"image/png",data:Buffer.from(image).toString("base64")};
-});}
+function scratchImage(chatId: string, id: string, vision: boolean): ImageContent {
+ if (!vision) throw new AtlasError("Choose an image-capable model to read this drawing. Your work is saved.", 409);
+ const image = stores.scratchpadStore.image(chatId, id);
+ return {type: "image", mimeType: "image/png", data: Buffer.from(image).toString("base64")};
+}
+export function scratchImages(chatId: string, messages: readonly AgentMessage[], vision: boolean, imageId?: string | null, resumeOlder = false) {
+ return resolveScratchpadImages(messages, id => scratchImage(chatId, id, vision), imageId, resumeOlder);
+}
+
+const readInput = z.object({attemptId: attemptId.optional(), before: attemptId.optional()}).strict();
+const readParameters = Type.Unsafe<z.infer<typeof readInput>>(z.toJSONSchema(readInput));
+
+export function scratchpadContext(chatId: string, messages: readonly LhMessage[], vision: boolean, imageId: string | null, resumeOlder: boolean) {
+ const submitted = messages.filter((m): m is LhMarkerMessage =>
+  m.role === "custom" && m.customType === "scratchpad-attempt" && !!(m.details as {hasImage?: boolean}).hasImage);
+ const requested = new Map<string, ImageContent>();
+ const name = "read_scratchpad";
+ const scratchpadTool: AgentTool<any> | undefined = !vision || !submitted.length ? undefined : {
+  name, label: "Read submitted drawing",
+  description: "Inspect a drawing submitted in this chat by attemptId. Omit attemptId to list drawings newest first; use the returned before cursor for older entries. Read only when the original pixels matter. Check the conversation for drawings already attached. No access to unsent drafts.",
+  parameters: readParameters,
+  execute: serverExecute(name, readParameters, (input, {toolCallId}) => {
+   if (input.attemptId) {
+    if (!submitted.some(m => m.id === input.attemptId)) throw new Error("This drawing was not submitted in this chat.");
+    requested.set(toolCallId, scratchImage(chatId, input.attemptId, vision));
+    return `Submitted drawing ${input.attemptId}. The image is available at the time of inspection.`;
+   }
+   const end = input.before ? submitted.findIndex(m => m.id === input.before) : submitted.length;
+   if (end < 0) throw new Error("Unknown drawing cursor. List saved drawings again.");
+   const page = submitted.slice(Math.max(0, end - 20), end).reverse();
+   return {
+    drawings: page.map(m => {
+     const {title, number} = m.details as {title: string; number: number};
+     return {attemptId: m.id, at: m.timestamp, title, number};
+    }),
+    before: end > 20 ? page.at(-1)?.id : undefined,
+   };
+  }),
+ };
+ return {
+  scratchpadTool,
+  resolveAttachments(history: readonly AgentMessage[]) {
+   const projected = scratchImages(chatId, history, vision, imageId, resumeOlder);
+   if (!requested.size) return projected;
+   const lastAssistant = projected.findLastIndex(m => m.role === "assistant");
+   return projected.map((m, i) => {
+    if (m.role !== "toolResult" || m.toolName !== name) return m;
+    const image = requested.get(m.toolCallId);
+    if (!image) return m;
+    // The next inference sees the pixels. Native history keeps only the receipt.
+    if (i > lastAssistant && !m.isError) return {...m, content: [...m.content, image]};
+    requested.delete(m.toolCallId);
+    return m;
+   });
+  },
+ };
+}
 const save=z.object({expectedRevision:z.number().int().nonnegative(),target:scratchTarget,scene:scratchScene,text:z.string().max(20000)}).strict();
 export async function scratchpadResponse(request:Request,chatId:string):Promise<Response>{try{
  const chat=stores.chatStore.getChat(chatId),lesson=stores.lessonStore.read(chatId)??challengeScratchLesson(chatId);if(!chat||!lesson&&chat.kind!=="practice"&&!stores.readingStore.list(chatId).length)throw new AtlasError("Open a learning or practice session to use its scratchpad.",404);

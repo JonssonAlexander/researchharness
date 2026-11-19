@@ -1,6 +1,6 @@
 import {z} from "zod";
 import type {LearningSession} from "./learning-session.ts";
-import type {LhMarkerMessage,LhMessage} from "./native-messages.ts";
+import {nativeInputCause,type LhMarkerMessage,type LhMessage} from "./native-messages.ts";
 import type {AgentMessage} from "@earendil-works/pi-agent-core";
 import {activeCompactionOf,keptIndexFor} from "./compaction.ts";
 import type {ImageContent} from "@earendil-works/pi-ai";
@@ -41,13 +41,54 @@ export function practiceScratchTarget(messages:readonly LhMessage[],padId?:strin
  const index=padId?Number(/^practice-(\d+)$/.exec(padId)?.[1])-1:problems.length-1,statement=problems[index];
  return typeof statement==="string"?{id:`practice-${index+1}`,title:`Practice problem ${index+1}`,start:statement.length<=4000?statement:"See the full problem statement in the conversation.",finish:"Solve the problem and explain your reasoning."}:null;
 }
-export function scratchAttemptMessage(a:ScratchAttempt):LhMarkerMessage{return {id:a.id,role:"custom",customType:"scratchpad-attempt",display:true,timestamp:Date.parse(a.createdAt),details:{attemptId:a.id,padId:a.padId,number:a.number,hasImage:!!a.imageHash,text:a.draft.text,title:a.draft.target.title},content:`Learner attempt ${a.number}: ${a.draft.target.title}\nStart: ${a.draft.target.start}\nFinish: ${a.draft.target.finish}\n${a.draft.text}${a.imageHash?"\n[Submitted drawing attached at the model boundary.]":""}\nGive a concise hint or explanation based on this attempt; preserve uncertainty in handwritten symbols.`};}
-/** Hydrate only at dispatch. Native history retains references, never base64 copies. */
-export function resolveScratchpadImages(messages:readonly AgentMessage[],read:(id:string)=>ImageContent):AgentMessage[]{const source=messages as readonly LhMessage[],cut=activeCompactionOf(source),start=cut?keptIndexFor(source,cut):0;return messages.map((m,i)=>{
- if(i<start)return m;
- if(m.role!=="custom"||m.customType!=="scratchpad-attempt")return m;
- const d=m.details as {hasImage?:boolean};return {role:"user",id:m.id,timestamp:m.timestamp,content:[{type:"text" as const,text:m.content},...(d.hasImage?[read(m.id)]:[])]};
-});}
+const scratchFeedback = "\nGive a concise hint or explanation based on this attempt; preserve uncertainty in handwritten symbols.";
+const attachedDrawing = "\n[Submitted drawing attached at the model boundary.]";
+const drawingSuffix = attachedDrawing + scratchFeedback;
+export function scratchAttemptMessage(a:ScratchAttempt):LhMarkerMessage{return {id:a.id,role:"custom",customType:"scratchpad-attempt",display:true,timestamp:Date.parse(a.createdAt),details:{attemptId:a.id,padId:a.padId,number:a.number,hasImage:!!a.imageHash,text:a.draft.text,title:a.draft.target.title},content:`Learner attempt ${a.number}: ${a.draft.target.title}\nStart: ${a.draft.target.start}\nFinish: ${a.draft.target.finish}\n${a.draft.text}${a.imageHash?attachedDrawing:""}${scratchFeedback}`};}
+/** A submission and one subsequent learner input can use the drawing automatically. */
+export function activeScratchpadImageId(messages: readonly AgentMessage[]): string | null {
+ let followUps = 0;
+ for (let i = messages.length - 1; i >= 0; i--) {
+  const message = messages[i]!;
+  if (message.role === "custom" && message.customType === "scratchpad-attempt") {
+   return (message.details as {hasImage?: boolean}).hasImage ? message.id : null;
+  }
+  if (message.role === "custom" && message.customType === "practice-next") return null;
+  if (nativeInputCause(message, messages) === "learner" && ++followUps > 1) return null;
+ }
+ return null;
+}
+
+export function resolveScratchpadImages(
+ messages: readonly AgentMessage[], read: (id: string) => ImageContent,
+ imageId = activeScratchpadImageId(messages), resumeOlder = false,
+): AgentMessage[] {
+ const source = messages as readonly LhMessage[];
+ const cut = activeCompactionOf(source);
+ const start = cut ? keptIndexFor(source, cut) : 0;
+ let resumed: AgentMessage | undefined;
+ const projected = source.map((m, i): AgentMessage => {
+  if (m.role !== "custom" || m.customType !== "scratchpad-attempt") return m;
+  const hasImage = (m.details as {hasImage?: boolean}).hasImage;
+  const attached = hasImage && m.id === imageId;
+  if (i < start) {
+   if (resumeOlder && attached) {
+    // Keep the compaction cut and carry only the drawing needed to resume feedback.
+    resumed = {role: "user", timestamp: m.timestamp, content: [{type: "text", text: m.content}, read(m.id)]};
+   }
+   return m;
+  }
+  let text = m.content;
+  if (hasImage && !attached) {
+   if (text.endsWith(drawingSuffix)) text = text.slice(0, -drawingSuffix.length) + scratchFeedback;
+   text += `\n[Earlier drawing saved under attemptId ${m.id}. Its pixels are not attached.]`;
+  }
+  const resolved: LhMessage = {role: "user", id: m.id, timestamp: m.timestamp, content: [{type: "text", text}, ...(attached ? [read(m.id)] : [])]};
+  return resolved;
+ });
+ if (resumed) projected.push(resumed);
+ return projected;
+}
 export function scratchDelivery(messages:readonly LhMessage[],id:string):"ready"|"submitted"|"answered"|"failed"{
  const i=messages.findIndex(m=>m.id===id);if(i<0)return "ready";
  const tail=messages.slice(i+1),boundary=tail.findIndex(m=>m.role==="user"||m.role==="custom"&&["scratchpad-attempt","practice-thinking","practice-next"].includes(m.customType)),responses=tail.slice(0,boundary<0?tail.length:boundary).filter(m=>m.role==="assistant"),next=responses.at(-1);return !next?"submitted":next.role==="assistant"&&["error","aborted"].includes(next.stopReason)?"failed":"answered";
