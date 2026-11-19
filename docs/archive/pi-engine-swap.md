@@ -1,5 +1,7 @@
 # The pi engine swap — design record
 
+> Archived 18 November 2026. Historical record.
+
 Date: 2026-09-12. Status: PLANNED (facts verified, awaiting go).
 
 Decision (user, 2026-09-12): swap the server agent engine (Band B) and the

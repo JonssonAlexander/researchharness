@@ -25,38 +25,6 @@ No source relationship is guessed. Reading doesn't integrate knowledge or advanc
 lesson progress. Existing lesson/tangent tools and reviewed integration stay in
 charge.
 
-## Storage and boundaries
-
-- `article-reading/<session>/<PDF SHA-256>.json`: versioned metadata, normalized
-  page rectangles, comment links, registered pad IDs, page, zoom and divider.
-- `active.json` records the last open PDF. Identical PDF bytes within a session
-  reuse one canvas even when present in both lesson and research sources.
-- Existing scratchpad storage owns editable scenes, viewport and immutable PNG
-  submissions. Registered targets use `reading_<hash>` and `readq_<uuid>`.
-- Existing native messages own all chat exchanges; comments reference their IDs.
-- Original PDFs remain in their existing lesson/research stores. Access checks
-  enforce session ownership and original byte hashes. Coordinates never migrate
-  to a changed source version.
-- Metadata/drawing writes use revision checks. Conflicts fail visibly instead of
-  silently overwriting another writer. Failed drawings can be downloaded locally.
-- Retries reuse stable action IDs; preparation saves before delivery. Explicit
-  submission still requires a model that accepts images. No autosaved drawing is
-  sent by opening, highlighting, attaching a local note, or switching views.
-- A research chat with no lesson receives an existing learning-session shell only
-  when the learner explicitly asks an article question.
-
-## Validation
-
-Focused regression tests cover article ownership/deduplication, revision conflicts,
-restart restoration, separate quick pads, immutable snapshots, repeated requests,
-comment edit/removal, native question delivery and unchanged lesson state while
-browsing. Existing scratchpad/source and workbench HTTP tests also pass.
-
-An isolated Chrome fixture checked PDF text selection, margin bubbles, drawing
-save, handwriting attachment, Chat/Reading restoration, divider/page persistence,
-multiple-PDF switching and narrow/wide layouts. No paid provider or pen-hardware
-acceptance test was run. Scanned PDFs use equation boxes when no text layer exists.
-
 ## PDF library and continuous reading
 
 **Atlas → PDF library** lists saved lesson and research PDFs across sessions, with
@@ -114,18 +82,24 @@ entries and their linked attempts. Publication re-reads metadata after PDF looku
 to retain intervening comments and reading position. Original bytes are rechecked;
 all temporary PDF copies are deleted after local extraction/location.
 
-Validation includes real PDF matching and fallback, persistence/restart, append
-idempotency, source/page/topic guards, cancellation, concurrent metadata preservation,
-native teacher tool calls and guide-linked scratchwork. Browser checks use a small
-fixture; owner-paper semantic quality and live paid-model acceptance remain manual.
+## Storage and boundaries
 
-Isolated Chrome also checked exact-region clicks, inline explanations, page-only
-fallback, hiding highlights and reopening with the saved visibility setting. This
-used local fixture data and no paid model calls.
+- `article-reading/<session>/<PDF SHA-256>.json`: versioned metadata, normalized
+  page rectangles, comment links, registered pad IDs, page, zoom and divider.
+- `active.json` records the last open PDF. Identical PDF bytes within a session
+  reuse one canvas even when present in both lesson and research sources.
+- Existing scratchpad storage owns editable scenes, viewport and immutable PNG
+  submissions. Registered targets use `reading_<hash>` and `readq_<uuid>`.
+- Existing native messages own all chat exchanges; comments reference their IDs.
+- Original PDFs remain in their existing lesson/research stores. Access checks
+  enforce session ownership and original byte hashes. Coordinates never migrate
+  to a changed source version.
+- Metadata/drawing writes use revision checks. Conflicts fail visibly instead of
+  silently overwriting another writer. Failed drawings can be downloaded locally.
+- Retries reuse stable action IDs; preparation saves before delivery. Explicit
+  submission still requires a model that accepts images. No autosaved drawing is
+  sent by opening, highlighting, attaching a local note, or switching views.
+- A research chat with no lesson receives an existing learning-session shell only
+  when the learner explicitly asks an article question.
 
-Route redesign validation: focused tests cover valid/invalid teaching routes,
-source-ID references, preservation of existing passages, native teacher route-tool
-execution and the concise panel structure. Isolated Chrome checked result framing,
-no explanation overlap with the PDF, Next navigation, Map switching and reopening
-a cached route without new chat/model requests. Semantic quality on the owner's
-paper still requires a deliberate new Overview request using the selected model.
+Native PDF tools cap images at 16 million rounded pixels. Oversized requests report actual DPI, and normalized top-left detail regions let a tool inspect a smaller area. The cap does not bound all decoder memory. PDF tasks are torn down after success or failure. Real-paper semantic quality and paid-model acceptance remain separate checks.

@@ -1,5 +1,7 @@
 # Upstream batch 2: PDF text and claim candidate retrieval
 
+> Archived 18 November 2026. Historical record.
+
 Selective integration from LearnHarness `713377f366771e3e4730e6acd1bc290e0ebc6d6e`
 onto Atlas `087ff1f`. Retrieval improvements only; upstream's relaxed automatic
 identity policy is deliberately excluded.

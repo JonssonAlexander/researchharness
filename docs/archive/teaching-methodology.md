@@ -1,6 +1,8 @@
 # The theory of learning and teaching
 
-*(Owner theory, formulated 2026-09-24. Historical theory for the legacy probe/teach workflow. For conversational and article lessons, [the implemented learning policy](learning-policy.md) supersedes the self-evidence terminal condition and every-step checking requirements below. Feeling fluent is not evidence of retained capability. The historical theory is preserved to explain the legacy prompts, not to govern the new lesson tutor.)*
+> Historical upstream teaching theory. See [the current learning policy](../learning-policy.md) for conversational lessons.
+
+*(Owner theory, formulated 2026-09-24. Historical theory for the legacy probe/teach workflow. For conversational and article lessons, [the implemented learning policy](../learning-policy.md) supersedes the self-evidence terminal condition and every-step checking requirements below. Feeling fluent is not evidence of retained capability. The historical theory is preserved to explain the legacy prompts, not to govern the new lesson tutor.)*
 
 ## 1. Two knowledge states
 

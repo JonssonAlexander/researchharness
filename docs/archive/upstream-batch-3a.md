@@ -1,5 +1,7 @@
 # Batch 3A: learner-file access
 
+> Archived 18 November 2026. Historical record.
+
 Selective port from LearnHarness `713377f366771e3e4730e6acd1bc290e0ebc6d6e`
 onto Atlas `e3034e7`. No attachment chips, native pickers, image annotation,
 source-folder imports, custom providers or credential-store changes are included.

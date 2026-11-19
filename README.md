@@ -65,9 +65,9 @@ All three platforms support in-app updates.
 ## Development and support
 
 ```bash
-npm install
-npm run dev        # http://localhost:3000
-npm test           # deterministic, no LLM, no network
+npm ci
+npm run dev:local  # http://127.0.0.1:3005
+npm test           # deterministic tests with scripted providers
 ```
 
 See the [development guide](docs/development.md), [architecture](docs/architecture.md), and [desktop release guide](docs/desktop-release.md).

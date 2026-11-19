@@ -1,5 +1,7 @@
 # Batch 4: Exa search
 
+> Archived 18 November 2026. Historical record.
+
 Selective port onto Atlas `45a6473`. Exa is the only added service. Firecrawl,
 hosted Ollama, SDK migrations and new model routing remain excluded.
 

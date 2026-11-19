@@ -1,6 +1,6 @@
 # Spaced Review
 
-Implemented first slice, 31 October 2026. **Review** opens a separate full-Atlas
+**Review** opens a separate full-Atlas
 canvas from graph home or minimal home. It uses saved concept positions and the
 existing renderer, with read-only node selection; it never saves positions,
 recolours the main Atlas, changes concept notes or promotes mathematical claims.
@@ -95,53 +95,7 @@ Group rating options show the separate interval for each concept. Corrections to
 older reviews omit previews because replay may include later events.
 Only one activity is active at once; active targets cannot be rewritten mid-review.
 
-## Persistence and recovery
-
-Schema v15 backs up a v14 database before creating `retrieval_items`,
-`retrieval_activities`, `retrieval_events` and `retrieval_settings`. These are hashed
-JSON records with indexed activity days/status and item events. Mathematical
-concepts/claims remain in their existing stores. Short SQLite transactions persist
-schedules, immutable review events and the activity receipt together. A failed
-transaction leaves the revealed activity resumable and records no partial grade.
-Source files are captured before their reference is committed; interrupted file
-captures can leave unreferenced local files, safely retried through stable tokens.
-Include the entire data root, SQLite metadata and scratchpad files in backups.
-
-The existing server event bus carries `review-changed`; UI refetches on events,
-reconnect/focus and a one-shot next-due/study-day-boundary timer. There is no new
-standing polling loop. Snapshot reads use today's activities/current/last activity
-rather than loading the entire historical deck. Source cards and review history
-are retained if a concept is removed; absent concepts are not scheduled.
-
-Tests cover real FSRS scheduling and configuration round trips, duplicate receipts,
-corrections, per-target cluster outcomes, target/source revisions, count/time limits,
-UTC/DST boundaries, isolated migration/backup, corruption refusal, rollback,
-restart, drawing retention, native scripted question submission and the UI reveal /
-rating path. They do not establish mathematical accuracy of a real model, real pen
-comfort, pedagogical calibration or a live paid-provider run. AI-written lesson-to-card refinement, Anki/APKG import/export, long problems, technique scheduling and
-personal parameter optimisation remain separate later work.
-
-Official API used: [ts-fsrs quick start](https://open-spaced-repetition.github.io/ts-fsrs/guide/quick-start)
-and the pinned package's README/types, including the FSRS-7 memory state.
-
-Validation follow-up, 1 November: 180 focused tests passed; the complete suite
-passed 2,715/2,760 in the restricted environment. All 45 failures involved local
-server/home-temp permissions; the affected files passed on targeted reruns
-(109 tests). Typecheck and lint passed. A temporary-profile Chrome run exercised
-card preparation, typed attempt, reveal and rating through the real HTTP/UI path.
-Electron's bundled Node 24.22 also initialized the pinned FSRS scheduler. No paid
-model call or owner-data card enrolment was used. Production build remains
-unverified: Turbopack hit a process/port restriction, and the Webpack fallback hit
-the existing client-barrel `node:crypto` import through `coverage.ts`. Development
-compilation and the browser card flow passed; this is not packaged-release sign-off.
-
-Daily review validation, 1 November: 92 focused retrieval/UI/canvas tests passed,
-including automatic two-card advancement, interval previews matching committed
-FSRS dates, and endpoint-mean retention colours. Typecheck and targeted lint
-passed. The owner-profile Review screen was visually checked without dispatching
-a paid question or recording an outcome. Live provider question preparation was
-not rerun for this UI change.
-
+## Card feedback and saved questions
 
 Card help: reveal after attempting, then use **Check my answer** to assess your
 saved answer/drawing, using the question/key as context. It gives feedback only,
@@ -155,7 +109,7 @@ schedule. These explicit model calls use the configured teaching model (up to tw
 calls, twenty-minute limit), retain usage and never choose your FSRS rating. This
 is model feedback, not formal mathematical verification.
 
-Question bank, 10 November: single cards already persist as retrieval targets.
+Question bank: single cards already persist as retrieval targets.
 Connected questions now form a reusable bank projected from durable review activity
 records, including existing history. No database migration or duplicate answer
 store is needed. Daily review tries saved connected groups first and reuses the
@@ -187,3 +141,23 @@ not a full solution dump or checkpoints. Continue discussion resumes the linked
 chat; the review and its independent schedule remain unchanged. Rate only what
 was recalled before the assisted discussion. No model is called merely to create
 the lesson; normal teaching requests retain their existing consent/model gates.
+
+## Persistence and recovery
+
+Schema v15 backs up a v14 database before creating `retrieval_items`,
+`retrieval_activities`, `retrieval_events` and `retrieval_settings`. These are hashed
+JSON records with indexed activity days/status and item events. Mathematical
+concepts/claims remain in their existing stores. Short SQLite transactions persist
+schedules, immutable review events and the activity receipt together. A failed
+transaction leaves the revealed activity resumable and records no partial grade.
+Source files are captured before their reference is committed; interrupted file
+captures can leave unreferenced local files, safely retried through stable tokens.
+Include the entire data root, SQLite metadata and scratchpad files in backups.
+
+The existing server event bus carries `review-changed`; UI refetches on events,
+reconnect/focus and a one-shot next-due/study-day-boundary timer. There is no new
+standing polling loop. Snapshot reads use today's activities/current/last activity
+rather than loading the entire historical deck. Source cards and review history
+are retained if a concept is removed; absent concepts are not scheduled.
+
+Scheduled review uses the pinned FSRS scheduler. Real pen comfort, model accuracy, and personal calibration require their own checks.

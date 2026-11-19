@@ -1,5 +1,7 @@
 # Performance repairs — 17 November 2026
 
+> Archived 18 November 2026. Historical record.
+
 Implements the six owner-reviewed Ponytail audit tickets (R01, R05, R08–R11,
 R15–R17). These bounded changes do not identify the origin of the previously
 observed 9.2 GB aged development-server footprint.

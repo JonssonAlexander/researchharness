@@ -1,13 +1,15 @@
 # Learning and derivation sessions — owner-approved plan
 
+> Archived 18 November 2026. Historical record.
+
 30 October 2026. R04–R05, R07–R12 and R15–R17. **Target design; first text/dictation slice implemented.**
 This clarifies the maintained implementation contract's §11.1. The existing
 concept-to-derivation navigation is only an entry point; it does not yet supply
-the complete learning experience. The [first workspace slice](atlas-learning-workspace.md)
+the complete learning experience. The [first workspace slice](../atlas-learning-workspace.md)
 now adds objectives, lesson maps, nested targets and conversational teaching;
 handwriting and canonical end-of-session integration are now implemented in the
-[scratchpad](atlas-scratchpad.md) and [reviewed integration](atlas-lesson-integration.md)
-slices. [Atlas-aware lookup and multi-concept priming](atlas-aware-lessons.md) now
+[scratchpad](../atlas-scratchpad.md) and [reviewed integration](../atlas-lesson-integration.md)
+slices. [Atlas-aware lookup and multi-concept priming](../atlas-aware-lessons.md) now
 support lesson planning; separate FSRS/challenging practice remains later work.
 
 ## Teaching
@@ -67,7 +69,7 @@ Finishing is not a proof certificate or automatic independent-mastery event.
 
 ## Practice remains separate
 
-Preserve AGENTS.md §12, including committed checked solutions, attempt/hint/reveal
+Preserve [the practice requirements](agent-contract-2026-11-18.md#12-retrieval-difficult-practice-and-techniques-r12), including committed checked solutions, attempt/hint/reveal
 history, technique recognition and defective-problem handling. Later practice
 includes independent whole-proof reconstruction, applications, multiple-concept
 combinations, hidden techniques and challenging Putnam/IMC-style problems. Short

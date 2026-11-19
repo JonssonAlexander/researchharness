@@ -90,28 +90,7 @@ an external provider after a crash; source snapshots and local message identitie
 are idempotent. Autosaved or unsuccessful work is never automatically integrated
 into canonical mathematical knowledge.
 
-This slice serves conversational learning sessions. Legacy question-tool/Practice
-scratchpad binding, OCR/transcription editing, very large multi-page submission and
-new understanding/FSRS evidence workflows remain later work. It does not alter the
-existing Practice protocol or create a custom drawing engine.
-
-Validation: isolated store/HTTP and scripted Pi tests cover stale/failed saves,
-immutable/idempotent snapshots, export/capture failure, actual image transport,
-source replay, unsupported vision and retained work. A paid vision call, microphone
-recording and real tablet assessment must be reported separately from those tests.
-
-API reference used alongside the pinned installed types:
-[Excalidraw export utilities](https://docs.excalidraw.com/docs/@excalidraw/excalidraw/api/utils/export).
-
-Native Chrome smoke check: opened the editor in the existing lesson, observed the
-pen/eraser/zoom/undo/redo controls, changed Small/Half/Fullscreen hosts and closed
-without drawing, recording audio or sending an attempt. This is not a tablet lag
-or palm-rejection measurement. Scripted delivery tests cover actual image blocks,
-duplicate submission, a completed-feedback resume, and a text-only model refusal;
-422 refusals are surfaced once rather than retried as busy-turn conflicts. Resume
-binds the attempt ID and refuses stale/failed targets instead of making a second
-unrelated response. Tailwind scans app/components/src/lib explicitly, keeping
-binary font assets and generated build artifacts out of class discovery.
+Autosave retains a lazy scene reader and serializes on flush, download, or explicit capture. Versioned acknowledgements preserve newer dirty work. The 800 ms debounce and unload protection still apply. Legacy quiz binding and editable OCR remain unavailable. Ordinary Practice can save per-question pads without changing its attempt protocol. Real pen and live provider checks are separate from the scripted transport tests.
 
 ## Lesson integration attachments
 
@@ -122,13 +101,7 @@ are skipped. There is no additional Save step, provider call or image upload. Th
 existing editor autosave is used; strokes not yet saved are not captured. Changing
 saved scratchwork invalidates a prepared approval just like changing lesson text.
 
-A preview image is useful for quick reading, but cannot preserve editable strokes.
-The toolbar Save dialog alone would create a separate file without a durable node
-reference and could be moved or overwritten. Both are therefore kept: submitted attempts retain their PNG plus complete local
-`.excalidraw` scene/assets; unsent drafts retain the scene and explanation and can
-be opened in the read-only local viewer without first exporting a PNG. Download
-Excalidraw uses the saved native scene; import that file into Excalidraw to edit a
-copy. Viewing/downloading never overwrites the working pad or reviewed attachment.
+Submitted attempts retain their PNG and editable native scene with assets. Unsent drafts retain their native scene and explanation. Open them locally or download a copy without overwriting the working pad.
 
 `Scratchwork` stays collapsed beneath concept notes, focused-map nodes, canonical
 result/explicitly cited claim details, and reviewed lesson maps/derivations. Entries

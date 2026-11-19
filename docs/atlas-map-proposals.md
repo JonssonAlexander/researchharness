@@ -1,7 +1,7 @@
 # Saved map interpretation proposals
 
 29 October 2026; R06, R07, R09, R14, R16 and R17. This is the interpretation and
-read-only preview slice of AGENTS.md §8.1, not the approval/commit workflow.
+read-only preview slice of [the reviewed synchronization design](archive/agent-contract-2026-11-18.md#81-lifecycle), not the approval/commit workflow.
 An explicit [second pass and isolated proposed-map view](atlas-map-refinement.md)
 now develops a prepared reading into retained draft notes without changing Atlas.
 

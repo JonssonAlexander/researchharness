@@ -10,7 +10,7 @@ Source text and recorded metrics stay separate from the owner's interpretation. 
 
 ## Files and limits
 
-Default reads: P0's version-1 workspace manifest, selected trail's `brief.md`, `handoff.md`, `runs/index.jsonl`, and at most 20 changed/invalid run-record attempts. No recursive source ingestion or code execution. Acknowledgement stores a cursor, so bad records do not permanently block later batches. Changed indexes reset the cursor; previous imported run hashes still prevent duplicates. Invalid/missing records are reported individually. Preview never advances a checkpoint.
+Default reads: P0's version-1 workspace manifest, selected trail's `brief.md`, `handoff.md`, `runs/index.jsonl`, and at most 20 changed/invalid run-record attempts. No recursive source ingestion or code execution. Acknowledgement stores a cursor so later batches can move past bad records. Later reviews leave room to retry unreadable or invalid run files from earlier batches, even when the index stays the same. Changed indexes reset the cursor. Previously acknowledged run hashes prevent duplicates. Invalid/missing records are reported individually. Preview never advances a checkpoint.
 
 Metadata/individual records: 64 KiB each; manifest/index: 1 MiB each. Oversized required metadata is refused explicitly. Up to 20 run attempts per batch; warnings are bounded with an omission notice. These are operational limits, not silent evidence truncation.
 
@@ -45,5 +45,7 @@ Main files: `src/core/research-integration.ts`, `src/store/research-integration.
 ## Validation and scope
 
 Targeted tests cover source discovery/batching, malformed/oversized records, identity and symlink refusal, artifact hashes, real Git metadata, source changes, approval/retry/conflicts, immutable prior evidence, restart persistence, migration backup/rollback/future refusal and existing P0 behavior. The focused P0/P1 run passed 10 tests; typecheck and changed-file ESLint passed. After the history pagination change, the affected approval/persistence test and typecheck/lint were rerun.
+
+Open device check: capture a failed and a completed run in a real VS Code project, review them in the app, then reopen the trail after restart. Include two trails sharing one project and confirm each imports its own run records.
 
 Optional AI synthesis, detailed code inspection, automatic Workbench resolution/recording helpers, chat-triggered import and background watching are omitted. Manual review is fully usable with zero model calls. P2/P3 remain future work. Per owner request: no full suite, production build, UI automation or device sign-off in this slice.

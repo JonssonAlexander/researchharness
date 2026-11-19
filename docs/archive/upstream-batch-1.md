@@ -1,5 +1,7 @@
 # Upstream batch 1: persistence and replay
 
+> Archived 18 November 2026. Historical record.
+
 Implemented against Atlas `ceb4c6696f9577a3c7c574460b8707cf36a4fc0d`, using
 LearnHarness `713377f366771e3e4730e6acd1bc290e0ebc6d6e` as the pinned reference.
 This is a selective port, not a merge of upstream main. No dependency, UI,

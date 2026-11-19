@@ -1,7 +1,8 @@
 # Refined notes and isolated proposed maps
 
-29 October 2026. R06–R09, R14–R17; a bounded resolve/preview extension of AGENTS.md
-§8.1. Editable review and approved concept/typed-association integration are documented
+29 October 2026. R06–R09, R14–R17. A bounded resolve/preview extension of
+[the reviewed synchronization design](archive/agent-contract-2026-11-18.md#81-lifecycle).
+Editable review and approved concept/typed-association integration are documented
 in [the next slice](atlas-map-integration.md); formal proposition/argument application
 remains pending. This does not complete Phase 3 or provide theorem verification.
 

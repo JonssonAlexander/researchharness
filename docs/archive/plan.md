@@ -1,5 +1,7 @@
 # Build Plan v1 — from vision to system
 
+> Historical upstream planning record. See [the current architecture guide](../architecture.md).
+
 Execution plan for `docs/vision.md`. Section references (§) point into that document. Not exact — a dependency-ordered wave structure with verification gates. Written 2026-08-22.
 
 ## Execution model

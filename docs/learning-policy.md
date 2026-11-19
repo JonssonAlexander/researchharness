@@ -1,7 +1,7 @@
 # Evidence-aware mathematical learning (updated 16 November 2026)
 
-The product specification is `research_atlas_learning_policy.md` in the enclosing
-workspace. This implementation applies to conversational lessons, including PDF
+See the [learning policy design](learning-policy-design.md) for the product
+specification. This implementation applies to conversational lessons, including PDF
 lessons and derivations. Legacy probe/teach, short Practice, Challenge and daily
 FSRS keep their existing protocols. No new agent hierarchy or embedding model.
 
@@ -81,11 +81,13 @@ Local JSON inspection/export:
 
 Exports contain private learner text assessments and prompt snapshots; they use
 no-store responses, never expose unrevealed Challenge solutions, and stay local.
-Deleting a session deletes its learning ledger through the existing deletion flow.
-Back up the complete data directory, including this database and retained legacy
-files, with the app stopped or a consistent SQLite backup. Legacy JSON alone is
-not a current backup after migration. Unsupported/corrupt ledgers or newer database
-versions fail closed. See [performance repairs](performance-hardening.md).
+## Storage, migration, and recovery
+
+The store keeps `learning-policy/learning.sqlite` under the data root (schema version 1). Event receipt and session revision commit together. Routine activity uses an indexed receipt and filtered context. Reports can still read the full history. Target edits reject stale revisions, missing references, and dependency cycles.
+
+First access imports valid legacy session JSON in one transaction. Failed import rolls back and retries safely. The original JSON remains a recovery copy. Newer or corrupt records fail closed. Older JSON-only builds cannot see later SQLite events.
+
+Deleting a session imports any unmigrated ledger first. The store removes the database rows and legacy file under a transaction. A failed unlink rolls back, and a crash after unlink still leaves the imported rows recoverable. Back up and restore the full data root with the app stopped or with SQLite-consistent tooling. Retained JSON alone omits newer events.
 
 ## Passive timing
 
@@ -116,22 +118,4 @@ share time. Intervals spanning a policy change retain separate policy spans;
 pre-policy time remains unattributed. Longitudinal exports expose these gaps.
 
 
-## Continuous delivery, stage 1
-
-Policy `2026-11-16.1` reconciles the previous one-key-idea style and mandatory
-opening map reads/focus writes. A bounded, request-local snapshot supplies live
-lesson context without a tool round-trip. Explicit reads remain for omitted/deeper
-material and conflicts. Meaningful map changes are batched; coverage is still
-not demonstrated understanding. No automatic solution reveal or forced completion.
-
-Native `turns[].delivery` observations and existing token steps support prospective
-latency/cost inspection without a new activity store. First text is a server-side
-presence proxy, not semantic usefulness or browser paint. Prepared units, delayed
-map synchronization without another inference, and bounded prefetch remain stages
-2–3. See [architecture, baseline and limitations](lesson-delivery.md).
-
-
-Cost-control amendment: policy `2026-11-16.2` makes interactive demos
-explicit-request only, particularly avoiding unsolicited artifacts in opening and
-conceptual explanations. Existing tools remain available for requested demos.
-Stage 2, including standalone unit indexing, remains deferred; see lesson-delivery.md.
+See [lesson delivery](lesson-delivery.md) for bounded context, teaching cadence, usage metrics, and deferred delivery work.
