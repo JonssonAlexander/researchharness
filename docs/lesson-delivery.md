@@ -37,9 +37,10 @@ The snapshot adds the parent topic, up to two upcoming route candidates and
 nearby associations within the 24,000-character JSON budget. A working derivation
 excludes the upcoming candidates. Long required notes and exact targets can exceed
 the budget by themselves. Optional topics are included whole or listed as omitted.
-Only `completeTopicIds` count as read notes. Use `read_lesson` for omitted notes,
-the full topology or a fresh revision after a conflict. Route order and coverage
-describe teaching progress.
+Use the supplied revision, route, active target and notes in `completeTopicIds`
+directly. Use `read_lesson` to fill a specific gap, such as omitted notes,
+another derivation, missing topology or a revision conflict. Batch missing topics
+in one read. Route order and coverage describe teaching progress.
 
 The learning agent appends this fresh application-data message after native
 history projection and protocol repair. An edit takes effect on the next inference,
@@ -57,6 +58,12 @@ Provider token counts are listed separately when admitted and present. The
 estimates use the existing character heuristic and fixed image allowance, so
 provider framing and vision token costs can differ. The inspector logs no
 prompt text, tool payloads, image bytes or credentials.
+
+In an offline replay of 227 saved tool follow-ups through the current ChatGPT
+request encoder, the cache key, tool declarations and earlier transcript
+matched the previous request. The prior request's snapshot at the tail was
+the first changed item. Saved provider counters confirm partial cache reuse,
+but do not identify why a larger matching prefix sometimes gets little credit.
 
 Two deterministic fixtures compared with the prior projection. These are
 input estimates. Common tools and policy text are excluded from both sides.

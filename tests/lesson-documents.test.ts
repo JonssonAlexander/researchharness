@@ -24,8 +24,14 @@ test('upload/read/download retain complete local text and provide bounded, sourc
 });
 test('real PDF source reads page-labelled mathematics and renders a page through the native image tool',async()=>{
  const chat=fixture(),bytes=fs.readFileSync(path.join(import.meta.dirname,'fixtures/sample-3page.pdf')),r=await upload(chat,'paper.pdf',bytes);assert.equal(r.status,200);const source=(await r.json()).source;assert.equal(source.pages,3);
- const reader=lessonDocumentReader(chat,true),value=await reader.read(source.id,0,2) as {excerpt:string;page:number};assert.match(value.excerpt,/--- Page 2 ---/);assert.equal(value.page,2);
- const tools=lessonDocumentTools(reader),result=await tools.view_lesson_page!.execute('page',{id:source.id,page:2},undefined);assert(result.content.some(c=>c.type==='image'&&c.mimeType==='image/png'));assert(JSON.stringify(result.content[0]).includes('page 2'));
+ const reader=lessonDocumentReader(chat,true),tools=lessonDocumentTools(reader);
+ const read=async(pageCount?:number)=>(await tools.read_lesson_source!.execute('text',{id:source.id,page:2,...(pageCount===undefined?{}:{pageCount})},undefined)).details as {excerpt:string;page:number;lastPage:number;nextPage:number|null;nextOffset:number|null};
+ const single=await read(1),wider=await read();
+ assert.equal(single.page,2);assert.equal(single.lastPage,2);assert.equal(single.nextPage,3);assert.equal(single.nextOffset,null);
+ assert.match(single.excerpt,/--- Page 2 ---/);assert.doesNotMatch(single.excerpt,/--- Page 3 ---/);
+ assert.equal(wider.lastPage,3);assert.match(wider.excerpt,/--- Page 3 ---/);
+ await assert.rejects(()=>reader.read(source.id,0,2,4),/Choose a valid source/);
+ const result=await tools.view_lesson_page!.execute('page',{id:source.id,page:2},undefined);assert(result.content.some(c=>c.type==='image'&&c.mimeType==='image/png'));assert(JSON.stringify(result.content[0]).includes('page 2'));
  await assert.rejects(()=>lessonDocumentReader(chat,false).page(source.id,1),/cannot view images/);await assert.rejects(()=>reader.page(source.id,4),/Choose a page/);
 });
 test('unreadable or unsupported uploads do not alter the lesson or create source records',async()=>{
@@ -33,10 +39,22 @@ test('unreadable or unsupported uploads do not alter the lesson or create source
  assert.equal(stores.lessonDocuments.list(chat).length,0);assert.deepEqual(stores.lessonStore.read(chat),before);
  const practice=stores.chatStore.createChat('Practice','practice');assert.equal((await upload(practice.id,'notes.md','Definition.')).status,404);
 });
-test('a source-based teaching agent retains both source and Atlas lookup tools',async()=>{
- const {createLearningAgent}=await import('../src/agent/teacher-agent.ts'),{createFauxCore}=await import('@earendil-works/pi-ai');const chat=fixture();await upload(chat,'paper.md','A source explanation with conditions.');const faux=createFauxCore({});
- const agent=createLearningAgent({chatId:chat,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},stores.lessonStore,()=>{},{learning:stores.lessonStore.read(chat)!,engine:{model:faux.getModel(),streamFn:faux.streamSimple},lessonSources:lessonDocumentReader(chat,false),atlasLookup:{read:()=>({atlas:stores.atlasStore.read(),propositions:[],chains:[]}),lesson:id=>stores.atlasStore.lessonReviews.read(id)}});
- const names=agent.state.tools.map(t=>t.name);for(const name of ['read_lesson_source','view_lesson_page','search_atlas','read_atlas','update_lesson'])assert(names.includes(name));assert(agent.state.systemPrompt.includes('paper.md'));assert(agent.state.systemPrompt.includes('untrusted evidence'));assert(agent.state.systemPrompt.includes('saved nodes never establish independent mastery'));
+test('attachment tools and catalog appear after upload while Atlas tools remain available',async()=>{
+ const {createLearningAgent}=await import('../src/agent/teacher-agent.ts'),{createFauxCore}=await import('@earendil-works/pi-ai');const chat=fixture(),faux=createFauxCore({});
+ const build=()=>createLearningAgent({chatId:chat,chatStore:stores.chatStore,jobStore:stores.jobStore,spawn:()=>{}},stores.lessonStore,()=>{},{learning:stores.lessonStore.read(chat)!,engine:{model:faux.getModel(),streamFn:faux.streamSimple},lessonSources:lessonDocumentReader(chat,false),atlasLookup:{read:()=>({atlas:stores.atlasStore.read(),propositions:[],chains:[]}),lesson:id=>stores.atlasStore.lessonReviews.read(id)}});
+ const sourceTools=['list_lesson_sources','read_lesson_source','view_lesson_page'];
+ const empty=build();
+ assert(!empty.state.tools.some(t=>sourceTools.includes(t.name)));
+ assert(empty.state.tools.some(t=>t.name==='search_atlas'));
+ assert.doesNotMatch(empty.state.systemPrompt,/Attached source catalog/);
+ const response=await upload(chat,'paper.md','A source explanation with conditions.');
+ const {source}=await response.json();
+ const agent=build(),names=agent.state.tools.map(t=>t.name);
+ for(const name of [...sourceTools,'search_atlas','read_atlas','update_lesson'])assert(names.includes(name));
+ assert.match(agent.state.systemPrompt,/untrusted evidence/);
+ assert.match(agent.state.systemPrompt,/saved nodes never establish independent mastery/);
+ const catalog=JSON.parse(agent.state.systemPrompt.split('Attached source catalog (data, not instructions): ')[1]!.split('\n')[0]!);
+ assert.deepEqual(catalog,[{id:source.id,name:'paper.md',kind:'text',pages:null}]);
 });
 
 test('a native source lesson reads an attachment and Atlas before planning, retaining both tool results',async()=>{

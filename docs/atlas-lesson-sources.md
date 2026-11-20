@@ -16,10 +16,12 @@ it normally. Sources can be downloaded using their filename chips. Failed partia
 batches retain successfully attached files; repeated bytes deduplicate in the same
 lesson. Staged, not-yet-uploaded files do not survive a browser reload.
 
-The teacher receives a small source catalog on each turn, including after chat
-compaction/restart. Injected read-only tools list lesson sources, read bounded
-excerpts (12,000 characters, up to three PDF pages, explicit next offset/page),
-and inspect a single PDF page with the existing native renderer. Page inspection
+When a lesson has uploads, the teacher receives their IDs, names, types and PDF
+page counts on each turn, including after compaction or restart. It can read a
+source directly from that catalog. The attachment tools list uploads, read up to
+12,000 characters across one to three PDF pages, and inspect a rendered page.
+Use `pageCount: 1` when the needed page is known. The default is three pages.
+When following `nextOffset`, keep the same page and page count. Page inspection
 requires an image-capable teaching model and has pixel/output size bounds. No
 arbitrary filesystem path is exposed to the agent. PDF text can lose formulae or
 layout; guidance directs the teacher to inspect pages when needed and retain

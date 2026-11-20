@@ -10,9 +10,9 @@ import {readRequestBody} from './request-body.ts';
 import {isTurnRunning} from './turn-liveness.ts';
 import {emit} from '../core/events.ts';
 export function lessonDocumentReader(chatId:string,vision:boolean):LessonDocumentReader{
- return {list:()=>stores.lessonDocuments.list(chatId),read:async(id,offset,page)=>{
-  const source=stores.lessonDocuments.asset(chatId,id);if(!Number.isInteger(offset)||offset<0||!Number.isInteger(page)||page<1||source.document.pages&&page>source.document.pages)throw new AtlasError('Choose a valid source page/offset.');
-  const last=Math.min(page+2,source.document.pages??page),text=source.document.kind==='pdf'?await pdfExtract(source.path,`${page}-${last}`):new TextDecoder('utf-8',{fatal:true}).decode(source.bytes),excerpt=text.slice(offset,offset+12000),more=offset+excerpt.length<text.length;
+ return {list:()=>stores.lessonDocuments.list(chatId),read:async(id,offset,page,pageCount=3)=>{
+  const source=stores.lessonDocuments.asset(chatId,id);if(!Number.isInteger(offset)||offset<0||!Number.isInteger(page)||page<1||!Number.isInteger(pageCount)||pageCount<1||pageCount>3||source.document.pages&&page>source.document.pages)throw new AtlasError('Choose a valid source page/offset.');
+  const last=Math.min(page+pageCount-1,source.document.pages??page),text=source.document.kind==='pdf'?await pdfExtract(source.path,`${page}-${last}`):new TextDecoder('utf-8',{fatal:true}).decode(source.bytes),excerpt=text.slice(offset,offset+12000),more=offset+excerpt.length<text.length;
   return {source:source.document.id,name:source.document.name,page:source.document.kind==='pdf'?page:null,lastPage:source.document.kind==='pdf'?last:null,offset,excerpt,nextOffset:more?offset+excerpt.length:null,nextPage:!more&&source.document.pages&&last<source.document.pages?last+1:null,notice:source.document.kind==='pdf'?'Extracted text can lose equations/layout. Inspect the page image for mathematical detail.':null};
  },page:async(id,page,region)=>{
   if(!vision)throw new AtlasError('This teaching model cannot view images. Choose an image-capable model to inspect source equations/figures.');
