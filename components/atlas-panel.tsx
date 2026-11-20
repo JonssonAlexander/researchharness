@@ -58,6 +58,9 @@ export function useAtlas() {
 	useServerEvent("atlas-changed", () => {
 		void refresh();
 	});
+	useServerEvent("chats-changed", () => {
+		void refresh();
+	});
 	useServerResync(() => {
 		void refresh();
 	});

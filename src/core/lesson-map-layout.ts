@@ -38,8 +38,7 @@ export function lessonLabelSize(node:LessonTopic){
  return {width,height:24+Math.ceil((node.question||node.title).length/25)*19+(node.question&&node.question!==node.title?25:0)+(node.formula?42:0)};
 }
 /** Resolve actual label rectangles, with a stable direction for coincident points. */
-function clearLabels(nodes:Point[],plan:MapPlan,pinned=new Set<string>()){
- const sizes=new Map(plan.nodes.map(n=>[n.id,lessonLabelSize(n)]));
+function clearLabels(nodes:Point[],sizes:ReadonlyMap<string,ReturnType<typeof lessonLabelSize>>,pinned:ReadonlySet<string>){
  for(let pass=0;pass<100;pass++){
   let overlap=false;
   for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
@@ -72,15 +71,25 @@ export function layoutLessonMap(plan:MapPlan):Point[]{
  const stage=(id:string)=>{const root=rootById.get(lessonRoot(plan,id)??id);return root?.section??root?.id??id;};
  for(const p of placed){const name=stage(p.id),c=centres.get(name)??{x:0,y:0,count:0};c.x+=p.x;c.y+=p.y;c.count++;centres.set(name,c);}
  for(const c of centres.values()){c.x/=c.count;c.y/=c.count;}
- const nodes:LayoutNode[]=placed.map(p=>({...p})),layers=lessonMapLayers(plan);
+ const anchors=new Map(placed.map(p=>[p.id,centres.get(stage(p.id))!]));
+ return settleLessonLayout(placed,plan.nodes,lessonMapLayers(plan),anchors);
+}
+type LessonLinks=Pick<ReturnType<typeof lessonMapLayers>,"route"|"branches"|"associations">;
+/** Keep the same link distances and label clearance when lesson maps are joined around fixed Atlas nodes. */
+export function settleLessonLayout(
+ points:readonly Point[],topics:readonly LessonTopic[],layers:LessonLinks,
+ anchors:ReadonlyMap<string,{x:number;y:number}>,pinned:ReadonlySet<string>=new Set(),anchorStrength=.008,
+):Point[]{
+ const sizes=new Map(topics.map(n=>[n.id,lessonLabelSize(n)]));
+ const nodes:LayoutNode[]=points.map(p=>pinned.has(p.id)?{...p,fx:p.x,fy:p.y}:{...p});
  const links=[...layers.route.map(e=>({...e,distance:320,strength:.07})),...layers.branches.map(e=>({...e,distance:220,strength:.14})),...layers.associations.map(e=>({...e,distance:400,strength:.015}))];
  const sim=createGraphSimulation(nodes,[],{chargeStrength:-900,gravity:{x:0,y:0,strength:0}});
  sim.force("relationships",forceLink<LayoutNode,{source:string|LayoutNode;target:string|LayoutNode;distance:number;strength:number}>(links.map(e=>({source:e.from,target:e.to,distance:e.distance,strength:e.strength}))).id(n=>n.id).distance(e=>e.distance).strength(e=>e.strength));
- sim.force("stageX",forceX<LayoutNode>(n=>centres.get(stage(n.id))!.x).strength(.008));
- sim.force("stageY",forceY<LayoutNode>(n=>centres.get(stage(n.id))!.y).strength(.008));
- sim.force("labels",forceCollide<LayoutNode>(n=>lessonLabelSize(plan.nodes.find(p=>p.id===n.id)!).width*.52).iterations(2));
+ sim.force("stageX",forceX<LayoutNode>(n=>anchors.get(n.id)!.x).strength(anchorStrength));
+ sim.force("stageY",forceY<LayoutNode>(n=>anchors.get(n.id)!.y).strength(anchorStrength));
+ sim.force("labels",forceCollide<LayoutNode>(n=>sizes.get(n.id)!.width*.52).iterations(2));
  sim.tick(240);sim.stop();
- return clearLabels(nodes.map(n=>({id:n.id,x:n.x!,y:n.y!})),plan);
+ return clearLabels(nodes.map(n=>({id:n.id,x:n.x!,y:n.y!})),sizes,pinned);
 }
 export interface LessonMapMotion {
  readonly active:boolean;
@@ -91,10 +100,10 @@ export interface LessonMapMotion {
  positions:()=>Point[];
 }
 /** The same D3 force engine as Atlas, warm-started and bounded to the dragged neighbourhood. */
-export function createLessonMotion(plan:MapPlan,points:Point[]):LessonMapMotion{
+export function createLessonMotion(plan:MapPlan,points:Point[],visibleLinks?:readonly {from:string;to:string}[]):LessonMapMotion{
  const nodes:LayoutNode[]=points.map(p=>({...p,fx:p.x,fy:p.y})),byId=new Map(nodes.map(n=>[n.id,n]));
  const anchors=new Map(points.map(p=>[p.id,{x:p.x,y:p.y}])),sizes=new Map(plan.nodes.map(n=>[n.id,lessonLabelSize(n)]));
- const {route,branches,associations}=lessonMapLayers(plan),links=[...route,...branches,...associations].map(e=>({...e,distance:Math.max(140,Math.hypot(byId.get(e.from)!.x!-byId.get(e.to)!.x!,byId.get(e.from)!.y!-byId.get(e.to)!.y!))}));
+ const {route,branches,associations}=lessonMapLayers(plan),links=(visibleLinks??[...route,...branches,...associations]).map(e=>({...e,distance:Math.max(140,Math.hypot(byId.get(e.from)!.x!-byId.get(e.to)!.x!,byId.get(e.from)!.y!-byId.get(e.to)!.y!))}));
  const sim=createGraphSimulation(nodes,[],{chargeStrength:-90,gravity:{x:0,y:0,strength:0},velocityDecay:.55,alphaDecay:.09});
  sim.force("springs",forceLink<LayoutNode,{source:string|LayoutNode;target:string|LayoutNode;distance:number}>(links.map(e=>({source:e.from,target:e.to,distance:e.distance}))).id(n=>n.id).distance(e=>e.distance).strength(.1));
  sim.force("anchorX",forceX<LayoutNode>(n=>anchors.get(n.id)!.x).strength(.045));sim.force("anchorY",forceY<LayoutNode>(n=>anchors.get(n.id)!.y).strength(.045));

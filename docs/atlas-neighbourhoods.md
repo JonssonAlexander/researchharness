@@ -22,15 +22,29 @@ prioritizing external concepts with more links into the subject. Omitted counts 
 shown. The full Atlas remains available; this is a bounded overview, not semantic
 search, a lesson-progress classifier or an exhaustive cross-disciplinary query.
 The local canvas reuses GraphCanvasRenderer and label-aware lesson layout, with
-fixed temporary positions, readable labels and no subject density glow. Local
-navigation neither moves nor copies global concepts. Main Atlas dragging and link
-editing remain available through Notes & edit / the existing Atlas controls.
+temporary positions and readable labels. Drag Atlas concepts or lesson topics to arrange the focused view. The lesson
+springs let nearby points shift and settle. Positions survive lesson toggles
+while the view is open. Region shading covers the selected Atlas concept, its immediate
+Atlas neighbours and their Atlas links. Floating labels identify the selected
+concept and each visible lesson, using the current chat title when available.
+Lesson branches stay outside the shaded region.
+Use the main Atlas controls to edit saved layout or links.
 
 The sidebar links saved integrated lesson maps and their source conversations.
 Explicit concept references and shared canonical proposition IDs both locate the
 source lesson, so organizing an existing claim under another concept retains its
-lesson access. Derivations open the existing canonical argument browser; proofs
-are not expanded into the conceptual Atlas. Notes and connection lists are
+lesson access. Linked maps branch out from the selected concept. They start from
+the lesson view’s family-aware layout and spread from both sides of the selected
+concept. The lesson view’s repulsion and weak springs leave room for branches to
+settle around it. Labels show saved questions and
+formulas. Shared topics show details when their visible lessons agree. The sidebar
+can hide or show any lesson. Exact, case-sensitive topic titles share one point
+in this view, including a title that matches the selected concept. Shared topics
+and links stay visible while any of their lessons are on. Solid lines show saved
+teaching order. Dotted lines show associations and the temporary links to the
+selected concept. Select a topic to highlight its source lessons in the sidebar.
+The overlay and toggles are temporary. Each source map, equation and proof remains
+available through its lesson. Derivations open the canonical argument browser. Notes and connection lists are
 collapsed by default. No model or provider call occurs during navigation.
 
 No storage schema or migration changes. Focus, inspection and navigation history

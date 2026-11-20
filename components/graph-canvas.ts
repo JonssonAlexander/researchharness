@@ -131,6 +131,7 @@ export interface CanvasCluster {
 	label: string | null;
 	members: string[];
 	color?: string;
+	labelOnly?: boolean;
 }
 
 /** Theme colors, resolved to #rrggbb by the caller (canvas wants hex,
@@ -731,7 +732,7 @@ export class GraphCanvasRenderer {
 	/** World rect the bitmap covers (drawImage target coords). */
 	private regionRect: { minX: number; minY: number; w: number; h: number } | null = null;
 	/** Region labels: cluster centroid + hue, computed at splat build. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number; color?: string }[] = [];
+	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number; color?: string; labelOnly?: boolean }[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -1731,7 +1732,7 @@ export class GraphCanvasRenderer {
 			linkStrength: t.linkStrength,
 			linkDistance: t.linkDistance,
 			clusterPull:
-				data.clusters.length > 0 ? { clusters: data.clusters, strength: t.clusterPull } : undefined,
+				data.clusters.length > 0 ? { clusters: data.clusters.filter(c => !c.labelOnly), strength: t.clusterPull } : undefined,
 			depthAnchor:
 				t.depthMode === "off"
 					? undefined
@@ -1782,7 +1783,8 @@ export class GraphCanvasRenderer {
 		// World rect over VISIBLE cluster members (regions cover members
 		// and their intra-cluster edges — nothing else).
 		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-		for (const c of data.clusters) {
+		const shaded = data.clusters.filter(c => !c.labelOnly);
+		for (const c of shaded) {
 			for (const id of c.members) {
 				if (!isVisible(id)) continue;
 				const n = this.nodeById.get(id);
@@ -1793,16 +1795,10 @@ export class GraphCanvasRenderer {
 				if (n.y > maxY) maxY = n.y;
 			}
 		}
-		if (minX > maxX) {
-			this.regionCanvas = null;
-			this.regionRect = null;
-			this.regionMeta = [];
-			return;
-		}
 
 		// Which cluster is a node in (for intra-cluster edges)?
 		const clusterOf = new Map<string, number>();
-		data.clusters.forEach((c, i) => {
+		shaded.forEach((c, i) => {
 			for (const id of c.members) clusterOf.set(id, i);
 		});
 
@@ -1832,6 +1828,7 @@ export class GraphCanvasRenderer {
 					cy: cluster.color ? topY - 65 : sumY / members,
 					hue: clusterHue(cluster.id),
 					color: cluster.color,
+					labelOnly: cluster.labelOnly,
 					lines: null,
 				});
 			}
@@ -1858,7 +1855,7 @@ export class GraphCanvasRenderer {
 		// THE off switch (user 2026-09-15): compute is skipped, not just
 		// paint hidden — no splat, no blur, no readback, no bitmap, no
 		// blit. Everything below this return is the bitmap path.
-		if (!tuning.enabled) {
+		if (!tuning.enabled || minX > maxX) {
 			this.regionCanvas = null;
 			this.regionRect = null;
 			return;
@@ -1914,7 +1911,7 @@ export class GraphCanvasRenderer {
 		// round-cap strokes (Minkowski dilation). NO blanket per-node discs
 		// — they double-counted where nodes sit on edges (user-identified
 		// hot spots, when clusters were edge-based).
-		data.clusters.forEach((cluster, ci) => {
+		shaded.forEach((cluster, ci) => {
 			const hue = clusterHue(cluster.id);
 			// Full-opacity strokes: alpha is applied ONCE at the very end
 			// (dilate at 1 → blur → scale by edgeAlpha). Baking per-stroke
@@ -2214,7 +2211,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
-				ctx.fillStyle = data.alwaysClusterLabels?data.colors.label:rm.color ? rgbaFromHex(rm.color, 0.85) : `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				ctx.fillStyle = data.alwaysClusterLabels&&!rm.labelOnly?data.colors.label:rm.color ? rgbaFromHex(rm.color, 0.85) : `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

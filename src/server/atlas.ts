@@ -26,7 +26,13 @@ const service = () =>
 	createAtlasService(stores.atlasStore, () => new Set(stores.graphStore.readNodes().map((n) => n.id)));
 export function atlasResponse(): Response {
 	try {
-		return Response.json(service().read(), { headers: { "Cache-Control": "no-store" } });
+		const snapshot = service().read();
+		if (snapshot.lessonMaps?.length) {
+			// The committed artifact retains its reviewed title as a fallback when the chat is gone.
+			const titles = new Map(stores.chatStore.listChats().map(({id,title})=>[id,title]));
+			snapshot.lessonMaps = snapshot.lessonMaps.map(map=>({...map,title:titles.get(map.chatId)??map.title}));
+		}
+		return Response.json(snapshot, { headers: { "Cache-Control": "no-store" } });
 	} catch (error) {
 		return failure(error);
 	}

@@ -1003,3 +1003,40 @@ test('revealed review opens a linked learning conversation with full solution co
   assert(ui.document.body.textContent.includes('Continue discussion'));
  }finally{await ui.close();globalThis.fetch=oldFetch;if(storageDescriptor)Object.defineProperty(globalThis,'sessionStorage',storageDescriptor);else delete (globalThis as Record<string,unknown>).sessionStorage;}
 });
+
+test('focused Atlas shows linked lesson branches and hides only topics unique to a disabled lesson',async()=>{
+ const {AtlasNeighbourhood}=await import('../components/atlas-neighbourhood.tsx');
+ const {initialLesson}=await import('../src/core/learning-session.ts');
+ const first=snapshot.concepts[0]!;
+ const lessonMaps=['First lesson','Second lesson'].map((title,index)=>{
+  const id=`lesson_${index}`,map=initialLesson(title);
+  map.nodes[0]!.title='Shared exact topic';
+  map.nodes.push({id:'extra',title:`Unique topic ${index}`,tangent:false,conceptId:null});
+  return {id,chatId:id,title,conceptIds:[first.id],newPropositionIds:[],map,derivations:[]};
+ });
+ const atlas={...snapshot,lessonMaps},opened:string[]=[];
+ const ui=await mount(()=> <AtlasNeighbourhood atlas={atlas} scope={{kind:'concept',id:first.id}} onClose={()=>{}} onInspect={()=>{}} onDerivations={()=>{}} onLesson={id=>opened.push(id)}/>);
+ try{
+  const buttons=(title:string)=>[...ui.document.querySelectorAll('button')].filter(b=>b.textContent===title);
+  const click=async(title:string)=>act(async()=>{buttons(title)[0]!.click();});
+  const firstToggle=ui.document.querySelector<HTMLButtonElement>('button[aria-label="Show map for First lesson"]')!;
+  const secondToggle=ui.document.querySelector<HTMLButtonElement>('button[aria-label="Show map for Second lesson"]')!;
+  assert.equal(firstToggle.getAttribute('aria-pressed'),'true');
+  assert.equal(secondToggle.getAttribute('aria-pressed'),'true');
+  assert.equal(buttons('Shared exact topic').length,1);
+  await act(async()=>firstToggle.click());
+  assert.equal(firstToggle.getAttribute('aria-pressed'),'false');
+  assert.equal(buttons('Unique topic 0').length,0);
+  assert.equal(buttons('Unique topic 1').length,1);
+  assert.equal(buttons('Shared exact topic').length,1);
+  await click('Shared exact topic');
+  assert.match(ui.document.body.textContent,/Selected topic · Shared exact topic/);
+  await click('First lesson');
+  assert.deepEqual(opened,['lesson_0']);
+  await click('Show all maps');
+  assert.equal(firstToggle.getAttribute('aria-pressed'),'true');
+  assert.equal(secondToggle.getAttribute('aria-pressed'),'true');
+  await click('Hide all maps');
+  assert.equal(buttons('Shared exact topic').length,0);
+ }finally{await ui.close();}
+});
