@@ -14,6 +14,7 @@ after(()=>fs.rmSync(root,{recursive:true,force:true}));
 const {stores}=await import('../src/server/stores.ts');
 const {createLessonIntegrationService}=await import('../src/server/lesson-integration.ts');
 const {graphView}=await import('../src/server/graph.ts');
+const {readFrontierSources}=await import('../src/server/frontier-sources.ts');
 const {createAtlasStore}=await import('../src/store/atlas.ts');
 const {getGraph}=await import('../src/core/graph.ts');
 const faux=createFauxCore({}),engine={model:faux.getModel(),streamFn:faux.streamSimple};
@@ -42,6 +43,12 @@ test('single reviewed integration preserves joint premises and full explanations
  assert.equal(result.draft!.arguments[0]!.rationale,'Both assumptions are required together.');
  const atlas=stores.atlasStore.read(),concept=atlas.concepts.find(c=>c.id===plan.concepts[0]!.id)!;
  assert(concept.propositionIds.includes(plan.artifact.derivations[0]!.rootId));assert(atlas.hiddenPropositionIds?.includes(plan.nodes[0]!.id));assert(atlas.lessonMaps?.some(m=>m.id===r.id));
+ const frontier = readFrontierSources().sources;
+ const joint = frontier.find(s => s.id === `reviewed-argument:${r.id}:joint`);
+ assert(joint);
+ assert.match(joint.text, /Both assumptions are required together/);
+ assert.deepEqual(joint.requires, [argument.id]);
+ assert(frontier.some(s => s.id === `reviewed-argument:${r.id}:gap` && s.status.includes('gap') && !s.requires?.length));
  const bytes=JSON.stringify([stores.graphStore.readNodes(),stores.graphStore.readChains(),atlas]);
  await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true});assert.equal(JSON.stringify([stores.graphStore.readNodes(),stores.graphStore.readChains(),stores.atlasStore.read()]),bytes);
  assert.equal((await f.generate()).id,r.id);assert.equal(f.calls(),1);
@@ -67,6 +74,7 @@ test('a partial canonical append stays hidden and resumes with reserved identiti
  stores.graphStore.appendNode=n=>{append(n);if(++writes===1)throw new Error('Injected post-write failure');};
  try{await assert.rejects(()=>f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true}),/Injected/);}finally{stores.graphStore.appendNode=append;}
  assert.equal(stores.atlasStore.lessonReviews.read(r.id)!.status,'applying');assert(!graphView().propositions.some(n=>n.id===r.plan!.nodes[0]!.id));
+ assert(!readFrontierSources().sources.some(s => s.id === r.plan!.nodes[0]!.id));
  await assert.rejects(()=>f.service.commit({action:'commit',id:r.id,digest:'f'.repeat(64),approve:true}),/Exact/);
  const saved=await f.service.commit({action:'commit',id:r.id,digest:r.digest,approve:true});assert.equal(saved.status,'committed');
  for(const n of r.plan!.nodes)assert.equal(stores.graphStore.readNodes().filter(p=>p.id===n.id).length,1);

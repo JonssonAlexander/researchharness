@@ -20,8 +20,16 @@ import { callCost } from "./pricing.ts";
  * reflects whatever the pipeline has merged so far.
  */
 export function graphView(): GraphSnapshot {
-	const pending=new Set(stores.atlasStore.lessonReviews.list().filter(r=>r.status==="applying").map(r=>r.id));
- return graphSnapshot({...stores,graphStore:{...stores.graphStore,readNodes:()=>stores.graphStore.readNodes().filter(n=>!n.integrationId||!pending.has(n.integrationId)),readChains:()=>stores.graphStore.readChains().filter(n=>!n.integrationId||!pending.has(n.integrationId))}});
+ return graphSnapshot({...stores, graphStore: reviewedGraphStore()});
+}
+
+export function reviewedGraphStore() {
+ const pending = new Set(stores.atlasStore.lessonReviews.list().filter(r => r.status === "applying").map(r => r.id));
+ return {
+  ...stores.graphStore,
+  readNodes: () => stores.graphStore.readNodes().filter(n => !n.integrationId || !pending.has(n.integrationId)),
+  readChains: () => stores.graphStore.readChains().filter(a => !a.integrationId || !pending.has(a.integrationId)),
+ };
 }
 
 /** The graph view's cost surface (GET /api/graph/costs — the 2026-09 cost

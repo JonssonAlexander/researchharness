@@ -432,6 +432,11 @@ export function abortJob(jobId: string): AbortOutcome {
 	const job = stores.jobStore.getJob(jobId);
 	if (!job) return { ok: false, reason: "not_found" };
 	if (job.status !== "running") return { ok: false, reason: "not_running" };
+	if (job.kind === "frontier") {
+		fireJobAbort(jobId);
+		stores.jobStore.updateJob(jobId, {status: "error", error: "Cancelled", activity: "cancelled"});
+		return {ok: true};
+	}
 	if (job.result) {
 		normalizeLegacyResult(job);
 		return { ok: false, reason: "not_running" };

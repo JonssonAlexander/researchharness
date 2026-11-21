@@ -76,3 +76,4 @@ export {articleLibraryResponse} from "./article-reading.ts";
 export {researchTrailsResponse} from './research-trails.ts';
 
 export {researchIntegrationResponse} from './research-integration-http.ts';
+export {researchFrontierResponse} from "./research-frontier.ts";

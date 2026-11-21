@@ -14,7 +14,7 @@ import { newHandoffMessage } from "../native-messages.ts";
 
 // ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
 
-export type JobKind = "research" | "demo" | "visual" | "pdf" | "python";
+export type JobKind = "research" | "demo" | "visual" | "pdf" | "python" | "frontier";
 export type JobStatus = "running" | "done" | "error";
 
 export interface JobRecord {
@@ -25,6 +25,8 @@ export interface JobRecord {
 	toolCallId: string;
 	/** Dispatch-time arguments, saved before spawn. Older jobs resolve from history. */
 	input?: unknown;
+	/** Durable progress for an Atlas-owned discovery job. */
+	frontier?: import("../research-frontier.ts").FrontierLedger;
 	/** Session-owned delivery, independent of the worker's terminal outcome.
 	 * Absent on legacy records: old terminal jobs must never be replayed. */
 	delivery?: { kind: "result" | "abort"; status: "pending" | "delivered" };

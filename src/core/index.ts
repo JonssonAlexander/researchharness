@@ -133,3 +133,5 @@ export * from "./reading-guide.ts";
 export * from "./research-trails.ts";
 
 export * from './research-integration.ts';
+export {FRONTIER_SCOPE, FRONTIER_TARGET, FRONTIER_BUDGET, FRONTIER_GOAL, frontierTokens} from "./research-frontier.ts";
+export type {FrontierState, FrontierSource, FrontierOpportunity} from "./research-frontier.ts";

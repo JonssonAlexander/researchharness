@@ -126,7 +126,7 @@ interface LoopContext {
 
 /** The kind→role table (model slots wave, 2026-09-20): which ModelRole's
  * engine each sub-agent kind runs — the engineFor injection key. */
-const KIND_ROLE: Record<Exclude<JobKind,"python">, ModelRole> = {
+const KIND_ROLE: Record<Exclude<JobKind,"python" | "frontier">, ModelRole> = {
 	research: "researcher",
 	demo: "demoBuilder",
 	visual: "visualMaker",
@@ -176,7 +176,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	 *  tests swap scripted engines without touching deps), then the injected
 	 *  settings-resolved engineFor. undefined = the BYOK chain came up
 	 *  empty (owner, 2026-09-22) — runJob refuses below, honestly. */
-	function pickEngine(kind: Exclude<JobKind,"python">): PiEngine | undefined {
+	function pickEngine(kind: Exclude<JobKind,"python" | "frontier">): PiEngine | undefined {
 		const testOverride: Record<string, { current?: PiEngine } | undefined> = {
 			researcher: researchModelOverride,
 			demoBuilder: demoModelOverride,
@@ -187,7 +187,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	}
 
 	const KIND_RUNNERS: Record<
-		Exclude<JobKind,"python">,
+		Exclude<JobKind,"python" | "frontier">,
 		(jobId: string, engine: PiEngine, input: JobToolInput | undefined, loop: LoopContext) => Promise<void>
 	> = {
 		research: (jobId, engine, input, loop) => runResearchJob(jobId, engine, input, loop),
@@ -202,7 +202,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			console.error(`[job ${jobId}] not found — nothing to run`);
 			return;
 		}
-		if (job.status !== "running") return; // already finished / re-run after crash recovery
+		if (job.status !== "running" || job.kind === "frontier") return; // already finished / re-run after crash recovery
   if (job.kind === "python") {
    const controller=new AbortController();registerJobAbort(jobId,controller);
    try {

@@ -131,6 +131,7 @@ export interface GraphStore {
 // ─── JobStore — background sub-agent jobs (data/jobs) ─────────────────────────
 
 export interface CreateJobInit {
+	frontier?: JobRecord["frontier"];
 	kind: JobKind;
 	chatId: string;
 	toolCallId: string;

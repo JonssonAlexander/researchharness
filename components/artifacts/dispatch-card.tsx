@@ -22,6 +22,7 @@ import { BrailleSpinner } from "@/components/braille-spinner";
 const KIND_LABEL: Record<JobKind, string> = {
  python:"Python",
 	research: "Research agent",
+	frontier: "Research Frontier",
 	demo: "Demo agent",
 	visual: "Figure agent",
 	pdf: "PDF reader",

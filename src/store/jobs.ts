@@ -34,6 +34,7 @@ function createJob(init: CreateJobInit): JobRecord {
 	const record: JobRecord = {
 		id: `job_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
 		kind: init.kind,
+		...(init.frontier ? {frontier: init.frontier} : {}),
 		chatId: init.chatId,
 		toolCallId: init.toolCallId,
 		...(init.input !== undefined ? { input: init.input } : {}),

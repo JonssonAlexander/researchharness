@@ -2,6 +2,8 @@ import React, {act} from 'react';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {parseHTML} from 'linkedom';
+import {ServerEventsProvider} from "../components/server-events.tsx";
+import {ResearchFrontier} from "../components/research-frontier.tsx";
 import {ResearchTrailEntry,ResearchTrails} from '../components/research-trails.tsx';
 import {researchCommandSchema, type AtlasSnapshot, type ResearchNode, type ResearchTrail} from '../src/core/index.ts';
 
@@ -61,4 +63,33 @@ test('concept switching anchors the new trail and failed node edits retain the e
   assert.equal(anchor.value,otherId);
   assert.equal((commands[0] as {kind:string}).kind,'edit-node');
  }finally{await ui.close();}
+});
+
+test("Research Frontier opens the saved brief and only starts work after an explicit action", async () => {
+ const commands: unknown[] = [];
+ const idea = {id: "abcd", title: "A uniform estimate", hypothesis: "Can the bound be uniform in dimension?",
+  intuition: "Use the existing contraction step.", sources: ["claim"], exploration: false};
+ const assessment = {id: idea.id, sources: ["claim"], startingPoint: "A contraction in each fixed dimension.",
+  obstacles: "The norm constant grows.", novelty: "Uniformity is open in the packet.", nextAction: "Track the dimension constant.",
+  uncertainty: "The examples may make it sharp.", reason: "A precise argument to inspect.", support: 3, usefulness: 4, surprise: 1, verdict: "pursue"};
+ const brief = {id: "job_test_deadbeef", date: "2026-11-20T00:00:00.000Z", goal: "Uniform estimates", budget: 35000,
+  selected: [idea.id], previous: ["retired", idea.id], opportunities: [{idea,assessment}], sourceTitles: {claim: "Contraction theorem"}};
+ const connect = () => ({close() {}, onOpen() {}, onEvent() {}});
+ const ui = await mount(() => <ServerEventsProvider connect={connect}>
+  <ResearchFrontier trails={[trail]} onConcept={() => {}} onTrail={() => {}}/>
+ </ServerEventsProvider>, async (_input, init) => {
+  if (init?.body) commands.push(JSON.parse(String(init.body)));
+  return Response.json({model: "fixture:research", job: null, brief});
+ });
+ try {
+  assert.match(ui.document.body.textContent!, /A uniform estimate.*Up from 2/);
+  assert.match(ui.document.body.textContent!, /Contraction theorem/);
+  assert.equal(commands.length, 0);
+  await act(async () => click(ui.document, "Deepen"));
+  assert.deepEqual(commands[0], {action: "deepen", id: brief.id, opportunityId: idea.id});
+  await act(async () => {
+   [...ui.document.querySelectorAll("form")].at(-1)!.dispatchEvent(new window.Event("submit", {bubbles: true, cancelable: true}));
+  });
+  assert.deepEqual(commands[1], {action: "start", goal: brief.goal, budget: brief.budget});
+ } finally {await ui.close();}
 });
