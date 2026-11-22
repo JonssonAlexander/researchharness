@@ -93,6 +93,7 @@ function progress(job?: JobRecord): FrontierProgress | undefined {
   action: a.pending?.action, reportedTokens: job?.usage ? frontierTokens(job.usage) : undefined,
   estimatedUnreported: a.estimatedUnreported, stop: a.stop,
   rounds: a.rounds.map(r => ({label: `${FRONTIER_ACTIONS[r.action.kind]} · ${r.action.label}`, outcome: r.outcome, gain: r.gain,
+   progress: r.progress, overlap: r.action.overlap, penalty: r.action.penalty, recovery: r.action.recovery,
    reportedTokens: r.reportedTokens, estimatedUnreported: r.estimatedUnreported}))};
 }
 
@@ -312,7 +313,7 @@ export async function researchFrontierResponse(request: Request, engineFor = ope
     evidence: [...new Map([...current.evidence, ...latest.evidence, ...packet.evidence].map(e => [e.id, e])).values()],
     assessed: [...new Map([...latest.assessed, ...children.reverse(), opportunity].map(o => [o.idea.id, o])).values()],
     previous: latest.selected, note: undefined, feedback: undefined, board: undefined,
-    adaptive: {settings: {...ADAPTIVE_DEFAULTS, maxIterations: 1}, catalog: packet.evidence, seeds: [],
+    adaptive: {settings: {...ADAPTIVE_DEFAULTS}, catalog: packet.evidence, seeds: [],
      preferences, rounds: [], estimatedUnreported: 0}};
    const action = {kind: "exploit" as const, key: JSON.stringify(["branch", opportunity.idea.id]), label: opportunity.idea.title,
     anchors, parents: [opportunity.idea.id], priority: 0};
@@ -342,6 +343,15 @@ export async function researchFrontierResponse(request: Request, engineFor = ope
     command.adaptive ? {settings: command.adaptive, preferences} : undefined);
    ledger.previous = prior?.selected ?? [];
    if (!ledger.packets.length) throw new AtlasError("Add an Atlas concept, mathematical claim, lesson or research question before starting discovery.", 409);
+  }
+  if (ledger.adaptive) {
+   const revisions = branch ? frontierRevision(sources, ledger.goal).revisions : ledger.revisions;
+   ledger.adaptive.priorInsights = records.flatMap(job => {
+    const previous = job.frontier;
+    if (job.status !== "done" || previous?.goal !== ledger.goal) return [];
+    return (previous.adaptive?.rounds ?? []).flatMap(round => round.progress?.insights ?? [])
+     .filter(insight => insight.sources.every(id => revisions[id] && revisions[id] === previous.revisions[id]));
+   }).slice(0, 24).reverse();
   }
   const model = currentModel();
   if (!model) throw new AtlasError("Configure the research model in Settings → Models.", 503);

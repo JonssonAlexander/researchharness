@@ -1,8 +1,8 @@
 import {createHash} from "node:crypto";
 import {
- FRONTIER_GOAL, frontierPacket, frontierSeeds, frontierTerms, frontierScore,
+ FRONTIER_GOAL, FRONTIER_STOPS, frontierPacket, frontierSeeds, frontierTerms, frontierScore,
  type AdaptiveSettings, type FrontierAction, type FrontierPreference,
- type FrontierLedger, type FrontierOpportunity, type FrontierSource,
+ type FrontierLedger, type FrontierOpportunity, type FrontierSource, type FrontierInsight, type FrontierGain,
 } from "./research-frontier.ts";
 
 export const frontierDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -87,6 +87,7 @@ export function planDiscovery(sources: FrontierSource[], goal: string, budget: n
 }
 
 export const ADAPTIVE_OUTPUT = 2700;
+export const BASELINE_FOLLOW_UP_LIMIT = 6;
 export const frontierCallEstimate = (input: unknown, output: number, overhead: number) =>
  Math.ceil(JSON.stringify(input).length / 2.5) + output + overhead;
 
@@ -129,13 +130,49 @@ export function portfolioValue(ledger: FrontierLedger): number {
  return ledger.assessed.reduce((sum, o) => sum + (selected.has(o.idea.id) ? frontierScore(o) : 0), 0);
 }
 
+const insightTerms = (value: string) => new Set(frontierTerms(value));
+const mathRelations = (value: string) => value.normalize("NFKC").replace(/\\(leq?|geq?|neq)/gu, (_, command) =>
+ ({le: "≤", leq: "≤", ge: "≥", geq: "≥", neq: "≠"})[command as "le" | "leq" | "ge" | "geq" | "neq"] ?? "").match(/<=|>=|!=|[<>=≤≥≠]/gu)?.join(",")
+ .replaceAll("<=", "≤").replaceAll(">=", "≥").replaceAll("!=", "≠") ?? "";
+
+function similarFinding(a: string, b: string) {
+ if (mathRelations(a) !== mathRelations(b)) return false;
+ const left = insightTerms(a), right = insightTerms(b);
+ const shared = [...left].filter(term => right.has(term)).length;
+ return shared > 0 && shared / Math.max(left.size, right.size) >= 0.8;
+}
+
+export function frontierProgress(portfolioDelta: number, proposed: FrontierInsight[], previous: FrontierInsight[],
+ evidence: ReadonlySet<string>, earlierFindings: string[] = []): FrontierGain {
+ const insights: FrontierInsight[] = [];
+ for (const insight of proposed) {
+  if (!insight.sources.length || !insight.sources.every(id => evidence.has(id))) continue;
+  if (similarFinding(insight.finding, insight.justification) || insightTerms(insight.justification).size < 5) continue;
+  if ([...previous, ...insights].some(old => similarFinding(insight.finding, old.finding) ||
+     similarFinding(insight.justification, old.justification)) ||
+     earlierFindings.some(old => similarFinding(insight.finding, old))) continue;
+  insights.push(insight);
+ }
+ const information = insights.length * 2;
+ return {portfolioDelta, information, total: Math.max(0, portfolioDelta) + information, insights};
+}
+
+export function frontierInsights(ledger: FrontierLedger) {
+ return [...(ledger.adaptive?.priorInsights ?? []), ...(ledger.adaptive?.rounds.flatMap(r => r.progress?.insights ?? []) ?? [])];
+}
+
 /** Rank available actions independently of the brief's mathematical ranking. */
 export function chooseFrontierAction(ledger: FrontierLedger, spent: number,
- estimateCall: (context: ReturnType<typeof adaptiveActionContext>) => number = context => frontierCallEstimate(context, ADAPTIVE_OUTPUT, 3500)): FrontierAction | "budget" | "iterations" | "converged" | "no-action" {
+ estimateCall: (context: ReturnType<typeof adaptiveActionContext>) => number = context => frontierCallEstimate(context, ADAPTIVE_OUTPUT, 3500), baseline = false): FrontierAction | keyof typeof FRONTIER_STOPS {
  const {settings, catalog, seeds, rounds, preferences} = ledger.adaptive!;
+ const last = rounds.at(-1);
+ if (last && last.action.key === JSON.stringify(["branch", last.action.parents[0]])) return "branch-complete";
  if (spent >= ledger.budget) return "budget";
- if (rounds.length >= settings.maxIterations) return "iterations";
- if (rounds.length >= settings.patience && rounds.slice(-settings.patience).every(r => r.gain < settings.minGain)) return "converged";
+ if (baseline && rounds.length >= BASELINE_FOLLOW_UP_LIMIT) return "iterations";
+ const low = (r: typeof rounds[number]) => (baseline ? r.gain : r.progress?.total ?? r.gain) < settings.minGain;
+ if (!baseline && last?.action.recovery && low(last)) return "recovery-exhausted";
+ const stagnant = rounds.length >= settings.patience && rounds.slice(-settings.patience).every(low);
+ if (baseline && stagnant) return "converged";
  const covered = new Set([...ledger.packets.flatMap(p => p.evidence.map(s => s.id)), ...rounds.flatMap(r => r.evidence)]);
  const byId = new Map(catalog.map(s => [s.id, s]));
  const neighbors = (id: string) => {
@@ -145,6 +182,14 @@ export function chooseFrontierAction(ledger: FrontierLedger, spent: number,
  const attempted = new Set(rounds.map(r => r.action.key));
  const mechanisms = new Set(rounds.flatMap(r => r.opportunities.map(o => o.assessment.feedback?.mechanism.trim().toLowerCase()).filter(Boolean)));
  const options: FrontierAction[] = [];
+ const mechanism = (o: FrontierOpportunity) => o.assessment.feedback?.mechanism;
+ const byOpportunity = new Map(ledger.assessed.map(o => [o.idea.id, o]));
+ const neighborhoods = rounds.map(r => ({
+  anchors: r.action.anchors,
+  ids: new Set(r.action.anchors.flatMap(neighbors)),
+  parents: r.action.parents,
+  families: [...r.opportunities, ...r.action.parents.flatMap(id => byOpportunity.get(id) ?? [])].flatMap(o => mechanism(o) ?? []),
+ }));
  function offer(kind: FrontierAction["kind"], label: string, anchors: string[], parents: FrontierOpportunity[], value: number) {
   const parentIds = parents.map(o => o.idea.id).sort();
   const key = JSON.stringify([kind, parentIds.length ? parentIds : [...anchors].sort()]);
@@ -153,11 +198,21 @@ export function chooseFrontierAction(ledger: FrontierLedger, spent: number,
   const context = adaptiveActionContext(ledger, action);
   if (!action.anchors.every(id => context.evidence.some(e => e.id === id))) return;
   const estimate = estimateCall(context);
-  const priority = Math.round(value / (estimate / 1000) * 100) / 100;
-  if (priority >= settings.minValue) options.push({...action, estimate, priority});
+  const nearby = new Set(anchors.flatMap(neighbors));
+  const overlap = baseline ? 0 : neighborhoods.filter(old =>
+   (anchors.some(id => old.ids.has(id)) || old.anchors.some(id => nearby.has(id))) ||
+   parentIds.some(id => old.parents.includes(id)) ||
+   parents.some(o => {
+    const family = mechanism(o);
+    return family && old.families.some(prior => similarFinding(family, prior));
+   })).length;
+  const penalty = 1 / (1 + 0.5 * overlap);
+  const priority = Math.round(value / (estimate / 1000) * penalty * 100) / 100;
+  if (priority >= settings.minValue) options.push({...action, estimate, priority, ...(!baseline ? {overlap, penalty} : {})});
  }
  // Coverage is a surprise proxy: unexplored adjacent evidence can change what the current portfolio assumes.
- for (const seed of seeds.filter(s => s.sources.every(id => !covered.has(id))).slice(0, 20)) {
+ const unexplored = seeds.filter(s => s.sources.every(id => !covered.has(id)));
+ for (const seed of stagnant ? unexplored : unexplored.slice(0, 20)) {
   const nearby = new Set(seed.sources.flatMap(neighbors));
   const known = [...nearby].filter(id => covered.has(id)).length;
   const value = 13 + Math.min(8, nearby.size - known) - Math.min(8, known) + (seed.kind === "gap" || seed.kind === "transfer" ? 5 : 0);
@@ -199,6 +254,15 @@ export function chooseFrontierAction(ledger: FrontierLedger, spent: number,
  }
  const affordable = options.filter(o => spent + o.estimate <= ledger.budget)
   .sort((a,b) => b.priority - a.priority || a.key.localeCompare(b.key));
+ if (stagnant) {
+  const exploration = affordable.filter(o => o.kind === "explore").find(o => o.overlap === 0) ??
+   affordable.find(o => {
+    if (o.kind !== "explore") return false;
+    const nearby = [...new Set(o.anchors.flatMap(neighbors))].filter(id => byId.has(id));
+    return nearby.filter(id => !covered.has(id)).length > nearby.length / 2;
+   });
+  return exploration ? {...exploration, recovery: "Low progress prompted exploration of an underexplored neighborhood."} : "no-recovery";
+ }
  if (!rounds.some(r => r.action.kind === "explore")) {
   const exploration = affordable.find(o => o.kind === "explore");
   if (exploration) return exploration;

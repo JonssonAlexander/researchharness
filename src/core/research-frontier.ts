@@ -49,13 +49,12 @@ export type FrontierOpportunity = {idea: FrontierHypothesis; assessment: Frontie
 export type FrontierSeed = {kind: "gap" | "transfer" | "generalization" | "unresolved"; sources: string[]};
 export type FrontierPacket = {seeds: FrontierSeed[]; evidence: FrontierSource[]; omitted: number};
 export const adaptiveSettings = z.object({
- maxIterations: z.number().int().min(1).max(12),
  patience: z.number().int().min(1).max(5),
  minGain: z.number().int().min(1).max(20),
  minValue: z.number().min(0.1).max(10),
 }).strict();
 export type AdaptiveSettings = z.infer<typeof adaptiveSettings>;
-export const ADAPTIVE_DEFAULTS: AdaptiveSettings = {maxIterations: 6, patience: 2, minGain: 2, minValue: 0.8};
+export const ADAPTIVE_DEFAULTS: AdaptiveSettings = {patience: 2, minGain: 2, minValue: 0.8};
 export const frontierPreference = z.enum(["interested", "dismiss", "revisit"]);
 export type FrontierPreference = z.infer<typeof frontierPreference>;
 export type FrontierActionKind = "explore" | "exploit" | "reformulate" | "combine" | "challenge" | "deepen";
@@ -71,7 +70,19 @@ export type FrontierAction = {
  label: string;
  priority: number;
  estimate: number;
+ overlap?: number;
+ penalty?: number;
+ recovery?: string;
 };
+export const frontierInsight = z.object({
+ kind: z.enum(["mechanism", "assumption", "counterexample", "elimination"]),
+ target: z.string().optional(),
+ finding: z.string().trim().min(12).max(220),
+ justification: z.string().trim().min(20).max(500),
+ sources: z.array(z.string()).min(1).max(6),
+}).strict();
+export type FrontierInsight = z.infer<typeof frontierInsight>;
+export type FrontierGain = {portfolioDelta: number; information: number; total: number; insights: FrontierInsight[]};
 export type FrontierRound = {
  action: FrontierAction;
  evidence: string[];
@@ -80,11 +91,15 @@ export type FrontierRound = {
  estimatedUnreported: number;
  opportunities: FrontierOpportunity[];
  gain: number;
+ progress?: FrontierGain;
 };
 export const FRONTIER_STOPS = {
  budget: "Budget cannot accommodate another assessed action.",
  iterations: "Iteration limit reached.",
+ "branch-complete": "The targeted follow-up finished.",
  converged: "Consecutive iterations fell below the improvement threshold.",
+ "recovery-exhausted": "The exploratory follow-up did not restore progress.",
+ "no-recovery": "No affordable underexplored option remained after stagnation.",
  "no-action": "No remaining action meets the value threshold.",
 } as const;
 export type FrontierProgress = {
@@ -94,7 +109,7 @@ export type FrontierProgress = {
  action?: FrontierAction;
  reportedTokens?: number;
  estimatedUnreported: number;
- rounds: {label: string; outcome: string; gain: number; reportedTokens: number; estimatedUnreported: number}[];
+ rounds: (Pick<FrontierRound, "outcome" | "gain" | "progress" | "reportedTokens" | "estimatedUnreported"> & {label: string; overlap?: number; penalty?: number; recovery?: string})[];
  stop?: keyof typeof FRONTIER_STOPS;
 };
 export type FrontierLedger = {
@@ -122,6 +137,7 @@ export type FrontierLedger = {
   seeds: FrontierSeed[];
   preferences: Record<string, FrontierPreference>;
   rounds: FrontierRound[];
+  priorInsights?: FrontierInsight[];
   pending?: {action: FrontierAction; reportedBefore: number; unreportedBefore: number};
   estimatedUnreported: number;
   stop?: keyof typeof FRONTIER_STOPS;
@@ -164,7 +180,8 @@ export type FrontierState = {
 export const frontierJobId = z.string().regex(/^job_[a-z0-9]+_[a-f0-9]{8}$/);
 export const frontierOpportunityId = z.string().regex(/^[a-f0-9]{24}$/);
 export const frontierCommand = z.discriminatedUnion("action", [
- z.object({action: z.enum(["start", "refresh"]), goal: prose(1000), budget: z.number().int().min(FRONTIER_TARGET).max(100_000), adaptive: adaptiveSettings.optional()}).strict(),
+ z.object({action: z.enum(["start", "refresh"]), goal: prose(1000), budget: z.number().int().min(FRONTIER_TARGET).max(100_000), adaptive: adaptiveSettings.extend({maxIterations: z.number().int().min(1).max(12).optional()})
+  .transform(({patience, minGain, minValue}) => ({patience, minGain, minValue})).optional()}).strict(),
  z.object({action: z.enum(["cancel", "resume"]), id: frontierJobId}).strict(),
  z.object({action: z.enum(["deepen", "branch"]), id: frontierJobId, opportunityId: frontierOpportunityId}).strict(),
  z.object({action: z.literal("archive-opportunity"), id: frontierJobId, opportunityId: frontierOpportunityId, archived: z.boolean()}).strict(),

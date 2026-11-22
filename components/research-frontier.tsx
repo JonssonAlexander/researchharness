@@ -113,16 +113,24 @@ function Direction({opportunity: {idea, assessment}, rank, previous, job, trails
 function DiscoveryProgress({progress}: {progress: FrontierProgress}) {
  const {action, budget, iteration, rounds, settings, stop, reportedTokens, estimatedUnreported} = progress;
  return <div className="space-y-1 rounded border p-2" aria-label="Auto-discovery progress">
-  <p>{iteration ? `Iteration ${iteration} of ${settings.maxIterations}` : "Broad discovery pass"}
+  <p>{iteration ? `Iteration ${iteration}` : "Broad discovery pass"}
    {action && ` · ${FRONTIER_ACTIONS[action.kind]} · ${action.label}`}</p>
   <p>{reportedTokens === undefined ? "No provider usage reported yet" : `${reportedTokens.toLocaleString()} reported tokens`}
    {!!estimatedUnreported && ` + ${estimatedUnreported.toLocaleString()} estimated`} · {budget.toLocaleString()} target</p>
   {action && <p>Estimated next call · {action.estimate.toLocaleString()} tokens · priority {action.priority}</p>}
+  {action?.recovery && <p>{action.recovery}</p>}
+  {action?.penalty !== undefined && <p>Priority multiplier {action.penalty.toFixed(2)} · {action.overlap} overlapping investigations</p>}
   {stop && <p>{FRONTIER_STOPS[stop]}</p>}
   <details><summary>Iteration outcomes and settings</summary>
-   <p>Minimum gain {settings.minGain} · stop after {settings.patience} below threshold · minimum action priority {settings.minValue}</p>
+   <p>Minimum gain {settings.minGain} · reconsider strategy after {settings.patience} below threshold · minimum action priority {settings.minValue}</p>
    <ul className="space-y-2">{rounds.map((round, i) => <li key={i}>
     <p className="font-medium">{round.label} · {round.gain > 0 ? "+" : ""}{round.gain} portfolio points</p>
+    {round.progress && <p>Progress {round.progress.total} · information gain {round.progress.information}</p>}
+    {round.penalty !== undefined && <p>Priority multiplier {round.penalty.toFixed(2)} · {round.overlap} overlapping investigations</p>}
+    {round.recovery && <p>{round.recovery}</p>}
+    {round.progress?.insights.map(insight => <details key={insight.finding}>
+     <summary>{insight.finding}</summary><p>{insight.justification}</p><p>Sources · {insight.sources.join(", ")}</p>
+    </details>)}
     <p>{round.outcome} · {round.reportedTokens.toLocaleString()} reported tokens
      {!!round.estimatedUnreported && ` + ${round.estimatedUnreported.toLocaleString()} estimated`}</p>
    </li>)}</ul>
@@ -192,7 +200,11 @@ export function ResearchFrontier({trails, onConcept, onTrail, onBoard, selected,
  const budgetValue = budget ?? String((!brief?.mode || brief.mode === modeValue ? brief?.budget : undefined)
   ?? (adaptive ? ADAPTIVE_BUDGET : FRONTIER_BUDGET));
  function start(action: "start" | "refresh") {
-  const configured = Object.fromEntries(Object.entries(policy).map(([key, value]) => [key, Number(settings[key] ?? value)]));
+  const configured = {
+   patience: Number(settings.patience ?? policy.patience),
+   minGain: Number(settings.minGain ?? policy.minGain),
+   minValue: Number(settings.minValue ?? policy.minValue),
+  };
   return send({action, goal: goalValue, budget: Number(budgetValue), ...(adaptive ? {adaptive: configured} : {})});
  }
  const directions = brief?.opportunities.filter(o => brief.selected.includes(o.idea.id)) ?? [];
@@ -275,7 +287,6 @@ export function ResearchFrontier({trails, onConcept, onTrail, onBoard, selected,
     <label className="block">Research goal<textarea className={field} required maxLength={1000} value={goalValue} onChange={e => setGoal(e.target.value)}/></label>
     <label className="block">Token budget target<input className={field} type="number" required step={1} min={FRONTIER_TARGET} max={100000} value={budgetValue} onChange={e => setBudget(e.target.value)}/></label>
     {adaptive && ([
-     ["maxIterations", "Maximum follow-up iterations", 1, 12, 1],
      ["patience", "Consecutive low-gain iterations", 1, 5, 1],
      ["minGain", "Minimum improvement points", 1, 20, 1],
      ["minValue", "Minimum action priority", 0.1, 10, 0.01],

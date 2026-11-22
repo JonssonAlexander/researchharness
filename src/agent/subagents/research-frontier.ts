@@ -1,11 +1,11 @@
 import {Type} from "typebox";
 import {z} from "zod";
 import {
- FRONTIER_ACTIONS, FRONTIER_TARGET, adaptiveAssessment, frontierAssessment, frontierHypothesis, frontierPacket, frontierShortlist, frontierTokens, frontierScore,
+ FRONTIER_ACTIONS, FRONTIER_TARGET, frontierInsight, adaptiveAssessment, frontierAssessment, frontierHypothesis, frontierPacket, frontierShortlist, frontierTokens, frontierScore,
  selectFrontier, uniqueFrontierIdeas,
  type FrontierLedger, type FrontierOpportunity, type FrontierPacket,
 } from "../../core/research-frontier.ts";
-import {ADAPTIVE_OUTPUT, adaptiveActionContext, adaptivePortfolio, chooseFrontierAction, frontierCallEstimate, frontierReferences, portfolioValue} from "../../core/frontier-plan.ts";
+import {ADAPTIVE_OUTPUT, adaptiveActionContext, adaptivePortfolio, chooseFrontierAction, frontierCallEstimate, frontierReferences, frontierInsights, frontierProgress, portfolioValue} from "../../core/frontier-plan.ts";
 import {accumulateJobUsage, piUsageToStep, type JobUsage} from "../../core/contracts/jobs.ts";
 import type {PiEngine} from "../models.ts";
 import {withBgLlmSlot} from "./bg-llm-semaphore.ts";
@@ -35,6 +35,7 @@ Return one fully assessed new proposal only if it adds value beyond the parent a
 
 export async function runFrontier(options: {
  engine: PiEngine;
+ baselinePolicy?: boolean;
  ledger: FrontierLedger;
  signal: AbortSignal;
  usage?: JobUsage;
@@ -177,12 +178,19 @@ Sort by expected mathematical value and testability. Put the principal source fi
  }
 
  if (adaptive && !focus) {
+  const schema = options.baselinePolicy ? targetedResult : targetedResult.extend({insights: z.array(frontierInsight).max(2).optional()});
+  const instructions = options.baselinePolicy ? targetedInstructions : targetedInstructions + `
+Report up to two genuinely new findings, even without a new proposal. Give a precise mathematical statement, a concrete derivation, counterexample or discriminating argument supporting it, and cite supplied source IDs. For assumptions, show exactly where the assumption enters or breaks the argument. For mechanisms, describe the new mathematical operation and why it changes what can be proved. For counterexamples or eliminations, verify hypotheses and show the failed conclusion. When rejecting a reviewed parent using already cited sources, report the specific argument that rules out that parent and set the finding’s target to the parent ID. Omit target when a finding does not address a named parent. Omit renamed or equivalent findings, restatements and untested suggestions.`;
+  const contextFor = (input: ReturnType<typeof adaptiveActionContext>) => {
+   const previous = frontierInsights(ledger).slice(-8);
+   return options.baselinePolicy || !previous.length ? input : {...input, previousFindings: previous.map(i => i.finding)};
+  };
   while (!adaptive.stop) {
    signal.throwIfAborted();
    if (!adaptive.pending) {
     const action = chooseFrontierAction(ledger, spent(), input => frontierCallEstimate({
-     input, parameters: z.toJSONSchema(targetedResult), systemPrompt: contextRules + "\n" + targetedInstructions,
-    }, ADAPTIVE_OUTPUT, 1000));
+     input: contextFor(input), parameters: z.toJSONSchema(schema), systemPrompt: contextRules + "\n" + instructions,
+    }, ADAPTIVE_OUTPUT, 1000), options.baselinePolicy);
     if (typeof action === "string") {
      adaptive.stop = action;
      break;
@@ -195,8 +203,8 @@ Sort by expected mathematical value and testability. Put the principal source fi
    const evidence = new Set(context.evidence.map(e => e.id));
    const reviewAllowed = action.kind === "deepen" || action.kind === "challenge";
    save({activity: `Iteration ${adaptive.rounds.length + 1} · ${FRONTIER_ACTIONS[action.kind]}`});
-   const result = await submit(targetedResult, targetedInstructions,
-    context, ADAPTIVE_OUTPUT, response => {
+   const result = await submit(schema, instructions,
+    contextFor(context), ADAPTIVE_OUTPUT, response => {
      if (response.review && (!reviewAllowed || !action.parents.includes(response.review.id))) return "Review only the selected parent.";
      const references = [...response.proposals.flatMap(p => [...p.idea.sources, ...p.assessment.sources]), ...response.review?.sources ?? []];
      return references.some(id => !evidence.has(id)) ? "Use only source IDs supplied for this action." : null;
@@ -211,6 +219,10 @@ Sort by expected mathematical value and testability. Put the principal source fi
    }
    signal.throwIfAborted();
    const before = portfolioValue(ledger);
+   const proposed = "insights" in result ? z.array(frontierInsight).parse(result.insights ?? []) : [];
+   const progress = frontierProgress(0, proposed.filter(i => !i.target || action.parents.includes(i.target)), frontierInsights(ledger), evidence,
+    [...ledger.assessed.flatMap(o => [o.idea.hypothesis, o.assessment.feedback?.mechanism ?? ""]),
+     ...options.history.map(h => h.hypothesis)]);
    const attempted: FrontierOpportunity[] = [];
    for (const proposal of result.proposals) {
     const id = options.idFor(proposal.idea.hypothesis);
@@ -224,14 +236,19 @@ Sort by expected mathematical value and testability. Put the principal source fi
     attempted.push(entry);
     const newGround = result.review.sources.some(id => !frontierReferences(old).includes(id));
     const decisiveChallenge = action.kind === "challenge" && result.review.verdict === "reject" &&
-     result.review.feedback.failureMechanism && newGround;
+     result.review.feedback.failureMechanism && (newGround || progress.insights.some(insight =>
+      insight.target === old.idea.id && (insight.kind === "counterexample" || insight.kind === "elimination") &&
+      insight.sources.some(id => result.review!.sources.includes(id))));
     if (decisiveChallenge || (result.review.verdict === "pursue" && frontierScore(entry) > frontierScore(old))) merge([entry]);
    }
    ledger.evidence = [...new Map([...ledger.evidence, ...context.evidence].map(e => [e.id, e])).values()];
    ledger.selected = adaptivePortfolio(ledger);
+   const delta = portfolioValue(ledger) - before;
+   progress.portfolioDelta = delta;
+   progress.total += Math.max(0, delta);
    adaptive.rounds.push({action, evidence: [...evidence], outcome: result.outcome, opportunities: attempted,
     reportedTokens: frontierTokens(usage) - reportedBefore, estimatedUnreported: unreported - unreportedBefore,
-    gain: portfolioValue(ledger) - before});
+    gain: delta, ...(!options.baselinePolicy ? {progress} : {})});
    adaptive.pending = undefined;
    save({frontier: ledger});
   }

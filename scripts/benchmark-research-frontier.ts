@@ -7,7 +7,7 @@ import {connectionBackgroundAllowed} from "../src/agent/subscription-connections
 import type {GraphChain, GraphNode} from "../src/core/contracts/graph.ts";
 import type {JobUsage} from "../src/core/contracts/jobs.ts";
 import {ADAPTIVE_BUDGET, ADAPTIVE_DEFAULTS, FRONTIER_BUDGET, frontierTokens, frontierScore, selectFrontier, type FrontierHypothesis, type FrontierOpportunity, type FrontierSource} from "../src/core/research-frontier.ts";
-import {frontierDigest, frontierIdeaId, planDiscovery, portfolioValue} from "../src/core/frontier-plan.ts";
+import {BASELINE_FOLLOW_UP_LIMIT, frontierDigest, frontierIdeaId, planDiscovery, portfolioValue} from "../src/core/frontier-plan.ts";
 import {resolveRoleSpec} from "../src/core/settings-resolution.ts";
 
 function readArchive<T>(file: string): T[] {
@@ -111,27 +111,28 @@ for (const c of cases) {
   ["Atlas-only", atlas],
   ["Atlas+lesson", [...atlas, lesson]],
   ["full discovery", [...atlas, lesson, history]],
- ] : ["single pass", "naive repeated", "adaptive"].map(variant => [variant, [...atlas, lesson, history]]);
+ ] : ["single pass", "naive repeated", "adaptive baseline", "adaptive"].map(variant => [variant, [...atlas, lesson, history]]);
 
  for (const [variant, sources] of variants) {
   assert(sources.every(s => !later.some(n => s.id === n.id || s.text.includes(n.statement))));
   const budget = contextOnly ? FRONTIER_BUDGET : ADAPTIVE_BUDGET;
-  const adaptive = variant === "adaptive";
+  const adaptive = variant.startsWith("adaptive");
   let usage: JobUsage | undefined;
   let estimatedUnreported = 0;
   let afterInitial = 0;
   let elapsed = 0;
   let stop: string | undefined;
+  let informationGain = 0, recoveries = 0, covered = 0;
   const engine = liveEngine ?? scriptedEngine(later);
   const cumulative = new Map<string, FrontierOpportunity>();
   let selected: FrontierOpportunity[] = [];
   let candidates = 0;
   let duplicates = 0;
-  for (let pass = 0; pass < (variant === "naive repeated" ? ADAPTIVE_DEFAULTS.maxIterations + 1 : 1); pass++) {
+  for (let pass = 0; pass < (variant === "naive repeated" ? BASELINE_FOLLOW_UP_LIMIT + 1 : 1); pass++) {
    const ledger = planDiscovery(sources, c.goal, budget, undefined, [],
     adaptive ? {settings: ADAPTIVE_DEFAULTS, preferences: {}} : undefined);
    const priorSteps = usage?.steps ?? 0;
-   const result = await runFrontier({ledger, engine, usage, history: [], signal: AbortSignal.timeout(180_000), idFor: frontierIdeaId,
+   const result = await runFrontier({ledger, engine, usage, baselinePolicy: variant === "adaptive baseline", history: [], signal: AbortSignal.timeout(180_000), idFor: frontierIdeaId,
     budgeted: !contextOnly, estimatedUnreported, onEstimatedUnreported: tokens => {estimatedUnreported = tokens;},
     save: patch => {
      if (patch.usage) usage = patch.usage;
@@ -152,13 +153,20 @@ for (const c of cases) {
    const merged = [...cumulative.values()];
    selected = variant === "naive repeated" ? selectedFrom(merged, selectFrontier(merged)) : selectedFrom(result.assessed, result.selected);
    if (!adaptive && pass === 0) afterInitial = value(selected);
-   if (adaptive) {elapsed += result.adaptive!.rounds.length; stop = result.adaptive!.stop;}
+   if (result.adaptive) {
+    const {rounds} = result.adaptive;
+    elapsed += rounds.length;
+    stop = result.adaptive.stop;
+    informationGain = rounds.reduce((sum, r) => sum + (r.progress?.information ?? 0), 0);
+    recoveries = rounds.filter(r => r.action.recovery).length;
+    covered = new Set([...result.packets.flatMap(p => p.evidence.map(e => e.id)), ...rounds.flatMap(r => r.evidence)]).size;
+   }
   }
   const n = selected.length, total = frontierTokens(usage);
   const worthwhile = selected.filter(o => o.assessment.usefulness >= 3 && o.assessment.support >= 2).length;
   const grounded = selected.filter(o => [...o.idea.sources, ...o.assessment.sources].some(id => id !== "goal")).length;
   const sample = frontierDigest([c.name, variant]).slice(0, 12);
-  results.push({case: c.name, sample, variant, budget, calls: usage?.steps ?? 0, reportedTokens: total, estimatedUnreported, elapsed, stop, selected: n,
+  results.push({case: c.name, sample, variant, budget, calls: usage?.steps ?? 0, reportedTokens: total, estimatedUnreported, elapsed, stop, informationGain, recoveries, covered, selected: n,
    distinctPrincipalSources: new Set(selected.map(o => o.idea.sources[0])).size, sourceAnchored: grounded,
    distinctMechanismLabels: new Set(selected.map(o => o.assessment.feedback?.mechanism).filter(Boolean)).size || undefined,
    candidateCount: candidates, duplicateIds: duplicates, portfolioProxyGain: value(selected) - afterInitial,
