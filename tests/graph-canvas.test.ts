@@ -20,7 +20,7 @@ import {
 	fitTransform,
 	labelAlpha,
 	pickNearest,
- projectResearchNodes,
+ frontierNodeId, projectFrontierNodes, projectResearchNodes,
 	wrapRegionLabel,
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
@@ -436,7 +436,7 @@ test("proof highlighting never paints an implication junction as an empty claim 
    const ctx=new Proxy(context,{get:(target,key)=>key in target?target[String(key)]:()=>{}});
    context.stroke=()=>strokes.push(context.lineWidth as number);
    const nodes=[{id:"n_claim",x:10,y:20},{id:"arg_joint",x:30,y:40}];
-   const view={data:{nodes,edges:[{from:"n_claim",to:"arg_joint"}],colors:{node:"#fff",label:"#aaa",edge:"#888"}},settings:{edgeWidth:.5,labelZoom:8},canvas:{clientWidth:600,clientHeight:400},ctx,transform:{x:0,y:0,k:1},kFit:1,world:{nodeR:2,glowOuter:10},regionBuiltVersion:0,geoVersion:0,builtVersion:0,frameCount:0,nodesPath:{},coloredSemanticPaths:new Map(),coloredMapPaths:new Map(),coloredNodes:new Map(),nodeById:new Map(nodes.map(n=>[n.id,n])),labelLines:new Map(),highlighted:new Set(nodes.map(n=>n.id)),subtleHighlight,nodeWorld:()=>({nodeR:2,labelSize:12,labelGap:3})};
+   const view={data:{nodes,edges:[{from:"n_claim",to:"arg_joint"}],colors:{node:"#fff",label:"#aaa",edge:"#888"}},settings:{edgeWidth:.5,labelZoom:8},canvas:{clientWidth:600,clientHeight:400},ctx,transform:{x:0,y:0,k:1},kFit:1,world:{nodeR:2,glowOuter:10},regionBuiltVersion:0,geoVersion:0,builtVersion:0,frameCount:0,nodesPath:{},coloredSemanticPaths:new Map(),coloredMapPaths:new Map(),coloredNodes:new Map(),nodeById:new Map(nodes.map(n=>[n.id,n])),labelLines:new Map(),frontierIds:new Set(),highlighted:new Set(nodes.map(n=>n.id)),subtleHighlight,nodeWorld:()=>({nodeR:2,labelSize:12,labelGap:3})};
    (GraphCanvasRenderer.prototype as unknown as {draw:(this:unknown)=>void}).draw.call(view);
    assert.deepEqual(arcs.map(a=>a.slice(0,2)),[[10,20]]);
    if(subtleHighlight)assert(strokes.every(width=>width===.5),"focus preserves the thin edge width");
@@ -462,4 +462,25 @@ test("research overlay renders and picks all supported nodes without changing th
  assert(rectangles.some(([x,y])=>x===deep.x-5&&y===deep.y-5));
  assert(rectangles.some(([x,y])=>x===late.x-5&&y===late.y-5));
  assert.deepEqual(canonical,before);
+});
+
+test("Research branches use ordinary graph nodes and keep placed positions across iterations", () => {
+ const entries = [
+  {id: "branch", jobId: "second", title: "Branch", priority: "promising", archived: false, anchors: ["missing"], parents: ["root"]},
+  {id: "root", jobId: "first", title: "Root", priority: "high", archived: false, anchors: ["evidence"]},
+  {id: "old", jobId: "first", title: "Archived", priority: "exploratory", archived: true, anchors: ["evidence"]},
+  {id: "unbound", jobId: "first", title: "Unbound", priority: "exploratory", archived: false, anchors: ["missing"]},
+ ] as const;
+ const cards = entries.map(e => ({...e, anchors: [...e.anchors], parents: "parents" in e ? [...e.parents] : undefined}));
+ const root = frontierNodeId("root"), branch = frontierNodeId("branch");
+ const base = new Map([["evidence", {x: 100, y: 200}], ["unrelated", {x: 200, y: 300}]]);
+ const saved = new Map([[root, {x: 175, y: 174}]]);
+ const result = projectFrontierNodes(cards, base, saved);
+ assert.deepEqual(result.nodes.map(n => n.id), [root, branch]);
+ assert.equal(result.nodes[0]!.x, 175);
+ assert.equal(result.nodes[0]!.y, 174);
+ assert(result.nodes.every(n => n.draggable && n.color && n.label));
+ assert(Math.abs(Math.hypot(result.nodes[1]!.x - 175, result.nodes[1]!.y - 174) - 75) < 0.01);
+ assert.deepEqual(result.edges, [{from: root, to: branch}, {from: "evidence", to: root}]);
+ assert.deepEqual(projectFrontierNodes(cards.map(c => ({...c, archived: c.archived || c.id === "root"})), base, saved).nodes, []);
 });

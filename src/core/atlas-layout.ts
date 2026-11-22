@@ -6,20 +6,29 @@ import { AtlasError, type AtlasSnapshot } from "./atlas.ts";
 export const ATLAS_LAYOUT_LIMIT = 150;
 const FLOOR = 0.003;
 
+type PositionedNode = {id: string; x: number; y: number};
+type ResearchLayout = {
+ only?: boolean;
+ nodes: PositionedNode[];
+ boundaries: PositionedNode[];
+ edges: {from: string; to: string}[];
+};
+
 /** Warm-start the upstream force engine. Only explicitly touched subjects move;
  * cross-subject endpoints are fixed boundary conditions, never proof premises. */
 export function createAtlasLayout(
 	snapshot: AtlasSnapshot,
 	subjectId: string | null,
 	additionalSubjects: readonly (string | null)[] = [],
+	research?: ResearchLayout,
 ) {
-	const subjectIds = new Set([subjectId, ...additionalSubjects]);
+	const subjectIds = new Set(research?.only ? [] : [subjectId, ...additionalSubjects]);
 	if (snapshot.subjects.some(s => subjectIds.has(s.id) && s.locked))
 		throw new Error("Unlock this subject before arranging it.");
 	const members = snapshot.concepts.filter(c => subjectIds.has(c.preferredSubjectId));
 	if (members.length > ATLAS_LAYOUT_LIMIT)
 		throw new Error("Local arrangement supports up to 150 concepts at a time.");
-	const active = new Set(members.map(c => c.id));
+	const active = new Set([...members.map(c => c.id), ...(research?.nodes.map(n => n.id) ?? [])]);
 	const edges = snapshot.relations
 		.filter(r => r.reviewStatus === "accepted" && (active.has(r.sourceId) || active.has(r.targetId)))
 		.map(r => ({from: r.sourceId, to: r.targetId}));
@@ -29,14 +38,16 @@ export function createAtlasLayout(
 		if((active.has(c.sourceId)||active.has(c.targetId))&&!pairs.has(pair)){edges.push({from:c.sourceId,to:c.targetId});pairs.add(pair);}
 	}
 	// Repulsion only needs the local region and directly connected boundary nodes.
-	const included = new Set([...active, ...edges.flatMap(e => [e.from, e.to])]);
-	if (included.size > 500 || edges.length > 2000) throw new Error("Too many boundary links for local arrangement.");
-	const nodes: (LayoutNode & { x: number; y: number })[] = snapshot.concepts
-		.filter(c => included.has(c.id))
-		.map(c => ({ id: c.id, x: c.x, y: c.y, ...(!active.has(c.id) ? { fx: c.x, fy: c.y } : {}) }));
+	const researchEdges = research?.edges ?? [];
+	const included = new Set([...active, ...edges.flatMap(e => [e.from, e.to]), ...(research?.boundaries.map(n => n.id) ?? [])]);
+	if (included.size > 500 || edges.length + researchEdges.length > 2000) throw new Error("Too many boundary links for local arrangement.");
+	const positions = new Map([...snapshot.concepts, ...(research?.boundaries ?? []), ...(research?.nodes ?? [])].map(n => [n.id, n]));
+	const nodes: (LayoutNode & { x: number; y: number })[] = [...positions.values()]
+		.filter(n => included.has(n.id))
+		.map(n => ({ id: n.id, x: n.x, y: n.y, ...(!active.has(n.id) ? { fx: n.x, fy: n.y } : {}) }));
 	const anchors = new Map(nodes.map(n => [n.id, {x: n.x, y: n.y}]));
 	const homes = new Map(members.map(c => [c.id, snapshot.subjects.find(s => s.id === c.preferredSubjectId)]));
-	const sim = createGraphSimulation(nodes, edges.filter(e => active.has(e.from) && active.has(e.to)), {
+	const sim = createGraphSimulation(nodes, [...edges.filter(e => active.has(e.from) && active.has(e.to)), ...researchEdges], {
 		gravity: {x: 0, y: 0, strength: 0}, chargeStrength: -600,
 		linkStrength: 0.2, linkDistance: 110, velocityDecay: 0.4, alphaDecay: 0.035,
 	});

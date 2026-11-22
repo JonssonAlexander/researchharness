@@ -57,6 +57,7 @@ import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zo
 import type { Simulation, SimulationLinkDatum } from "d3-force";
 import { clusterHue, type Pt } from "./cluster-geometry.ts";
 import {
+	FRONTIER_PRIORITIES, type FrontierBoardEntry,
 	CHARGE_STRENGTH,
 	CLUSTER_PULL_STRENGTH,
 	createGraphSimulation,
@@ -158,6 +159,7 @@ export interface CanvasData {
  motion?:LessonMapMotion;
  alwaysClusterLabels?:boolean;
 	atlas?: AtlasSnapshot;
+ frontier?: FrontierBoardEntry[];
 	/** The LOGICAL arrows (proposition→conclusion, imp contracted) the
 	 *  depth force consumes — absent = the sim derives depth from the
 	 *  drawn edges (legacy). Optional so non-graph callers of the
@@ -540,6 +542,40 @@ export function pickNearest<T extends { id: string; x: number; y: number }>(
 	return best;
 }
 
+const FRONTIER_POSITIONS_KEY = "lh:frontier-positions";
+export const frontierNodeId = (id: string) => `rh_${id}`;
+
+export function projectFrontierNodes(entries: FrontierBoardEntry[], base: ReadonlyMap<string, Pt>, saved: ReadonlyMap<string, Pt>) {
+ const active = new Map(entries.filter(entry => !entry.archived).map(entry => [entry.id, entry]));
+ const nodes = new Map<string, CanvasNode>();
+ const visiting = new Set<string>();
+ function place(entry: FrontierBoardEntry): CanvasNode | undefined {
+  const id = frontierNodeId(entry.id);
+  if (nodes.has(id)) return nodes.get(id);
+  if (visiting.has(id)) return;
+  visiting.add(id);
+  const anchor = (entry.parents ?? []).flatMap(parentId => {
+   const parent = active.get(parentId);
+   return parent ? place(parent) ?? [] : [];
+  })[0] ?? (entry.anchors ?? []).flatMap(anchorId => base.get(anchorId) ?? [])[0];
+  visiting.delete(id);
+  if (!anchor) return;
+  const direction = (parseInt(entry.id.slice(-4), 16) || 0) / 65536 * Math.PI * 2;
+  const point = saved.get(id) ?? {x: anchor.x + 75 * Math.cos(direction), y: anchor.y + 75 * Math.sin(direction)};
+  const node: CanvasNode = {id, ...point, label: entry.title, color: FRONTIER_PRIORITIES[entry.priority].color, draggable: true};
+  nodes.set(id, node);
+  return node;
+ }
+ for (const entry of active.values()) place(entry);
+ const edges = [...active.values()].flatMap(entry => {
+  const to = frontierNodeId(entry.id);
+  if (!nodes.has(to)) return [];
+  const links = [...(entry.parents ?? []).map(frontierNodeId), ...(entry.anchors ?? [])];
+  return [...new Set(links.filter(from => from !== to && (base.has(from) || nodes.has(from))))].slice(0, 4).map(from => ({from, to}));
+ });
+ return {nodes: [...nodes.values()], edges};
+}
+
 /** View-only layout of the selected research tree; canonical graph data is untouched. */
 export function projectResearchNodes(nodes:ResearchNode[],rootId:string,anchor:Pt):{id:string;trailId:string;x:number;y:number;parent:string|null;title:string}[] {
  const byId=new Map(nodes.map(n=>[n.id,n])), children=new Map<string,ResearchNode[]>();
@@ -840,6 +876,40 @@ export class GraphCanvasRenderer {
 	}
 
 	// Research geometry is view-only and follows the live concept positions.
+ private frontierIds = new Set<string>();
+ private frontierEdges: CanvasEdge[] = [];
+ private frontierPositions = new Map<string, Pt>();
+ private frontierPositionsLoaded = false;
+ private frontierSelection: string | null = null;
+
+ setFrontierSelection(id: string | null): void {
+  if (this.frontierSelection) {
+   const previous = this.nodeById.get(this.frontierSelection);
+   if (previous) previous.focusRing = undefined;
+  }
+  this.frontierSelection = id ? frontierNodeId(id) : null;
+  const node = this.frontierSelection && this.nodeById.get(this.frontierSelection);
+  if (node) node.focusRing = node.color;
+  this.markDirty();
+ }
+
+ fitFrontier(id?: string): boolean {
+  const ids = id ? [frontierNodeId(id)] : [...this.frontierIds];
+  const selected = new Set(ids.filter(i => this.nodeById.has(i) && (!this.visible || this.visible.has(i))));
+  if (!selected.size || !this.viewW || !this.viewH) return false;
+  const anchors = this.frontierEdges.filter(e => selected.has(e.to)).map(e => e.from);
+  const insets = this.viewW < 640 ? {bottom: this.viewH * .5} : {right: 355, bottom: 105};
+  this.fitNodes([...selected, ...anchors], insets);
+  return true;
+ }
+
+ private rememberFrontier(): void {
+  for (const id of this.frontierIds) {
+   const node = this.nodeById.get(id);
+   if (node) this.frontierPositions.set(id, {x: node.x, y: node.y});
+  }
+ }
+
  private researchTrails:ResearchTrail[]=[];
  private researchDetail:{trail:ResearchTrail;nodes:ResearchNode[];workspace:ResearchWorkspace|null}|null=null;
  setResearchOverlay(trails:ResearchTrail[],detail:{trail:ResearchTrail;nodes:ResearchNode[];workspace:ResearchWorkspace|null}|null):void {this.researchTrails=trails;this.researchDetail=detail;this.markDirty();}
@@ -860,6 +930,32 @@ export class GraphCanvasRenderer {
  // ── Public API ──
 
 	setData(data: CanvasData): void {
+		this.rememberFrontier();
+		const previousFrontierIds = this.frontierIds;
+		const previousFrontierEdges = this.frontierEdges;
+		if (data.frontier?.length && !this.frontierPositionsLoaded) {
+			this.frontierPositionsLoaded = true;
+			try {
+				const saved = JSON.parse(localStorage.getItem(FRONTIER_POSITIONS_KEY) ?? "{}");
+				for (const [id, value] of Object.entries(saved)) {
+					const p = value as Pt | null;
+					if (/^rh_[a-f0-9]{24}$/.test(id) && p && [p.x, p.y].every(v => Number.isFinite(v) && Math.abs(v) <= 1_000_000))
+						this.frontierPositions.set(id, p);
+				}
+			} catch { /* Saved positions are best-effort view state. */ }
+		}
+		const basePositions = new Map(data.nodes.map(n => [n.id, n]));
+		const research = projectFrontierNodes(data.frontier ?? [], basePositions, this.frontierPositions);
+		this.frontierIds = new Set(research.nodes.map(n => n.id));
+		this.frontierEdges = research.edges;
+		const frontierChanged = research.nodes.some(n => !previousFrontierIds.has(n.id)) ||
+			JSON.stringify(previousFrontierEdges) !== JSON.stringify(this.frontierEdges) ||
+			this.frontierEdges.some(edge => {
+				const before = this.nodeById.get(edge.from);
+				const after = basePositions.get(edge.from);
+				return before && after && (before.x !== after.x || before.y !== after.y);
+			});
+		if (research.nodes.length) data = {...data, nodes: [...data.nodes, ...research.nodes], mapEdges: [...(data.mapEdges ?? []), ...research.edges]};
 		if(this.layoutPreview){
 			if(data.atlas?.layoutRevision!==this.data?.atlas?.layoutRevision)this.layoutPreview=null;
 			else for(const n of data.nodes)if(this.layoutPreview.has(n.id)){const p=this.nodeById.get(n.id);if(p){n.x=p.x;n.y=p.y;}}
@@ -910,6 +1006,7 @@ export class GraphCanvasRenderer {
 			if (changed && !data.atlas.subjects.find(s => s.id === changed.preferredSubjectId)?.locked)
 				this.relaxAtlas(changed.preferredSubjectId);
 		}
+		if (!this.atlasLayout && this.frontierIds.size && frontierChanged) this.relaxAtlas(null, true);
 		this.geoVersion++; // new data → rebuild world geometry
 		this.markDirty();
 	}
@@ -921,7 +1018,7 @@ export class GraphCanvasRenderer {
         if(!this.data||!this.settings||this.settings.edgeWidth<=0)return null;
         const {x,y,k}=this.transform;
         const edges=[...(this.data.semanticEdges??[]).filter(e=>!this.semanticFocus||!!e.id&&this.semanticFocus.has(e.id)),...(!this.semanticFocus?this.data.mapEdges??[]:[])];
-        return pickConnection(edges,this.nodeById,pos,{x,y,k},this.visible);
+        return pickConnection(edges.filter(e => !this.frontierIds.has(e.from) && !this.frontierIds.has(e.to)),this.nodeById,pos,{x,y,k},this.visible);
     }
     setSettings(settings: GraphRenderSettings): void {
 		this.settings = settings;
@@ -1018,8 +1115,10 @@ export class GraphCanvasRenderer {
 	private layoutPreview:Map<string,Pt>|null=null;
 	setHighlighted(ids:ReadonlySet<string>|null,options?:{subtle?:boolean}):void{this.highlighted=ids;this.subtleHighlight=options?.subtle??false;this.markDirty();}
 	fitNodes(ids:readonly string[],insets:{right?:number;bottom?:number}={}):void{
-		const nodes=this.data?.nodes.filter(n=>ids.includes(n.id))??[];if(!nodes.length)return;
-		const minX=Math.min(...nodes.map(n=>n.x))-70,maxX=Math.max(...nodes.map(n=>n.x))+70,minY=Math.min(...nodes.map(n=>n.y))-70,maxY=Math.max(...nodes.map(n=>n.y))+70;
+		const nodes = this.data?.nodes.filter(n => ids.includes(n.id)) ?? [];
+		const padding = 70;
+		if (!nodes.length || !this.viewW || !this.viewH) return;
+		const minX=Math.min(...nodes.map(n=>n.x))-padding,maxX=Math.max(...nodes.map(n=>n.x))+padding,minY=Math.min(...nodes.map(n=>n.y))-padding,maxY=Math.max(...nodes.map(n=>n.y))+padding;
 		const right=Math.min(insets.right??0,this.viewW/2),bottom=Math.min(insets.bottom??0,this.viewH/2);
 		const t=fitTransform({minX,maxX,minY,maxY},this.viewW-right,this.viewH-bottom,60),k=Math.max(.02,Math.min(3,t.k));
 		this.restoreViewCamera({x:(minX+maxX)/2+right/(2*k),y:(minY+maxY)/2+bottom/(2*k),k});
@@ -1144,12 +1243,14 @@ export class GraphCanvasRenderer {
 					}
 					return;
 				}
+				const research = this.frontierIds.has(this.dragId);
 				const concept = this.data?.atlas?.concepts.find(c => c.id === this.dragId);
-				if (concept) {
-					if (moved || this.atlasLayout) {
-						if (!this.atlasLayout?.active.has(concept.id)) this.relaxAtlas(concept.preferredSubjectId);
+				if (research || concept) {
+					if (moved || !this.dragOrigin) {
+						this.dragOrigin = null; // The drag remains active after crossing the click threshold.
+						if (!this.atlasLayout?.active.has(n.id)) this.relaxAtlas(concept?.preferredSubjectId ?? null, research);
 						const {x: tx, y: ty, k} = this.transform;
-						this.atlasLayout?.move(concept.id, (pos.x-tx)/k, (pos.y-ty)/k);
+						this.atlasLayout?.move(n.id, (pos.x-tx)/k, (pos.y-ty)/k);
 						this.markDirty();
 					}
 					return;
@@ -1189,7 +1290,7 @@ export class GraphCanvasRenderer {
         const marker=this.researchTrails.flatMap(t=>t.linkedConceptIds??t.anchorConceptIds).find(id=>{const n=this.nodeById.get(id);if(!n)return false;const r=this.nodeWorld(id).nodeR;return Math.hypot((n.x+r*.8)*k+tx-pos.x,(n.y-r*.8)*k+ty-pos.y)<8;});
         if(marker&&this.callbacks.onSelectResearchAnchor){e.preventDefault();this.downPos=null;this.callbacks.onSelectResearchAnchor(marker);return;}
         const node = this.pickAt(pos.x, pos.y);
-		if(e.shiftKey&&node&&this.callbacks.onToggleConnection){
+		if(e.shiftKey&&node&&!this.frontierIds.has(node.id)&&this.callbacks.onToggleConnection){
 			e.preventDefault();this.downPos=null;this.zoomTarget=null;
 			this.connectionDrag={sourceId:node.id,pointerId:e.pointerId,position:pos};
 			try{this.canvas.setPointerCapture(e.pointerId);}catch{/* best effort */}
@@ -1295,6 +1396,8 @@ export class GraphCanvasRenderer {
 		// Node press ending: click (no slop) → select; drag → release-and-relax.
 		if (this.dragId) {
 			const id = this.dragId;
+			const pos = this.eventPos(e);
+			const draggedAtlasNode = !this.dragOrigin;
 			this.dragId = null;
 			this.dragOrigin = null;
 			try {
@@ -1310,9 +1413,9 @@ export class GraphCanvasRenderer {
 				else this.callbacks.onSelect(id,this.eventPos(e));
 				return;
 			}
-			if (this.data?.atlas?.concepts.some(c => c.id === id)) {
-				if (this.atlasLayout) this.atlasLayout.release();
-				else this.callbacks.onSelect(id, this.eventPos(e));
+			if (this.frontierIds.has(id) || this.data?.atlas?.concepts.some(c => c.id === id)) {
+				if (draggedAtlasNode) this.atlasLayout?.release();
+				else this.callbacks.onSelect(id, pos);
 				this.markDirty();
 				return;
 			}
@@ -1462,19 +1565,32 @@ export class GraphCanvasRenderer {
     }
 
 	/** Explicit arrangement and dragging share the same local, warm-started engine. */
-	relaxAtlas(subjectId: string | null): void {
+	relaxAtlas(subjectId: string | null, researchOnly = false): void {
 		if (!this.data?.atlas) return;
 		try {
 			const snapshot = this.data.atlas;
 			this.atlasLayout = createAtlasLayout({...snapshot, concepts: snapshot.concepts.map(c => {
 				const n = this.nodeById.get(c.id);
 				return n ? {...c, x: n.x, y: n.y} : c;
-			})}, subjectId, [...(this.atlasLayout?.subjectIds ?? [])]);
+			})}, subjectId, [...(this.atlasLayout?.subjectIds ?? [])], this.frontierIds.size ? {
+				only: researchOnly && !(this.atlasLayout?.subjectIds.size),
+				nodes: [...this.frontierIds].flatMap(id => this.nodeById.get(id) ?? []),
+				boundaries: this.frontierBoundaries(),
+				edges: this.frontierEdges,
+			} : undefined);
 			this.atlasLayoutRevision = snapshot.layoutRevision ?? 0;
 			this.markDirty();
 		} catch (error) {
 			this.callbacks.onLayoutError?.(error instanceof Error ? error.message : "Could not arrange subject.");
 		}
+	}
+
+	private frontierBoundaries(): CanvasNode[] {
+		const anchorIds = new Set(this.frontierEdges.map(edge => edge.from));
+		const anchors = [...anchorIds].flatMap(id => !this.frontierIds.has(id) ? this.nodeById.get(id) ?? [] : []);
+		const nearby = (this.data?.nodes ?? []).filter(node => !this.frontierIds.has(node.id) && !anchorIds.has(node.id) &&
+			anchors.some(anchor => Math.hypot(node.x - anchor.x, node.y - anchor.y) < 150)).slice(0, 150);
+		return [...anchors, ...nearby];
 	}
 
 	private advanceAtlas(): boolean {
@@ -1488,6 +1604,11 @@ export class GraphCanvasRenderer {
 		this.geoVersion++;
 		if (!moving) {
 			this.atlasLayout = null;
+			if (this.frontierIds.size) {
+				this.rememberFrontier();
+				try { localStorage.setItem(FRONTIER_POSITIONS_KEY, JSON.stringify(Object.fromEntries(this.frontierPositions))); }
+				catch { /* Saved positions are best-effort view state. */ }
+			}
 			const positions = layout.positions().filter(p => {
 				const saved = this.data?.atlas?.concepts.find(c => c.id === p.id);
 				return saved && (Math.abs(saved.x-p.x) > 0.01 || Math.abs(saved.y-p.y) > 0.01);
@@ -1715,7 +1836,7 @@ export class GraphCanvasRenderer {
 		}
 		const t = this.physicsTuning;
 		const conceptIds = new Set(data.atlas?.concepts.map(c => c.id));
-		const formalNodes = data.nodes.filter(n => !conceptIds.has(n.id));
+		const formalNodes = data.nodes.filter(n => !conceptIds.has(n.id) && !this.frontierIds.has(n.id));
 		if (formalNodes.length) {
 			this.simCenter = {
 				x: (Math.min(...formalNodes.map(n => n.x)) + Math.max(...formalNodes.map(n => n.x))) / 2,
@@ -2138,7 +2259,18 @@ export class GraphCanvasRenderer {
 		for(const n of data.nodes){
 			const shown=!this.visible||this.visible.has(n.id),radius=this.nodeWorld(n.id).nodeR;
 			if(n.derivationCount&&shown&&(!data.atlas||nodeAlpha>.8||this.hoverNode?.id===n.id)){ctx.save();ctx.fillStyle=n.color??"#999fa9";ctx.font=`${10/k}px sans-serif`;ctx.textAlign="right";ctx.fillText(String(n.derivationCount),n.x-radius-5/k,n.y+3/k);ctx.restore();}
-			if(n.focusRing&&shown){ctx.save();ctx.strokeStyle=n.focusRing;ctx.lineWidth=2/k;ctx.beginPath();ctx.arc(n.x,n.y,radius+5/k,0,Math.PI*2);ctx.stroke();ctx.restore();}
+			const priorityColor = this.frontierIds.has(n.id) ? n.color : undefined;
+			const priorityRadius = Math.max(radius + 2.5 / k, 4 / k);
+			if (shown && priorityColor) {
+				ctx.save();
+				ctx.strokeStyle = priorityColor;
+				ctx.lineWidth = 2 / k;
+				ctx.beginPath();
+				ctx.arc(n.x, n.y, priorityRadius, 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.restore();
+			}
+			if(n.focusRing&&shown){ctx.save();ctx.strokeStyle=n.focusRing;ctx.lineWidth=2/k;ctx.beginPath();ctx.arc(n.x,n.y,priorityColor ? priorityRadius+4/k : radius+5/k,0,Math.PI*2);ctx.stroke();ctx.restore();}
             if(n.badgeColor&&shown){ctx.fillStyle=n.badgeColor;ctx.beginPath();ctx.arc(n.x+radius,n.y-radius,Math.max(1.5/k,radius*.5),0,Math.PI*2);ctx.fill();}
 			if(n.studyBadgeColor&&shown){ctx.fillStyle=n.studyBadgeColor;ctx.beginPath();ctx.arc(n.x+radius,n.y+radius,Math.max(1.5/k,radius*.5),0,Math.PI*2);ctx.fill();}
 			if(n.htmlLabel){const el=n.htmlLabel,alpha=this.hoverNode?.id===n.id?Math.max(nodeAlpha,this.hoverFade):nodeAlpha;

@@ -6,12 +6,13 @@ import path from "node:path";
 import {randomUUID} from "node:crypto";
 import {createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep} from "@earendil-works/pi-ai";
 import {initialLesson} from "../src/core/learning-session.ts";
-import {FRONTIER_SCOPE, frontierPacket, frontierTokens, type FrontierSource, type FrontierState} from "../src/core/research-frontier.ts";
-import {frontierIdeaId, frontierRevision, planDiscovery} from "../src/core/frontier-plan.ts";
+import {ADAPTIVE_DEFAULTS, FRONTIER_SCOPE, frontierPacket, frontierTokens, type FrontierLedger, type FrontierOpportunity, type FrontierSource, type FrontierState} from "../src/core/research-frontier.ts";
+import {adaptivePortfolio, chooseFrontierAction, frontierBoardAnchors, frontierIdeaId, frontierRevision, planDiscovery} from "../src/core/frontier-plan.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "research-frontier-"));
 process.env.LH_DATA_DIR = path.join(root, "data");
 process.env.LH_AUTH_FILE = path.join(root, "auth.json");
+const {runFrontier} = await import("../src/agent/subagents/research-frontier.ts");
 const {researchFrontierResponse} = await import("../src/server/research-frontier.ts");
 const {stores} = await import("../src/server/stores.ts");
 const {readFrontierSources} = await import("../src/server/frontier-sources.ts");
@@ -50,6 +51,18 @@ const assessment = (idea: {id: string; sources: string[]}, verdict = "pursue") =
  uncertainty: "The uniformity assumption might be necessary.", reason: "A falsifiable next step.",
  support: 3, usefulness: 4, surprise: 2, verdict,
 });
+test("map anchors come from cited evidence and exact argument dependencies", () => {
+ const claim = source("n_claim", {concepts: ["ac_primary"]});
+ const later = source("n_later");
+ const proof = source("arg_proof", {kind: "argument", requires: [claim.id]});
+ const reviewed = source("reviewed", {kind: "argument", requires: [proof.id]});
+ const unrelated = source("ac_unrelated", {kind: "concept"});
+ const idea = {...hypothesis(reviewed, "Extend the reviewed argument"), id: "fixture", exploration: false};
+ const opportunity: FrontierOpportunity = {idea, assessment: {...assessment({...idea, sources: [later.id]}), verdict: "pursue"}};
+ assert.deepEqual(frontierBoardAnchors(opportunity, new Map([reviewed, proof, claim, later, unrelated].map(s => [s.id, s]))),
+  ["ac_primary", "n_claim", "n_later"]);
+});
+
 const answer = (body: unknown) => fauxAssistantMessage([fauxToolCall("submit_frontier", body as never, {id: "submit"})], {stopReason: "toolUse"});
 const url = "http://localhost/api/research/frontier";
 const config = {action: "start", goal: "Investigate finite dimensional structure", budget: 35_000};
@@ -84,9 +97,11 @@ test("Frontier HTTP uses the job lifecycle, zero-call cache, selective refresh a
   const m = context.messages.at(-1)!;
   assert.equal(m.role, "user");
   const input = JSON.parse(typeof m.content === "string" ? m.content : (m.content[0] as {text: string}).text);
+  if (input.action) return answer({review: null, proposals: [], outcome: "No additional grounded direction."});
   if (input.candidates) {
    critiqueCandidates.push(input.candidates.map((c: {sources: string[]}) => c.sources[0]));
-   return answer({assessments: input.candidates.map((c: {id: string; sources: string[]}) => assessment(c))});
+   return answer({assessments: input.candidates.map((c: {id: string; sources: string[]}) =>
+    ({...assessment(c), ...(input.structuredCritique ? {feedback: {...critiqueFeedback, mechanism: c.sources[0]}} : {})}))});
   }
   const batch = input.evidence as FrontierSource[];
   batches.push(batch.map(e => e.id));
@@ -160,7 +175,7 @@ test("Frontier HTTP uses the job lifecycle, zero-call cache, selective refresh a
  const prior = stores.jobStore.getJob(saved.id)!.frontier!;
  const interrupted = stores.jobStore.createJob({kind: "frontier", chatId: FRONTIER_SCOPE, toolCallId: "interruption",
   input: {model: {provider: "openai", id: "gpt-test"}, history: []},
-  frontier: {...prior, generated: prior.packets.length, ranked: false, deepened: true, candidates: [], assessed: []}});
+  frontier: {...prior, ...frontierRevision(readFrontierSources().sources, config.goal), generated: prior.packets.length, ranked: false, deepened: true, candidates: [], assessed: []}});
  assert((await get()).job?.interrupted);
  const checkpointCalls = calls;
  assert.equal((await post({action: "resume", id: interrupted.id})).status, 200);
@@ -190,4 +205,184 @@ test("Frontier HTTP uses the job lifecycle, zero-call cache, selective refresh a
  assert.equal(cancelled.brief?.id, interrupted.id);
  assert(stores.jobStore.getJob(failed.job!.id)?.frontier?.generated);
  assert.equal((await post({action: "resume", id: failed.job!.id})).status, 409);
+
+ const preference = {action: "feedback", id: saved.id, opportunityId: saved.selected[0], preference: "interested"};
+ assert.equal((await post({...preference, opportunityId: "0".repeat(24)})).status, 404);
+ assert.equal((await post(preference)).status, 200);
+ faux.setResponses(Array.from({length: 10}, () => reply));
+ const settings = {...ADAPTIVE_DEFAULTS, maxIterations: 1};
+ assert.equal((await post({...config, budget: 50_000, adaptive: settings})).status, 202);
+ const automatic = await settled();
+ assert.equal(automatic.job?.status, "done", automatic.job?.error);
+ assert.equal(automatic.brief?.mode, "adaptive");
+ assert.equal(automatic.brief?.progress?.iteration, 1);
+ assert.equal(automatic.brief?.progress?.stop, "iterations");
+ assert.equal(automatic.brief?.progress?.budget, 50_000);
+ const adaptiveLedger = stores.jobStore.getJob(automatic.brief!.id)!.frontier!;
+ assert.equal(adaptiveLedger.adaptive?.preferences[saved.selected[0]!], "interested");
+ assert(adaptiveLedger.assessed.some(o => o.assessment.feedback));
+
+ const count = calls;
+ const single = await post(config);
+ assert.equal(single.status, 200);
+ const singleState: FrontierState = await single.json();
+ assert.equal(singleState.brief?.mode, "single");
+ assert.equal(singleState.brief?.id, interrupted.id);
+ assert.equal(calls, count);
+
+ const card = singleState.board?.find(o => o.id === saved.selected[0] && !o.archived);
+ assert(card);
+ const archive = {action: "archive-opportunity", id: card.jobId, opportunityId: card.id, archived: true};
+ assert.equal((await post({...archive, opportunityId: "0".repeat(24)})).status, 404);
+ assert.equal((await post(archive)).status, 200);
+ assert((await get()).board?.find(o => o.id === card.id)?.archived);
+ assert.equal((await post({...archive, archived: false})).status, 200);
+ assert.equal((await get()).board?.find(o => o.id === card.id)?.archived, false);
+
+ const add = {action: "add-to-atlas", id: card.jobId, opportunityId: card.id};
+ const firstAdd = await (await post(add)).json();
+ const retryAdd = await (await post(add)).json();
+ assert.equal(firstAdd.conceptId, retryAdd.conceptId);
+ const conceptAfter = stores.atlasStore.read().concepts.find(c => c.id === firstAdd.conceptId);
+ assert(conceptAfter);
+ assert.match(conceptAfter.markdown ?? "", /Research hypothesis/);
+ assert.deepEqual(conceptAfter.propositionIds, []);
+ assert.equal(calls, count);
+ const branch = {action: "branch", id: card.jobId, opportunityId: card.id};
+ for (const [index, title] of ["A connected branch", "A second connected branch"].entries()) {
+  faux.setResponses([context => {
+   calls++;
+   const message = context.messages.at(-1)!;
+   assert(message.role === "user" && typeof message.content === "string");
+   const input = JSON.parse(message.content);
+   assert.deepEqual(input.parents.map((parent: {id: string}) => parent.id), [card.id]);
+   if (index) assert.equal(input.existingBranches.length, 1);
+   const citedId = input.parents[0].sources[0];
+   const {id: _id, ...critique} = assessment({id: "unused", sources: [citedId]});
+   return answer({review: null, outcome: "Found a follow-up.", proposals: [{idea: hypothesis(source(citedId), title),
+    assessment: {...critique, verdict: "defer", feedback: critiqueFeedback}}]});
+  }]);
+  assert.equal((await post(branch)).status, 202);
+  const result = await settled();
+  assert.equal(result.job?.status, "done", result.job?.error);
+  assert(result.board?.some(o => o.id === card.id));
+  assert.deepEqual(result.board?.find(o => o.title === title)?.parents, [card.id]);
+  assert.equal(calls, count + index + 1);
+ }
+ assert((await get()).board?.some(o => o.title === "A connected branch"));
+
+
+});
+
+
+const critiqueFeedback = {
+ mechanism: "Local comparison", failureMechanism: "",
+ unresolvedAssumptions: ["Dimension-independent norm"],
+ alternativeMechanisms: ["Duality"], evidenceNeeded: ["A comparison inequality"],
+};
+
+function adaptiveFixture() {
+ const seed = source("known", {title: "Local bound", links: ["related"]});
+ const related = source("related", {title: "Comparison inequality"});
+ const remote = source("remote", {title: "An independent neighborhood"});
+ const settings = {...ADAPTIVE_DEFAULTS};
+ const ledger = planDiscovery([seed, related, remote], "Investigate local bounds", 50_000, undefined, [], {settings, preferences: {}});
+ ledger.packets = [frontierPacket([seed], [{kind: "gap", sources: [seed.id]}], 2000)];
+ const idea = {...hypothesis(seed, "Retain the strong bound"), id: "strong", exploration: false};
+ const strong: FrontierOpportunity = {idea, assessment: {...assessment(idea), verdict: "pursue", feedback: critiqueFeedback}};
+ ledger.assessed = [strong];
+ ledger.selected = ["strong"];
+ ledger.ranked = true;
+ return {ledger, strong, remote};
+}
+
+test("adaptive priorities reserve uncovered evidence and honor cost, feedback and stopping thresholds", () => {
+ const {ledger, strong} = adaptiveFixture();
+ const chosen = chooseFrontierAction(ledger, 0);
+ assert(typeof chosen !== "string");
+ assert.equal(chosen.kind, "explore");
+ assert.equal(chooseFrontierAction(ledger, ledger.budget - 1), "budget");
+ const a = ledger.adaptive!;
+ a.rounds.push({action: chosen, evidence: ["related", "remote"], outcome: "No new direction.", opportunities: [], reportedTokens: 1000, estimatedUnreported: 0, gain: 0});
+ const targeted = chooseFrontierAction(ledger, 1000);
+ assert(typeof targeted !== "string");
+ assert.deepEqual(targeted.parents, [strong.idea.id]);
+ a.preferences[strong.idea.id] = "revisit";
+ assert.equal(chooseFrontierAction(ledger, 1000), "no-action");
+ a.preferences[strong.idea.id] = "interested";
+ a.rounds.push({action: targeted, evidence: ["known"], outcome: "No improvement.", opportunities: [], reportedTokens: 1000, estimatedUnreported: 0, gain: 0});
+ assert.equal(chooseFrontierAction(ledger, 2000), "converged");
+ a.settings.maxIterations = 2;
+ assert.equal(chooseFrontierAction(ledger, 2000), "iterations");
+ assert.deepEqual(adaptivePortfolio(ledger), [strong.idea.id]);
+ a.preferences[strong.idea.id] = "dismiss";
+ assert.deepEqual(adaptivePortfolio(ledger), []);
+});
+
+test("adaptive policy surfaces each focused action when its evidence supports it", () => {
+ for (const kind of ["exploit", "reformulate", "combine", "challenge", "deepen"] as const) {
+  const {ledger, strong} = adaptiveFixture();
+  const a = ledger.adaptive!;
+  ledger.packets = [{seeds: [], evidence: a.catalog, omitted: 0}];
+  const feedback = {...critiqueFeedback, alternativeMechanisms: [], unresolvedAssumptions: [], evidenceNeeded: []};
+  strong.assessment = {...strong.assessment, feedback, support: 4};
+  if (kind === "reformulate") strong.assessment.verdict = "reject";
+  if (kind === "exploit") strong.assessment.feedback!.alternativeMechanisms = ["Duality"];
+  if (kind === "challenge") strong.assessment.support = 1;
+  if (kind === "deepen") strong.assessment.feedback!.evidenceNeeded = ["A sharp bound"];
+  if (kind === "combine") {
+   ledger.assessed.push({idea: {...strong.idea, id: "second", sources: ["related"]}, assessment: {
+    ...strong.assessment, id: "second", sources: ["related"], feedback: {...feedback, mechanism: "Separate mechanism"},
+   }});
+  }
+  const selected = chooseFrontierAction(ledger, 0);
+  assert(typeof selected !== "string", `Expected ${kind}, got ${selected}`);
+  assert.equal(selected.kind, kind);
+ }
+});
+
+test("adaptive checkpoints resume the same action without replaying stages and retain stronger findings", async () => {
+ const {ledger, strong} = adaptiveFixture();
+ const faux = createFauxCore({});
+ const engine = {model: faux.getModel(), streamFn: faux.streamSimple};
+ const base = {engine, history: [], signal: AbortSignal.timeout(5000), idFor: frontierIdeaId};
+ let checkpoint: FrontierLedger | undefined;
+ await assert.rejects(runFrontier({...base, ledger, save: patch => {
+  if (patch.frontier?.adaptive?.pending) {
+   checkpoint = JSON.parse(JSON.stringify(patch.frontier));
+   throw new Error("Interrupted after planning");
+  }
+ }}), /Interrupted after planning/);
+ assert(checkpoint);
+ let calls = 0;
+ let text = "";
+ let usage;
+ const first = checkpoint.adaptive!.pending!.action;
+ faux.setResponses(Array.from({length: 3}, (): FauxResponseStep => context => {
+  calls++;
+  const current = context.messages.at(-1)!;
+  assert(current.role === "user" && typeof current.content === "string");
+  const input = JSON.parse(current.content);
+  if (calls === 1) {
+   assert.deepEqual(input.action.anchors, first.anchors);
+   text = input.evidence[0].id;
+   const {id: _id, ...critique} = assessment({id: "unused", sources: [text]});
+   return answer({review: null, outcome: "Found a weaker candidate.", proposals: [{idea: hypothesis(source(text), "Secondary bound"),
+    assessment: {...critique, support: 1, usefulness: 1, feedback: {...critiqueFeedback, mechanism: "Other mechanism"}}}]});
+  }
+  assert(input.parents.length > 0);
+  return answer({review: null, proposals: [], outcome: "No stronger alternative."});
+ }));
+ const final = await runFrontier({...base, ledger: checkpoint, save: patch => {if (patch.usage) usage = patch.usage;}});
+ assert.equal(final.adaptive!.rounds[0]!.action.key, first.key);
+ assert(final.adaptive!.rounds[0]!.evidence.includes(text));
+ assert.equal(final.adaptive!.stop, "converged");
+ assert.equal(calls, 3);
+ assert(frontierTokens(usage) > 0);
+ assert.equal(final.selected[0], strong.idea.id);
+ assert.deepEqual(final.assessed.find(o => o.idea.id === strong.idea.id), strong);
+ const noMoney = {...checkpoint, budget: 1, adaptive: {...checkpoint.adaptive!, stop: undefined, rounds: []}};
+ await runFrontier({...base, ledger: noMoney, save() {}});
+ assert.equal(noMoney.adaptive.stop, "budget");
+ assert.equal(calls, 3);
 });

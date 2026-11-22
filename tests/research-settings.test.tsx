@@ -77,7 +77,8 @@ it("an Exa-only key enables the engine menu and selecting Exa saves the pin", as
 	const bodies: Record<string, unknown> = {
 		"/api/search": { available: true, engine: "exa", reason: "search engine: exa (auto)" },
 		"/api/keys": { keys: [{ id: "EXA_API_KEY", present: true }] },
-		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
+		"/api/models": { models: [{provider: "openai", id: "fixture-research", name: "Fixture Research", input: ["text"],
+   contextWindow: 10000, supportedLevels: ["low"], cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}}], slots: { strong: null, cheap: null, vision: null } },
 		"/api/settings/prompts": { prober: [], teacher: [] },
 	};
 	for (const [key, value] of Object.entries({
@@ -108,6 +109,13 @@ it("an Exa-only key enables the engine menu and selecting Exa saves the pin", as
 		assert.match(exa.textContent ?? "", /Exa.*key/);
 		act(() => exa.click());
 		assert.deepEqual(written?.search, { engine: "exa" });
+		const researcher = document.querySelector<HTMLButtonElement>('[data-testid="slot-model-researcher"]')!;
+		assert.match(researcher.textContent ?? "", /Use Cheap slot/);
+		await act(async () => researcher.click());
+		const model = document.querySelector<HTMLButtonElement>('[data-testid="model-option-fixture-research"]')!;
+		assert(model);
+		await act(async () => model.click());
+		assert.deepEqual(written?.models?.researcher, {model: {provider: "openai", id: "fixture-research"}, thinkingLevel: "low"});
 	} finally {
 		act(() => root.unmount());
 		for (const [key, descriptor] of previous) {

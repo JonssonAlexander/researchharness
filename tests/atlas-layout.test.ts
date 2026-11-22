@@ -46,6 +46,26 @@ test("drag releases into local settling; nearby nodes respond and distant region
  assert(positions.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
  assert.equal(held.fx,null);
 });
+test("Research branch drag uses the Atlas forces while evidence anchors stay fixed", () => {
+ const snapshot = fixture();
+ const anchor = snapshot.concepts[0]!;
+ const parent = {id: "rh_parent", x: anchor.x + 100, y: anchor.y};
+ const child = {id: "rh_child", x: anchor.x + 210, y: anchor.y};
+ const nodes = [parent, child], boundaries = [anchor], evidence = {from: anchor.id, to: parent.id};
+ const unlinked = createAtlasLayout(snapshot, null, [], {only: true, nodes, boundaries, edges: [evidence]});
+ const layout = createAtlasLayout(snapshot, null, [], {only: true, nodes, boundaries, edges: [evidence, {from: parent.id, to: child.id}]});
+ for (const physics of [layout, unlinked]) {
+  physics.move(child.id, child.x, child.y + 140);
+  for (let i = 0; i < 30; i++) physics.step();
+ }
+ assert.equal(layout.nodes.find(n => n.id === child.id)!.y, child.y + 140);
+ assert(Math.abs(layout.nodes.find(n => n.id === parent.id)!.y - unlinked.nodes.find(n => n.id === parent.id)!.y) > 1);
+ layout.release();
+ assert.deepEqual(settle(layout).map(n => n.id), [parent.id, child.id]);
+ const fixed = layout.nodes.find(n => n.id === anchor.id)!;
+ assert.equal(fixed.x, anchor.x);
+ assert.equal(fixed.y, anchor.y);
+});
 test("locked subjects reject layout; oversized regions fail before moving anything",()=>{
  const snapshot=fixture(); snapshot.subjects[0]!.locked=true;
  assert.throws(()=>createAtlasLayout(snapshot,snapshot.subjects[0]!.id),/Unlock/);

@@ -70,10 +70,11 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, projectAtlas, type AtlasPathFocus, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, projectAtlas, type AtlasPathFocus, propositionSessionHref, type FrontierBoardEntry, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import {useResearch} from "./research-trails";
-import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import {ResearchFrontier} from "./research-frontier";
+import { GraphCanvasRenderer, frontierNodeId, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -994,7 +995,7 @@ export function GraphView({
 	const atlas = useAtlas();
  const research=useResearch();
  const researchRef=useRef(research); researchRef.current=research;
-	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined; maps:string} | null>(null);
+	const canvasFeedRef = useRef<{renderer: GraphCanvasRenderer; snapshot: GraphSnapshot; revision: number | undefined; maps:string; frontierKey: string} | null>(null);
 	const atlasActionsRef = useRef(atlas);
 	atlasActionsRef.current = atlas;
 	const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -1002,6 +1003,34 @@ export function GraphView({
 	atlasRef.current = atlas.snapshot;
 	const [reviewOpen,setReviewOpen]=useState(false);
 	const [atlasOpen, setAtlasOpen] = useState(false);
+ const [frontierOpen, setFrontierOpen] = useState(false);
+ const [frontierCards, setFrontierCards] = useState<FrontierBoardEntry[]>([]);
+ const [frontierSelection, setFrontierSelection] = useState<string | null>(null);
+ const atlasCameraBeforeResearch = useRef<ReturnType<GraphCanvasRenderer["getViewCamera"]> | null>(null);
+ const frontierOpenRef = useRef(false);
+ const pendingFrontierFocus = useRef<string | null>(null);
+
+ function toggleFrontier(open: boolean) {
+  if (open === frontierOpenRef.current) return;
+  frontierOpenRef.current = open;
+  if (open) {
+   atlasCameraBeforeResearch.current = rendererRef.current?.getViewCamera() ?? null;
+   setSelected(null);
+   setAtlasOpen(false);
+   setMapScope(null);
+   setDerivationId(null);
+   setLinkPair(null);
+  } else {
+   if (atlasCameraBeforeResearch.current) rendererRef.current?.restoreViewCamera(atlasCameraBeforeResearch.current);
+   else rendererRef.current?.fit();
+   atlasCameraBeforeResearch.current = null;
+   pendingFrontierFocus.current = null;
+   setFrontierSelection(null);
+   setFrontierCards([]);
+  }
+  setFrontierOpen(open);
+ }
+
  const [savedProof,setSavedProof]=useState<{id:string;chatId:string;key?:string}|null>(null);
  const [mapScope,setMapScope]=useState<AtlasMapScope|null>(null);
  const [derivationId,setDerivationId]=useState<string|null>(null);
@@ -1108,8 +1137,13 @@ export function GraphView({
 				set.add(concept.id);
 		}
 		if (atlasFocus) for (const id of set) if (!atlasFocus.conceptIds.includes(id)) set.delete(id);
+		if (frontierOpen) for (const card of frontierCards) {
+			if (card.archived) continue;
+			if (atlasFocus ? card.anchors?.some(id => set.has(id)) : card.title.toLowerCase().includes(query.trim().toLowerCase()))
+				set.add(frontierNodeId(card.id));
+		}
 		return set;
-	}, [snapshot, atlas.snapshot, query, atlasFocus]);
+	}, [snapshot, atlas.snapshot, query, atlasFocus, frontierOpen, frontierCards]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1391,6 +1425,12 @@ export function GraphView({
                 onToggleConnection:(sourceId,targetId)=>{if([sourceId,targetId].every(id=>atlasRef.current.concepts.some(c=>c.id===id))){setAtlasOpen(false);setLinkPair({sourceId,targetId});setSelected(null);}},
                 onSelect: (nodeId, pos) => {
                     setLinkPair(null);
+					if (nodeId.startsWith(frontierNodeId(""))) {
+						pendingFrontierFocus.current = null;
+						setFrontierSelection(nodeId.slice(frontierNodeId("").length));
+						setSelected(null);
+						return;
+					}
 					if (atlasRef.current.concepts.some((c) => c.id === nodeId)) {
                         const size=heldNodeSize.current;
                         if(size){setEmphasis(previous=>{const next={...previous};if(size==="normal")delete next[nodeId];else next[nodeId]=size;return next;});return;}
@@ -1430,7 +1470,7 @@ export function GraphView({
 				onCameraMove: (t) => {
 					setSelected(null);
 					setCtxNode(null);
-					persistCamera(t);
+					if (!frontierOpenRef.current) persistCamera(t);
 				},
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
@@ -1489,9 +1529,11 @@ export function GraphView({
 		if (!renderer || !snapshot) return;
 		// A bookmark save changes no graph data and must not interrupt a live drag.
 		const revision = atlas.snapshot.layoutRevision,maps=JSON.stringify(atlas.snapshot.mindmaps?.map(m=>[m.id,m.currentRevision,m.archived]));
+		const frontier = frontierOpen ? frontierCards.filter(card => !card.archived) : [];
+		const frontierKey = JSON.stringify(frontier.map(card => [card.id, card.title, card.priority, card.anchors, card.parents]));
 		const previous = canvasFeedRef.current;
-		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision && previous.maps===maps) return;
-		canvasFeedRef.current = {renderer, snapshot, revision,maps};
+		if (previous?.renderer === renderer && previous.snapshot === snapshot && previous.revision === revision && previous.maps===maps && previous.frontierKey === frontierKey) return;
+		canvasFeedRef.current = {renderer, snapshot, revision, maps, frontierKey};
 		const projection = projectAtlas(atlas.snapshot);
         const hidden=new Set(atlas.snapshot.hiddenPropositionIds??[]);
         for(const link of snapshot.impLinks)if(hidden.has(link.conclusion)||link.premises.some(id=>hidden.has(id)))hidden.add(link.id);
@@ -1509,6 +1551,7 @@ export function GraphView({
 			edges: snapshot.edges.filter(visible).map((e) => ({ from: e.from, to: e.to })),
 			semanticEdges: projection.semanticEdges,
 			mapEdges:projection.mapEdges,
+			frontier,
 			atlas: atlas.snapshot,
 			logicalEdges: snapshot.logicalEdges.filter(visible).map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks.filter(l=>!hidden.has(l.id)),
@@ -1525,9 +1568,16 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, atlas.snapshot, isEmpty]);
+	}, [snapshot, atlas.snapshot, isEmpty, frontierOpen, frontierCards]);
 
 	useEffect(()=>{rendererRef.current?.setResearchOverlay(research.mode==='hide'?[]:research.trails.filter(t=>!t.archivedAt),research.mode==='selected'&&research.detail?.trail.id===research.selectedId?research.detail:null);},[research.trails,research.detail,research.selectedId,research.mode,isEmpty]);
+
+ useEffect(() => {
+  const renderer = rendererRef.current;
+  renderer?.setFrontierSelection(frontierOpen ? frontierSelection : null);
+  if (frontierOpen && pendingFrontierFocus.current && renderer?.fitFrontier(pendingFrontierFocus.current))
+   pendingFrontierFocus.current = null;
+ }, [frontierOpen, frontierCards, frontierSelection, isEmpty, snapshot, atlas.snapshot]);
 
  useEffect(()=>{rendererRef.current?.setNodeEmphasis(emphasis);},[emphasis,isEmpty]);
 
@@ -1590,7 +1640,26 @@ export function GraphView({
 
 	return (
 		<div className="relative h-full w-full">
-			{atlasOpen && (
+   {frontierOpen && <aside aria-label="Research board" className="lh-no-drag absolute bottom-28 left-3 right-3 z-20 flex max-h-[48%] flex-col sm:bottom-32 sm:left-auto sm:top-14 sm:max-h-none sm:w-88 rounded-xl border bg-card/95 p-3 shadow-xl backdrop-blur">
+    <div className="mb-2 flex items-center justify-between">
+     <h2 className="font-medium">Research</h2>
+     <div className="flex gap-2">
+      <button type="button" disabled={!frontierCards.some(card => !card.archived)} className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+       onClick={() => rendererRef.current?.fitFrontier()}>Fit hypotheses</button>
+      <button type="button" className="rounded border px-2 py-1 text-xs hover:bg-accent" onClick={() => toggleFrontier(false)}>Close</button>
+     </div>
+    </div>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+     <ResearchFrontier trails={research.trails} onBoard={setFrontierCards}
+      selected={frontierSelection} onSelect={id => {
+       setFrontierSelection(id);
+       pendingFrontierFocus.current = rendererRef.current?.fitFrontier(id) ? null : id;
+      }}
+      onConcept={id => {toggleFrontier(false); setConceptId(id); setAtlasOpen(true); void atlas.refresh();}}
+      onTrail={(id, node) => {toggleFrontier(false); research.select(id, node); setAtlasOpen(true);}}/>
+    </div>
+   </aside>}
+			{atlasOpen && !frontierOpen && (
 				<AtlasPanel research={research} onOpenMap={scope=>{setMapScope(scope);setAtlasOpen(false);}} onDerivations={id=>{setDerivationId(id);setLinkPair(null);}} onEditLinks={(sourceId,targetId)=>{setAtlasOpen(false);setLinkPair({sourceId,targetId});}} atlas={atlas} selectedId={conceptId} onSelect={setConceptId} focusedMapId={mapFocus} onArrangePreview={previewArrangement} onLearn={onAtlasLearn}
 					onMapFocus={(id,center)=>{setMapFocus(id);setAtlasFocus(null);setQuery("");if(center&&id){setAtlasOpen(false);const map=atlas.snapshot.mindmaps?.find(m=>m.id===id);rendererRef.current?.fitNodes(map?.captures.find(c=>c.id===map.currentRevision)?.conceptIds??[],{bottom:160});}}}
 					onRelax={(id) => rendererRef.current?.relaxAtlas(id)}
@@ -1721,7 +1790,8 @@ export function GraphView({
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
 				<button type="button" onClick={() => rendererRef.current?.fit()} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Fit graph</button>
 				<button type="button" className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent" onClick={()=>setReviewOpen(true)}>Review</button>
-				<button type="button" aria-expanded={atlasOpen} onClick={() => setAtlasOpen((open) => !open)} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Atlas</button>
+				<button type="button" aria-expanded={atlasOpen && !frontierOpen} onClick={() => {toggleFrontier(false); setAtlasOpen(open => frontierOpen || !open);}} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent">Atlas</button>
+				<button type="button" aria-pressed={frontierOpen} onClick={() => toggleFrontier(!frontierOpen)} className="h-9 rounded-lg border bg-card/95 px-3 text-xs hover:bg-accent aria-pressed:border-amber-400">Research</button>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}

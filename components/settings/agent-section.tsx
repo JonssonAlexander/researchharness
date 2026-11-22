@@ -7,7 +7,7 @@ import {isFileAccessFolder} from "@/src/core";
  * Tools / System prompts).
  *
  * Model slots (model-slots wave, 2026-09-20, owner ruling: SLOTS ONLY —
- * the six per-role rows disappeared; per-role overrides remain in the
+ * Researcher has a dedicated override row; other per-role overrides remain in the
  * schema for a future advanced surface): Strong = Prober + Teacher, Cheap
  * = the five workhorse roles, Vision = Visual maker + PDF reader. Each
  * slot row carries the shared dropdown (fuzzy search, arrow-walk, Enter
@@ -81,10 +81,11 @@ import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
 
 /** One slot's display identity — the tier's roster as the row hint rides
  *  with the resolved default (owner: the hint ALWAYS names the default). */
-const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
+const SLOT_META: Record<ModelSlotName | "researcher", { label: string; roster: string }> = {
 	strong: { label: "Strong", roster: "The main model for your sessions" },
 	cheap: { label: "Cheap", roster: "The assistants that research, build demos, and grade your work" },
 	vision: { label: "Vision", roster: "The assistants that draw and read PDFs" },
+	researcher: {label: "Researcher", roster: "Research Frontier and research jobs. Falls back to Cheap."},
 };
 
 
@@ -330,7 +331,7 @@ export function AgentSection({
 	const [folderError, setFolderError] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
 	 *  row), which kind. */
-	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
+	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "researcher" | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
 
 	const refreshSearch = () =>
@@ -605,8 +606,23 @@ export function AgentSection({
 		<>
 			<SettingsGroup label="Models" testid="group-models">
 				{catalogFailed && <p role="alert" className="text-xs text-red-400">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
-				{MODEL_SLOTS.map((slot) => {
-					const override = models?.[slot];
+				{([...MODEL_SLOTS, "researcher"] as const).map((slot) => {
+					const isResearcher = slot === "researcher";
+					const override = isResearcher ? agent?.models?.researcher : models?.[slot];
+					const inherited = isResearcher ? models?.cheap : undefined;
+					function saveModel(provider: string, id: string, thinking: string) {
+						if (!isResearcher) {
+							onModelsChange(composeSlotModel(models, slot, provider, id, thinking));
+							return;
+						}
+						const next = {...agent?.models};
+						if (!id && !thinking) delete next.researcher;
+						else next.researcher = {
+							...(provider && id ? {model: {provider, id}} : {}),
+							...(thinking ? {thinkingLevel: thinking as ThinkingLevel} : {}),
+						};
+						onSectionChange({...agent, models: next});
+					}
 					const modelId = override?.model?.id ?? "";
 					const provider = override?.model?.provider ?? "";
 					const thinking = override?.thinkingLevel ?? "";
@@ -615,11 +631,11 @@ export function AgentSection({
 					// carries the roster, the triggers read "—" when unpicked — but
 					// the pin still governs the thinking level LIST when no override
 					// names a model to read levels from.
-					const pin = slots?.[slot];
+					const pin = slots?.[isResearcher ? "cheap" : slot];
 					// The model whose levels govern the thinking list: the
 					// override, else the resolved pin (when it's in the federated
 					// catalog); the standard ladder as the last fallback.
-					const coord = override?.model ?? pin?.model;
+					const coord = override?.model ?? inherited?.model ?? pin?.model;
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
@@ -643,7 +659,7 @@ export function AgentSection({
 								<MenuTrigger
 									value={modelId ? prettyModel(modelId) : ""}
 									hint={modelId ? `${provider}:${modelId}` : undefined}
-									emptyLabel="—"
+									emptyLabel={isResearcher ? "Use Cheap slot" : "—"}
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
 									open={thisMenuOpen === "model"}
@@ -654,7 +670,7 @@ export function AgentSection({
 									// Legacy display (chunk 2 item 4): no stored level + a known
 									// model → the RESOLVED level (the ordering's first supported —
 									// what the engine build runs). Display-only until a pick writes.
-									value={thinking || (chosen ? defaultOrderLevel(levels) : "")}
+									value={thinking || inherited?.thinkingLevel || (chosen ? defaultOrderLevel(levels) : "")}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} thinking`}
 									testid={`slot-thinking-${slot}`}
@@ -671,22 +687,24 @@ export function AgentSection({
 									>
 										<ModelMenuList
 											models={slotCatalog ?? undefined}
-											effectiveId={modelId}
-											effectiveProvider={provider}
+											effectiveId={coord?.id}
+											effectiveProvider={coord?.provider}
 											onPick={(entry) => {
 												// Auto-populate (chunk 2, owner: "populate everywhere"): the
 												// fresh pick writes a level — the stored one rides as-is
 												// (the write clamps server-side), else the ordering's level.
 												const next = populateLevel(thinking || undefined, entry.supportedLevels);
-												onModelsChange(composeSlotModel(models, slot, entry.provider, entry.id, next));
+												saveModel(entry.provider, entry.id, next);
 												setOpenMenu(null);
 											}}
 											footer={
 												catalog && catalog.length === 0
 													? "No models — add a provider key in Keys"
-													: "Runs every agent of this tier"
+													: isResearcher ? "Applies to Research Frontier and research jobs" : "Runs every agent of this tier"
 											}
 										/>
+										{isResearcher && override && <button type="button" className="rounded px-2 py-1 text-left hover:bg-accent"
+											onClick={() => {saveModel("", "", ""); setOpenMenu(null);}}>Use Cheap slot</button>}
 									</MenuShell>
 								)}
 								{thisMenuOpen === "thinking" && (
@@ -700,9 +718,9 @@ export function AgentSection({
 											levels={levels.map(String)}
 											// The ✓ sits on the RESOLVED level for legacy unset records —
 											// the same one the trigger shows.
-											effectiveLevel={thinking || (chosen ? defaultOrderLevel(levels) : undefined)}
+											effectiveLevel={thinking || inherited?.thinkingLevel || (chosen ? defaultOrderLevel(levels) : undefined)}
 											onPick={(level) => {
-												onModelsChange(composeSlotModel(models, slot, provider, modelId, level));
+												saveModel(provider, modelId, level);
 												setOpenMenu(null);
 											}}
 										/>

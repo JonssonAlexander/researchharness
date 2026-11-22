@@ -1,6 +1,5 @@
 "use client";
 import {ResearchTrails, useResearch} from "./research-trails";
-import {ResearchFrontier} from "./research-frontier";
 import {ArticleLibraryEntry} from './article-library';
 import {ProblemEntry} from "./problems";
 import {LessonScratchwork} from "./lesson-scratchwork";
@@ -182,7 +181,6 @@ export function AtlasPanel({
 					</p>
 				)}
 				<div className="flex flex-wrap gap-2"><ArticleLibraryEntry/><ProblemEntry atlas={atlas.snapshot}/>{selectedId&&<ProblemEntry atlas={atlas.snapshot} conceptId={selectedId}/>}</div>
- {research && <ResearchFrontier trails={research.trails} onConcept={onSelect} onTrail={research.select}/>}
  <LessonMaps atlas={atlas.snapshot}/>
                 {research&&<ResearchTrails research={research} atlas={atlas.snapshot} conceptId={selectedId}/>}
 				{viewActions && <AtlasViews views={atlas.snapshot.views ?? []} save={atlas.save} actions={viewActions} />}
